@@ -1,0 +1,249 @@
+
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import type { ChatMessage } from '../../types';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import { useUserPersona } from '../../contexts/UserPersonaContext'; // Import context
+
+export interface MessageMenuAction {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    className?: string;
+}
+
+const MessageMenu: React.FC<{
+    actions: MessageMenuAction[];
+    isUser: boolean;
+}> = ({ actions, isUser }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(event.target as Node) && triggerRef.current && !triggerRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            const firstButton = menuRef.current?.querySelector('button');
+            firstButton?.focus();
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen]);
+    
+    const handleKeyDown = (event: React.KeyboardEvent) => {
+        if (event.key === 'Escape') {
+            setIsOpen(false);
+            triggerRef.current?.focus();
+        }
+    };
+
+    const validActions = actions.filter(a => a.disabled !== true);
+    if (validActions.length === 0) return null;
+
+    return (
+        <div className="relative">
+            <button 
+                ref={triggerRef}
+                onClick={() => setIsOpen(!isOpen)} 
+                className="p-1 rounded-full text-slate-400 hover:bg-slate-600 hover:text-white transition-colors"
+                aria-haspopup="true"
+                aria-expanded={isOpen}
+                aria-label="Message options"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                </svg>
+            </button>
+            {isOpen && (
+                <div 
+                    ref={menuRef} 
+                    onKeyDown={handleKeyDown}
+                    className={`absolute z-10 bottom-full mb-1 ${isUser ? 'right-0' : 'left-0'} w-48 bg-slate-900 border border-slate-700 rounded-md shadow-lg py-1`}
+                >
+                    {validActions.map((action, idx) => (
+                        <button
+                            key={`${action.label}-${idx}`}
+                            onClick={() => { action.onClick(); setIsOpen(false); triggerRef.current?.focus(); }}
+                            className={`w-full text-left px-4 py-2 text-sm transition-colors ${action.className || 'text-slate-200 hover:bg-slate-700'}`}
+                        >
+                            {action.label}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// New component to display hidden thoughts
+export const ThinkingReveal: React.FC<{ content: string }> = ({ content }) => {
+    const [isOpen, setIsOpen] = useState(false);
+
+    return (
+        <div className="mb-4 bg-indigo-900/30 border border-indigo-500/30 rounded-lg overflow-hidden">
+            <button 
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full px-3 py-2 text-xs font-semibold text-indigo-300 bg-indigo-900/40 hover:bg-indigo-800/50 flex items-center gap-2 transition-colors"
+                aria-expanded={isOpen}
+            >
+                <span className="text-lg" aria-hidden="true">🧠</span>
+                <span>{isOpen ? 'Ẩn quy trình suy nghĩ' : 'Xem quy trình suy nghĩ'}</span>
+                <svg 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    className={`h-4 w-4 ml-auto transform transition-transform ${isOpen ? 'rotate-180' : ''}`} 
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    aria-hidden="true"
+                >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {isOpen && (
+                <div className="p-3 text-xs font-mono text-indigo-100 whitespace-pre-wrap border-t border-indigo-500/20 bg-indigo-900/20">
+                    {content}
+                </div>
+            )}
+        </div>
+    );
+};
+
+interface MessageBubbleProps {
+    message: ChatMessage;
+    avatarUrl: string | null;
+    isEditing: boolean;
+    editingContent: string;
+    onContentChange: (content: string) => void;
+    onSave: () => void;
+    onCancel: () => void;
+    menuActions: MessageMenuAction[];
+    isImmersive: boolean;
+}
+
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ 
+    message, 
+    avatarUrl, 
+    isEditing, 
+    editingContent, 
+    onContentChange, 
+    onSave, 
+    onCancel, 
+    menuActions, 
+    isImmersive 
+}) => {
+    const { activePersona } = useUserPersona();
+    const isUser = message.role === 'user';
+    const isSystem = message.role === 'system';
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    const { mainHtml, thinkingContent } = useMemo(() => {
+        if (isUser || !message.content) {
+            return { mainHtml: '', thinkingContent: null };
+        }
+
+        // Replace display macros for the UI
+        let contentToRender = message.content;
+        if (activePersona) {
+            contentToRender = contentToRender.replace(/{{user}}/gi, activePersona.name);
+        }
+
+        let extractedThinking = null;
+
+        // Extract <thinking> block using regex
+        // Matches <thinking> ... </thinking> across multiple lines, case insensitive
+        const thinkingMatch = contentToRender.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+        
+        if (thinkingMatch) {
+            extractedThinking = thinkingMatch[1].trim();
+            // Remove the thinking block from the content to be rendered as markdown
+            contentToRender = contentToRender.replace(thinkingMatch[0], '').trim();
+        }
+
+        const rawHtml = marked.parse(contentToRender) as string;
+        const sanitized = DOMPurify.sanitize(rawHtml, { 
+            ADD_TAGS: ['style', 'details', 'summary'],
+            ADD_ATTR: ['style', 'class', 'open'] // Allow styling attributes for custom regex blocks like Night Sky
+        });
+        
+        return { mainHtml: sanitized, thinkingContent: extractedThinking };
+    }, [isUser, message.content, activePersona]);
+    
+    useEffect(() => {
+        if (isEditing && textareaRef.current) {
+            const textarea = textareaRef.current;
+            textarea.style.height = 'auto';
+            textarea.style.height = `${textarea.scrollHeight}px`;
+            textarea.focus();
+        }
+    }, [isEditing, editingContent]);
+
+    if (isEditing) {
+        return (
+            <div className={`flex items-start gap-3 my-4 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                 {!isUser && !isSystem && (
+                    <div className="w-10 h-10 rounded-full bg-slate-700 flex-shrink-0" />
+                 )}
+                <div className={`rounded-lg px-4 py-3 max-w-lg w-full ${isUser ? 'bg-sky-600' : 'bg-slate-700'}`}>
+                    <textarea
+                        ref={textareaRef}
+                        value={editingContent}
+                        onChange={(e) => onContentChange(e.target.value)}
+                        className="w-full bg-transparent text-white focus:outline-none resize-none overflow-hidden"
+                        rows={1}
+                    />
+                    <div className="mt-2 flex justify-end gap-2">
+                        <button onClick={onCancel} className="px-3 py-1 text-xs font-semibold rounded-md bg-slate-600 hover:bg-slate-500 text-white transition-colors">Hủy</button>
+                        <button onClick={onSave} className="px-3 py-1 text-xs font-semibold rounded-md bg-sky-500 hover:bg-sky-400 text-white transition-colors">Lưu</button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (isSystem) {
+        return (
+             <div className="flex justify-center my-4 group">
+                <div className="bg-slate-800/70 border border-slate-600/50 text-slate-400 text-sm px-4 py-2 rounded-full flex items-center gap-2 backdrop-blur-sm">
+                    <span className="italic">{message.content}</span>
+                     <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <MessageMenu actions={menuActions} isUser={false} />
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className={`flex items-end gap-2 my-4 group ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+             <div className="flex-shrink-0 self-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                <MessageMenu actions={menuActions} isUser={isUser} />
+            </div>
+            {!isUser && (
+                <div className="w-10 h-10 rounded-full bg-slate-700 flex-shrink-0 overflow-hidden self-start shadow-md border border-slate-600/30">
+                    {avatarUrl ? (
+                        <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+                        </div>
+                    )}
+                </div>
+            )}
+            <div className={`rounded-lg px-4 py-2 max-w-lg shadow-sm ${isUser ? 'bg-sky-600 text-white rounded-br-none' : 'bg-slate-700/90 backdrop-blur-md text-slate-200 rounded-bl-none'}`}>
+                {isUser ? (
+                     <p className="whitespace-pre-wrap">{message.content}</p>
+                ) : (
+                    <>
+                        {thinkingContent && <ThinkingReveal content={thinkingContent} />}
+                        <div
+                            className="markdown-content"
+                            dangerouslySetInnerHTML={{ __html: mainHtml }}
+                        />
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
