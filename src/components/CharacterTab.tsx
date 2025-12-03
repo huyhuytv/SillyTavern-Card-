@@ -5,7 +5,8 @@ import { AnalysisPane } from './AnalysisPane';
 import { useCharacter, CharacterInContext } from '../contexts/CharacterContext';
 import { Loader } from './Loader';
 import { CharacterBookFullScreenView } from './CharacterBookFullScreenView';
-import type { WorldInfoEntry } from '../types';
+import { AiStudioArchitectModal } from './AiStudioArchitectModal';
+import type { WorldInfoEntry, CharacterCard } from '../types';
 
 export const CharacterTab: React.FC = () => {
   const {
@@ -21,6 +22,7 @@ export const CharacterTab: React.FC = () => {
   } = useCharacter();
 
   const [isLorebookMode, setIsLorebookMode] = useState(false);
+  const [isArchitectOpen, setIsArchitectOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const activeCharacter = activeCharacterFileName
@@ -51,6 +53,13 @@ export const CharacterTab: React.FC = () => {
       
       updateActiveCharacter(newCard);
       setIsLorebookMode(false);
+  };
+
+  // Handler for saving card from Architect
+  const handleArchitectSave = (newCard: CharacterCard) => {
+      if (!activeCharacter) return;
+      updateActiveCharacter(newCard);
+      // Optional: Close architect or show success toast
   };
 
   if (isLoading && characters.length === 0) {
@@ -147,6 +156,7 @@ export const CharacterTab: React.FC = () => {
                 avatarFile={activeCharacter.avatarFile}
                 setAvatarUrl={(url) => handleSetAvatar(activeCharacter)(url, activeCharacter.avatarFile)}
                 setAvatarFile={(file) => handleSetAvatar(activeCharacter)(activeCharacter.avatarUrl, file)}
+                onOpenArchitect={() => setIsArchitectOpen(true)}
               />
             </div>
           </div>
@@ -159,6 +169,16 @@ export const CharacterTab: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Architect Modal */}
+      {activeCharacter && (
+          <AiStudioArchitectModal 
+              isOpen={isArchitectOpen}
+              onClose={() => setIsArchitectOpen(false)}
+              card={activeCharacter.card}
+              onSaveCard={handleArchitectSave}
+          />
+      )}
     </div>
   );
 };

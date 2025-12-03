@@ -69,11 +69,30 @@ const processEjsTemplate = async (
     const getvar = (path: string) => get(variables, path);
 
     // RECURSIVE getwi function
-    const getwi = async (bookName: string | null, entryKey: string) => {
-        // console.log(`[EJS] getwi called for: ${entryKey}`);
+    // Supports polymorphism: getwi(key) OR getwi(book, key)
+    const getwi = async (arg1: string | null, arg2?: string) => {
+        // Normalize arguments
+        let bookName: string | null = null;
+        let entryKey: string = '';
+
+        if (arg2 === undefined) {
+            // Case: getwi('Key') -> arg1 is Key
+            if (arg1) entryKey = arg1;
+        } else {
+            // Case: getwi('Book', 'Key') or getwi(null, 'Key')
+            bookName = arg1;
+            entryKey = arg2;
+        }
+
+        // console.log(`[EJS] getwi called. Book: ${bookName}, Key: ${entryKey}`);
+
         let allEntries: WorldInfoEntry[] = [];
         if (card.char_book?.entries) allEntries = [...allEntries, ...card.char_book.entries];
-        lorebooks.forEach(lb => { if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries]; });
+        lorebooks.forEach(lb => { 
+            // Filter by bookName if provided
+            if (bookName && lb.name !== bookName) return;
+            if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries]; 
+        });
 
         const entry = allEntries.find(e => {
             // Robust matching: Check exact comment match OR key inclusion, case-insensitive if needed
@@ -83,7 +102,9 @@ const processEjsTemplate = async (
         });
 
         if (!entry) {
-            console.warn(`[EJS] getwi failed: Entry '${entryKey}' not found.`);
+            // Silently fail or log warning based on preference. 
+            // For complex cards, silent failure on optional WI is often preferred to avoid error spam.
+            // console.warn(`[EJS] getwi failed: Entry '${entryKey}' not found.`);
             return '';
         }
 
@@ -115,6 +136,48 @@ const processEjsTemplate = async (
         // Return an error string so the user knows logic failed, rather than silently swallowing it
         return `[SYSTEM ERROR: EJS Processing Failed - ${errorMsg}]`; 
     }
+};
+
+/**
+ * HELPER: Scans rendered text for lines that are actually Keys to other WI entries.
+ * If found, replaces the key with that entry's content.
+ * Solves the issue where Event Controllers output "Event_ID" and expect the system to fetch the event description.
+ */
+const expandKeysToContent = async (
+    text: string, 
+    variables: Record<string, any>,
+    card: CharacterCard,
+    lorebooks: Lorebook[]
+): Promise<string> => {
+    if (!text || !text.trim()) return text;
+
+    const lines = text.split('\n');
+    const processedLines = await Promise.all(lines.map(async (line) => {
+        const cleanLine = line.trim();
+        if (!cleanLine) return line;
+
+        // Gather all available entries
+        let allEntries: WorldInfoEntry[] = [];
+        if (card.char_book?.entries) allEntries = [...allEntries, ...card.char_book.entries];
+        lorebooks.forEach(lb => { if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries]; });
+
+        // Check if this line exactly matches a Key or Comment of another entry
+        const matchedEntry = allEntries.find(e => {
+            const isKeyMatch = e.keys && e.keys.includes(cleanLine);
+            const isCommentMatch = e.comment && e.comment === cleanLine;
+            return (isKeyMatch || isCommentMatch) && !e.constant; // Don't expand constants to avoid infinite loops if they refer to themselves
+        });
+
+        if (matchedEntry) {
+            // Found a match! Recursively render its content.
+            // console.log(`[PromptManager] Auto-expanding key: "${cleanLine}" -> Entry Content`);
+            return await processEjsTemplate(matchedEntry.content, variables, card, lorebooks);
+        }
+
+        return line;
+    }));
+
+    return processedLines.join('\n');
 };
 
 /**
@@ -205,6 +268,10 @@ export async function constructChatPrompt(
     ].filter(Boolean).join('\n\n');
 
     // --- 1. Process World Info (Render -> Filter -> Format) ---
+    // IMPORTANT: World Info must be processed BEFORE variables formatting.
+    // Why? Because some World Info entries (like Preprocessing scripts) might EXECUTE code that updates variables.
+    // If we format variables first, we send stale data to the AI.
+    
     const { before, after } = getActiveWorldInfoEntries(card, worldInfoState, activeEntriesOverride, worldInfoPlacement);
     const wiFormat = preset?.wi_format || '[{{keys}}: {{content}}]';
 
@@ -212,13 +279,17 @@ export async function constructChatPrompt(
         const results: string[] = [];
         for (const entry of entries) {
             // A. Render EJS first (Execute logic)
-            const renderedContent = await processEjsTemplate(entry.content, variables, card, lorebooks);
+            // This step might update 'variables' via side effects if the entry contains scripts
+            let renderedContent = await processEjsTemplate(entry.content, variables, card, lorebooks);
             
-            // B. Filter: If result is empty/whitespace, discard it (Logic Controller)
+            // B. Auto-Expansion: If content is just an Event ID, fetch the real event content
+            renderedContent = await expandKeysToContent(renderedContent, variables, card, lorebooks);
+
+            // C. Filter: If result is empty/whitespace, discard it (Logic Controller)
             // UNLESS it is an error message we want to show for debugging
             if (!renderedContent || (!renderedContent.trim() && !renderedContent.includes('[SYSTEM ERROR'))) continue;
 
-            // C. Format: Apply the display format (e.g. [Key: Value])
+            // D. Format: Apply the display format (e.g. [Key: Value])
             const formatted = wiFormat
                 .replace(/{{keys}}/g, (entry.keys || []).join(', '))
                 .replace(/{{content}}/g, renderedContent.trim());
@@ -228,6 +299,7 @@ export async function constructChatPrompt(
         return results;
     };
 
+    // Processing WI lists triggers any scripts within them (like @@preprocessing)
     const worldInfoBeforeList = await processEntryList(before);
     const worldInfoAfterList = await processEntryList(after);
     const worldInfoCombinedList = [...worldInfoBeforeList, ...worldInfoAfterList];
@@ -236,7 +308,8 @@ export async function constructChatPrompt(
     const worldInfoAfterString = worldInfoAfterList.join('\n');
     const worldInfoCombinedString = worldInfoCombinedList.join('\n');
 
-    // --- 2. Prepare Prompt Variables ---
+    // --- 2. Prepare Prompt Variables (MOVED AFTER WI PROCESSING) ---
+    // Now that WI scripts have run, the 'variables' object is up-to-date.
     
     const formatVariablesForPrompt = (vars: Record<string, any>): string => {
         if (!vars || Object.keys(vars).length === 0) return '';

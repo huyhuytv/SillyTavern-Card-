@@ -76,30 +76,92 @@ body {
     position: relative;
     width: 100%;
     min-height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 #chat {
     position: relative;
     width: 100%;
     height: auto;
+    padding: 10px;
+    box-sizing: border-box;
 }
 #app {
     width: 100%;
     height: 100%;
 }
 
-/* --- ST STANDARD CLASSES STUBS --- */
+/* --- ST STANDARD CLASSES STUBS (ENHANCED) --- */
 .mes { 
     position: relative; 
     width: 100%;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    animation: fadeIn 0.3s ease;
 }
-.mes_text {
-    display: block;
+
+.mes_block {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    max-width: 100%;
 }
+
+.avatar_container {
+    flex-shrink: 0;
+    margin-right: 15px;
+    width: 50px;
+    height: 50px;
+}
+
 .avatar {
     width: 50px;
     height: 50px;
     border-radius: 50%;
     object-fit: cover;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+}
+
+.mes_content {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    min-width: 0; /* Fix flexbox overflow */
+    max-width: 100%;
+}
+
+.ch_name {
+    font-weight: bold;
+    margin-bottom: 4px;
+    color: var(--text_color);
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+
+.mes_text {
+    display: block;
+    background-color: rgba(30, 41, 59, 0.7); /* slate-800/70 */
+    padding: 12px 16px;
+    border-radius: 0 12px 12px 12px;
+    color: var(--mes_text_color);
+    position: relative;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+}
+
+/* Specific styling for script-generated elements inside mes_text */
+.mes_text img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+}
+
+.mes_text code {
+    background-color: rgba(0,0,0,0.3);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: monospace;
 }
 
 /* Scrollbar */
@@ -116,6 +178,11 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(148, 163, 184, 0.5);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 `;
 
@@ -684,11 +751,13 @@ export const InteractiveHtmlMessage = forwardRef<HTMLIFrameElement, InteractiveH
 
         const _getVarFromStore = (path) => {
             let current = window.__st_live_data;
-            if (current && current.stat_data) current = current.stat_data;
+            if (current && current.stat_data) current = current.stat_data; // Unpack V3 wrapper if redundant
             if (!path) return current;
-            const cleanPath = path.replace(/^stat_data\\./, '');
-            const keys = cleanPath.match(/[^.[\\]]+/g) || [];
-            for (const key of keys) {
+            
+            const cleanPath = path.replace(/^stat_data\./, ''); // Strip prefix
+            const parts = cleanPath.split('.');
+            
+            for (const key of parts) {
                 if (current === undefined || current === null) return undefined;
                 current = current[key];
             }
@@ -702,7 +771,7 @@ export const InteractiveHtmlMessage = forwardRef<HTMLIFrameElement, InteractiveH
              window.eventEmit('mvu-variable-update-ended', { stat_data: window.__st_live_data });
         };
         
-        window.getCurrentMessageId = () => 'stcs_0';
+        window.getCurrentMessageId = () => 'msg_mock_001';
         window.getChatMessages = () => window.__st_chat_history || [];
         
         window.getScriptId = () => 'script_default';
@@ -723,7 +792,37 @@ export const InteractiveHtmlMessage = forwardRef<HTMLIFrameElement, InteractiveH
         
         window.Mvu = { 
             events: { VARIABLE_UPDATE_ENDED: 'mvu-variable-update-ended' }, 
-            getMvuData: () => ({ stat_data: window.__st_live_data }),
+            getMvuData: (opts) => {
+                // Return structure { stat_data: ... } as expected by V3 scripts
+                return { stat_data: window.__st_live_data };
+            },
+            getMvuVariable: (target, path, options) => {
+                // Robust getter handling nested objects and tuple unwrapping
+                let searchObj = target;
+                
+                // If path is absolute (e.g., 'stat_data.abc'), try global lookup
+                if (path && path.startsWith('stat_data.') && !target) {
+                    searchObj = { stat_data: window.__st_live_data };
+                }
+                
+                // Normalize target: If target has stat_data, use it, unless path starts with stat_data
+                if (target && target.stat_data && !path.startsWith('stat_data')) {
+                    searchObj = target.stat_data;
+                }
+
+                if (!searchObj) searchObj = window.__st_live_data;
+
+                const parts = path.split('.');
+                let current = searchObj;
+                
+                for (let i = 0; i < parts.length; i++) {
+                    if (current === undefined || current === null) break;
+                    current = current[parts[i]];
+                }
+                
+                if (current !== undefined) return current;
+                return (options && options.default_value !== undefined) ? options.default_value : undefined;
+            },
             extensions: { 
                 TavernHelper: { 
                     getTavernHelperVersion: () => '1.0.0' 
@@ -736,11 +835,25 @@ export const InteractiveHtmlMessage = forwardRef<HTMLIFrameElement, InteractiveH
         };
         window.TavernHelper = window.Mvu.extensions.TavernHelper;
         
-        window.getwi = async (bookName, entryKey) => {
+        window.getwi = async (arg1, arg2) => {
+            let bookName = null;
+            let entryKey = '';
+            
+            // Handle Overloading: getwi('Key') vs getwi('Book', 'Key')
+            if (arg2 === undefined) {
+                entryKey = arg1; 
+            } else {
+                bookName = arg1;
+                entryKey = arg2;
+            }
+
             if (!window.__st_world_info || window.__st_world_info.length === 0) return '';
+            
+            // If still no key, dump all content (Legacy behavior)
             if (!entryKey) return window.__st_world_info.map(e => e.content).join('\\n');
+            
             const entry = window.__st_world_info.find(e => {
-                const commentMatch = e.comment && e.comment.includes(entryKey);
+                const commentMatch = e.comment && e.comment.trim() === entryKey;
                 const keyMatch = e.keys && e.keys.includes(entryKey);
                 return commentMatch || keyMatch;
             });
@@ -854,6 +967,9 @@ export const InteractiveHtmlMessage = forwardRef<HTMLIFrameElement, InteractiveH
                  _isHandshakeComplete = true;
                  handleDataUpdate(payload);
                  
+                 // ST Standard: Set window.this_mes to point to the message div
+                 window.this_mes = document.getElementById('msg_mock_001');
+                 
                  window.eventEmit(window.tavern_events.CHAT_CHANGED, window.__st_context);
                  window.eventEmit(window.tavern_events.SETTINGS_UPDATED, _extensionSettings);
                  
@@ -930,7 +1046,6 @@ export const InteractiveHtmlMessage = forwardRef<HTMLIFrameElement, InteractiveH
             .replace(/{{charId}}/g, characterId);
         
         content = content.replace(/(window\.|)(parent|top)\.document/g, 'window.__st_parent_mock');
-        
         return content;
     };
 
@@ -962,9 +1077,27 @@ export const InteractiveHtmlMessage = forwardRef<HTMLIFrameElement, InteractiveH
     const scriptsJson = safeJson(filteredScriptsToExecute);
     const bodyContentJson = safeJson(cardBodyContent);
 
+    // MOCK MESSAGE STRUCTURE
+    const mockMessageHtml = `
+        <div id="chat">
+            <div class="mes chat_msg" id="msg_mock_001">
+                <div class="mes_block">
+                    <div class="avatar_container">
+                        <img src="${safeAvatar}" class="avatar" />
+                    </div>
+                    <div class="mes_content">
+                        <div class="ch_name">${characterName}</div>
+                        <div class="mes_text" id="target_mes_text"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
     const starterLogicScript = `
       document.addEventListener('DOMContentLoaded', async () => {
-          const chatContainer = document.getElementById('chat') || document.body;
+          // Logic: Find the inner text container to inject card content
+          const chatContainer = document.getElementById('target_mes_text') || document.getElementById('chat') || document.body;
           const cardBodyContent = ${bodyContentJson};
           
           const appDiv = document.createElement('div'); appDiv.id = 'app';
@@ -979,6 +1112,7 @@ export const InteractiveHtmlMessage = forwardRef<HTMLIFrameElement, InteractiveH
                       toastr: window.toastr,
                   };
                   const renderedHtml = await ejsLib.render(cardBodyContent, renderContext, { async: true });
+                  // Inject inside the text bubble
                   chatContainer.innerHTML = renderedHtml;
               } else {
                   chatContainer.innerHTML = cardBodyContent;
@@ -1056,7 +1190,7 @@ export const InteractiveHtmlMessage = forwardRef<HTMLIFrameElement, InteractiveH
       '</head><body>' +
       '<div id="sheld"></div>' + 
       '<div id="wrapper"><div id="content">' +
-      '<div id="main"><div id="chat"></div></div>' +
+      '<div id="main">' + mockMessageHtml + '</div>' +
       '</div></div>' +
       '<script>' + starterLogicScript + '</script>' +
       '</body></html>'

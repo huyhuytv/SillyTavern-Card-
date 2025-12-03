@@ -14,11 +14,11 @@ const defaultPreset: SillyTavernPreset = {
     repetition_penalty: 1.1,
     
     // Smart Scan Defaults
-    smart_scan_enabled: false,
-    smart_scan_mode: 'keyword', // Default to classic mode
-    smart_scan_model: 'gemini-2.5-flash',
-    smart_scan_depth: 3,
-    smart_scan_max_entries: 5,
+    smart_scan_enabled: true, // Bật mặc định vì chế độ là AI Only
+    smart_scan_mode: 'ai_only', // 3. AI Toàn Quyền (AI Only)
+    smart_scan_model: 'gemini-flash-lite-latest', // Gemini 2.5 Flash-Lite
+    smart_scan_depth: 6, // 6, Độ sâu Quét (Tin nhắn)
+    smart_scan_max_entries: 20, // 20, Ngân sách Mục (Max Entries)
     smart_scan_system_prompt: `Bạn là "Hệ thống Truy hồi Bối cảnh" (Context Retrieval System).
 Nhiệm vụ: Phân tích HÀNH ĐỘNG MỚI NHẤT và Lịch sử để chọn ra các mục World Info cần thiết nhất từ Danh sách Ứng viên.
 
@@ -52,25 +52,28 @@ Cấu trúc JSON bắt buộc:
 - "selected_ids": Mảng chứa các ID của các mục World Info bạn chọn. Nếu không có mục nào phù hợp, trả về mảng rỗng [].`,
 
     // Smart Context Defaults
-    context_depth: 20, // Mặc định 20 tin nhắn (10 lượt)
-    context_mode: 'standard', // Mặc định giữ cả User và AI
-    summarization_prompt: `Bạn là **Thư Ký Ghi Chép (The Chronicler)** của thế giới này. Nhiệm vụ của bạn là cô đọng 'Trí Nhớ Dài Hạn' từ đoạn hội thoại vừa qua để lưu trữ.
+    context_depth: 24, // 24, Độ sâu Cửa sổ Nhớ (Context Depth)
+    context_mode: 'ai_only', // Chế độ Tự thuật (Chỉ AI)
+    summarization_prompt: `Bạn là một AI tóm tắt viên, chuyên nghiệp trong việc chắt lọc những sự kiện chính từ một loạt các diễn biến trong một game nhập vai.
+User (người chơi) và {{char}} đang trong một phần của cuộc phiêu lưu.
 
-**QUY TẮC TÓM TẮT:**
-1.  **Độ dài:** Bắt buộc trong khoảng **500 đến 1000 ký tự**.
-2.  **Giọng văn:** **Trung lập, Khách quan, Ngôi thứ 3**. Tuyệt đối không dùng cảm xúc cá nhân của bạn để đánh giá. Viết như một biên bản sự kiện hoặc nhật ký hành trình khách quan.
-3.  **Nội dung ưu tiên:**
-    *   Các hành động và sự kiện chính đã diễn ra giữa {{char}} và User.
-    *   Sự thay đổi quan trọng trong trạng thái nhân vật (vết thương, cảm xúc, mối quan hệ, xung đột).
-    *   Các vật phẩm, thông tin bí mật hoặc địa điểm mới được phát hiện.
-4.  **Loại bỏ:** Các câu chào hỏi xã giao (xin chào, tạm biệt), các chi tiết lặp lại vô nghĩa hoặc rườm rà.
-
-Đoạn hội thoại cần ghi chép:
+NHẬT KÝ DIỄN BIẾN CẦN TÓM TẮT:
 ---
 {{chat_history_slice}}
 ---
 
-Bản Ghi Chép (Tóm tắt):`,
+YÊU CẦU:
+Hãy viết một đoạn văn (khoảng 400-500 chữ) tóm tắt lại những sự kiện, quyết định, và kết quả nổi bật nhất đã xảy ra trong nhật ký trên. Tập trung vào:
+1. Hành động quan trọng của người chơi và hậu quả trực tiếp.
+2. Sự kiện lớn hoặc bất ngờ.
+3. Thay đổi đáng kể về trạng thái nhiệm vụ (bắt đầu, hoàn thành mục tiêu, hoàn thành nhiệm vụ).
+4. NPC hoặc địa điểm mới quan trọng được khám phá.
+5. Thu thập vật phẩm hoặc học kỹ năng đặc biệt (nếu có ý nghĩa lớn).
+6. Thay đổi quan trọng về mối quan hệ với NPC hoặc phe phái.
+7. Nếu có hệ thống tu luyện/sức mạnh, đề cập đến những tiến triển hoặc thất bại quan trọng.
+
+Mục tiêu là tạo ra một bản tóm tắt giúp người chơi nhanh chóng nắm bắt lại những gì đã xảy ra trước đó để tiếp tục cuộc phiêu lưu một cách mạch lạc.
+Tránh đi sâu vào các chi tiết nhỏ hoặc các thay đổi chỉ số thông thường. Chỉ viết đoạn văn tóm tắt, không thêm lời dẫn hay tag nào khác.`,
 
     // Default prompt structure using the new macros - REORDERED (The Funnel Model)
     prompts: [

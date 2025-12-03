@@ -2,23 +2,24 @@
 import _ from 'lodash';
 
 /**
- * VARIABLE ENGINE - HYBRID LODASH SANDBOX
+ * VARIABLE ENGINE - TUPLE-AWARE PROXY SANDBOX (World-Class Standard)
  * 
- * Tiêu chuẩn cao nhất:
- * 1. Native Execution: Sử dụng `new Function` để chạy mã JS thật.
- * 2. Hybrid Library: Kết hợp sức mạnh của Lodash thật với logic tùy chỉnh của SillyTavern.
- * 3. Tuple-Awareness: Tự động xử lý cấu trúc [Value, Description] đặc trưng của ST.
- * 4. Safety: Chạy trong hộp cát, chặn truy cập window/document.
+ * Kiến trúc:
+ * 1. Native Execution: Sử dụng `new Function` để đạt hiệu suất tối đa.
+ * 2. Lodash Inheritance: Kế thừa lodash thật, chỉ override các hàm mutate dữ liệu.
+ * 3. Tuple-Awareness: Tự động phát hiện và bảo tồn cấu trúc [Value, Description].
+ * 4. Type Safety: Ép kiểu số học nghiêm ngặt cho các phép toán.
+ * 5. Scope Isolation: Che khuất biến toàn cục (window, document...).
  */
 
-// --- 1. HELPER UTILS & CLEANING ---
+// --- 1. UTILITIES ---
 
 /**
- * Làm sạch chuỗi thô từ AI trước khi xử lý.
- * Loại bỏ các thẻ XML bao quanh và lọc bỏ các dòng không phải code JS.
+ * Làm sạch chuỗi script từ AI.
+ * Loại bỏ các thẻ XML rác (<Analysis>, <Thinking>) và chỉ giữ lại code JS hợp lệ.
  */
 const extractScriptContent = (rawText: string): { script: string, cleanText: string } => {
-    // 1. Tìm khối <UpdateVariable> bao quanh (Case insensitive)
+    // Regex tìm khối <UpdateVariable> (không phân biệt hoa thường)
     const updateBlockRegex = /<UpdateVariable(?:variable)?>([\s\S]*?)<\/UpdateVariable(?:variable)?>/i;
     const match = rawText.match(updateBlockRegex);
 
@@ -28,67 +29,71 @@ const extractScriptContent = (rawText: string): { script: string, cleanText: str
 
     let rawContent = match[1];
 
-    // 2. Xóa bỏ khối <Analysis>...</Analysis> và các thẻ XML phổ biến khác của AI
-    // Sử dụng regex thay thế mạnh tay để đảm bảo sạch sẽ
+    // Xóa các khối meta-data thường gặp trong output của LLM
     rawContent = rawContent
         .replace(/<Analysis>[\s\S]*?<\/Analysis>/gi, "")
         .replace(/<Thinking>[\s\S]*?<\/Thinking>/gi, "")
+        .replace(/<Comment>[\s\S]*?<\/Comment>/gi, "")
         .trim();
 
-    // 3. Vệ sinh từng dòng (Line-by-line Sanitization)
+    // Lọc dòng: Chỉ giữ lại các dòng có vẻ là code JS, loại bỏ markdown fences và labels
     const lines = rawContent.split('\n');
     const validLines = lines.filter(line => {
         const trimmed = line.trim();
-        // Bỏ qua dòng trống
         if (!trimmed) return false;
-        // Bỏ qua dòng bắt đầu bằng thẻ XML (ví dụ <comment>, </tag>)
-        if (trimmed.startsWith('<')) return false;
-        // Bỏ qua dòng bắt đầu bằng markdown code fence
-        if (trimmed.startsWith('```')) return false;
-        // Bỏ qua các dòng label kiểu "Analysis:" mà AI hay viết thừa
-        if (/^[A-Za-z0-9_]+:\s*$/i.test(trimmed)) return false; 
-        
+        if (trimmed.startsWith('<')) return false; // Thẻ XML lẻ loi
+        if (trimmed.startsWith('```')) return false; // Markdown fence
+        if (/^[A-Za-z0-9_]+:\s*$/i.test(trimmed)) return false; // Label rác (VD: "Analysis:")
         return true;
     });
 
     let script = validLines.join('\n').trim();
     
-    // 4. Giải mã ký tự HTML entity (nếu AI trả về &gt; thay vì >)
+    // Giải mã HTML entities cơ bản nếu AI lỡ encode code
     script = script
         .replace(/&gt;/g, '>')
         .replace(/&lt;/g, '<')
         .replace(/&amp;/g, '&')
-        .replace(/[\u2018\u2019]/g, "'") // Smart quotes
+        .replace(/[\u2018\u2019]/g, "'") // Smart quotes -> Straight quotes
         .replace(/[\u201C\u201D]/g, '"');
 
-    // Loại bỏ khối lệnh khỏi văn bản hiển thị
+    // Xóa khối lệnh khỏi văn bản hiển thị cuối cùng
     const cleanText = rawText.replace(updateBlockRegex, "").trim();
 
     return { script, cleanText };
 };
 
 /**
- * Deep Get: Lấy giá trị từ object theo đường dẫn 'a.b[0]'.
- * Tự động trả về giá trị gốc nếu biến là Tuple [Value, Description].
+ * Chuẩn hóa đường dẫn biến số (Path Normalization).
+ * Chuyển đổi: a['b'][0] -> a.b.0
  */
-export const get = (obj: any, path: string, defaultValue: any = undefined): any => {
-    if (!obj || !path) return defaultValue;
-    
-    // Chuẩn hóa đường dẫn: a['b'][0] -> a.b.0
-    const normalizedPath = path
-        .replace(/^stat_data\./, '')
+const normalizePath = (path: string): string => {
+    if (!path) return '';
+    return path
+        .replace(/^stat_data\./, '') // Xóa prefix thường gặp trong V3
         .replace(/^variables\./, '')
         .replace(/\["([^"]+)"\]/g, '.$1')
         .replace(/\['([^']+)'\]/g, '.$1')
         .replace(/\[(\d+)\]/g, '.$1');
-        
-    const val = _.get(obj, normalizedPath);
+};
+
+/**
+ * Kiểm tra xem một giá trị có phải là Tuple của SillyTavern không.
+ * Signature: [Value, Description (string)]
+ */
+const isTuple = (val: any): boolean => {
+    return Array.isArray(val) && val.length === 2 && typeof val[1] === 'string';
+};
+
+/**
+ * Lấy giá trị từ object (Deep Get) với khả năng tự động bóc tách Tuple.
+ * @param unwrapTuple Nếu true, trả về giá trị bên trong Tuple. Nếu false, trả về raw Tuple.
+ */
+export const get = (obj: any, path: string, defaultValue: any = undefined, unwrapTuple: boolean = true): any => {
+    const cleanPath = normalizePath(path);
+    const val = _.get(obj, cleanPath);
     
-    // ST Logic: Nếu kết quả là [val, string], trả về val (Tuple unwrapping)
-    // Nhưng nếu người dùng muốn lấy chính cái mảng đó (ví dụ để push), thì logic này có thể gây cản trở.
-    // Tuy nhiên, trong get() thông thường để hiển thị/tính toán, unwrap là đúng.
-    // Các hàm push/assign sẽ tự xử lý việc lấy raw object.
-    if (Array.isArray(val) && val.length === 2 && typeof val[1] === 'string') {
+    if (unwrapTuple && isTuple(val)) {
         return val[0];
     }
     
@@ -96,150 +101,148 @@ export const get = (obj: any, path: string, defaultValue: any = undefined): any 
 };
 
 /**
- * Deep Set: Gán giá trị vào object. 
- * Thông minh: Nếu đích là Tuple [Value, Desc], chỉ cập nhật Value.
+ * Gán giá trị vào object (Deep Set) với khả năng bảo tồn Tuple.
  */
 const set = (obj: any, path: string, value: any): void => {
-    const normalizedPath = path
-        .replace(/^stat_data\./, '')
-        .replace(/^variables\./, '')
-        .replace(/\["([^"]+)"\]/g, '.$1')
-        .replace(/\['([^']+)'\]/g, '.$1')
-        .replace(/\[(\d+)\]/g, '.$1');
+    const cleanPath = normalizePath(path);
+    
+    // Lấy giá trị hiện tại để kiểm tra cấu trúc
+    const currentVal = _.get(obj, cleanPath);
 
-    // Lấy giá trị hiện tại để kiểm tra xem có phải Tuple không
-    const currentVal = _.get(obj, normalizedPath);
-
-    // Tuple Check: Nếu biến hiện tại là mảng [val, desc], chỉ cập nhật val
-    if (Array.isArray(currentVal) && currentVal.length === 2 && typeof currentVal[1] === 'string') {
-        // Target is a tuple, update index 0, keep index 1 (desc)
+    if (isTuple(currentVal)) {
+        // Nếu đích là Tuple, chỉ cập nhật giá trị (index 0), giữ nguyên mô tả (index 1)
+        // Chúng ta tạo một mảng mới để đảm bảo tính bất biến (immutability) ở mức shallow nếu cần
         const newTuple = [value, currentVal[1]];
-        _.set(obj, normalizedPath, newTuple);
+        _.set(obj, cleanPath, newTuple);
     } else {
-        // Standard set
-        _.set(obj, normalizedPath, value);
+        // Gán bình thường
+        _.set(obj, cleanPath, value);
     }
 };
 
 /**
- * Math Ops Helper
+ * Xử lý các phép toán số học an toàn.
+ * Tự động ép kiểu Number() để tránh lỗi cộng chuỗi.
  */
 const mathOp = (obj: any, path: string, val: any, op: 'add' | 'sub' | 'mul' | 'div' | 'mod') => {
-    const currentVal = Number(get(obj, path)) || 0;
+    // Lấy giá trị hiện tại (đã unwrap nếu là tuple)
+    const currentRaw = get(obj, path, 0); 
+    const currentNum = Number(currentRaw);
     const operand = Number(val);
-    if (isNaN(operand)) return;
 
-    let result = currentVal;
+    if (isNaN(operand)) return; // Bỏ qua nếu tham số không phải số
+    // Nếu giá trị hiện tại không phải số (ví dụ null/undefined), mặc định là 0
+    const safeCurrent = isNaN(currentNum) ? 0 : currentNum;
+
+    let result = safeCurrent;
     switch (op) {
         case 'add': result += operand; break;
         case 'sub': result -= operand; break;
         case 'mul': result *= operand; break;
-        case 'div': result = operand !== 0 ? result / operand : result; break;
+        case 'div': result = operand !== 0 ? result / operand : result; break; // Tránh chia cho 0
         case 'mod': result = operand !== 0 ? result % operand : result; break;
     }
+
+    // Ghi lại giá trị (hàm set sẽ tự lo việc bảo tồn tuple)
     set(obj, path, result);
 };
 
-// --- 2. THE HYBRID LIBRARY (_) ---
-// Kết hợp Lodash thật với các hàm tùy chỉnh của SillyTavern.
+// --- 2. ENGINE CORE ---
 
+/**
+ * Tạo ra một phiên bản Lodash "lai" (Hybrid Lodash).
+ * Nó kế thừa mọi hàm của lodash gốc, nhưng ghi đè các hàm thao tác dữ liệu
+ * để phù hợp với logic của SillyTavern (Tuple, Math, Logging).
+ */
 const createHybridLodash = (scopeVariables: any, logger: (msg: string) => void) => {
-    // 1. Tạo đối tượng chứa các hàm Custom (ST Specific)
+    
+    // Các hàm Override (Custom Logic)
     const customOverrides = {
-        // Basic Accessors
+        // --- Accessors ---
         get: (path: string, def?: any) => get(scopeVariables, path, def),
         
-        set: (path: string, val: any, ...args: any[]) => { 
-            // ST sometimes generates _.set('path', old_val, new_val). We take the LAST arg as the new value.
-            // If only 2 args: set(path, val) -> val is the value.
+        set: (path: string, val: any, ...args: any[]) => {
+            // Hỗ trợ cú pháp: _.set(path, oldVal, newVal) mà một số prompt AI hay dùng
+            // Chúng ta luôn lấy đối số cuối cùng làm giá trị mới.
             const actualVal = args.length > 0 ? args[args.length - 1] : val;
             set(scopeVariables, path, actualVal);
             logger(`SET ${path} = ${JSON.stringify(actualVal)}`);
         },
+
+        // --- Math Ops (Type Safe) ---
+        add: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'add'); logger(`ADD ${path} += ${val}`); },
+        sub: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'sub'); logger(`SUB ${path} -= ${val}`); },
+        mul: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'mul'); logger(`MUL ${path} *= ${val}`); },
+        div: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'div'); logger(`DIV ${path} /= ${val}`); },
         
-        // Math
-        add: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'add'); logger(`ADD ${path} + ${val}`); },
-        sub: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'sub'); logger(`SUB ${path} - ${val}`); },
-        mul: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'mul'); logger(`MUL ${path} * ${val}`); },
-        div: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'div'); logger(`DIV ${path} / ${val}`); },
+        // --- Array/Object Polymorphic Ops ---
         
-        // ST-Specific Assign (Polymorphic)
-        // 1. assign(arrayPath, value) -> PUSH value to array
-        // 2. assign(objPath, key, value) -> SET obj[key] = value
+        // _.assign trong ST Scripts thường dùng đa năng:
+        // 1. _.assign(arrayPath, value) -> Push vào mảng
+        // 2. _.assign(objPath, key, value) -> Gán thuộc tính object
         assign: (path: string, ...args: any[]) => {
-            const normalizedPath = path
-                .replace(/^stat_data\./, '')
-                .replace(/^variables\./, '')
-                .replace(/\["([^"]+)"\]/g, '.$1')
-                .replace(/\['([^']+)'\]/g, '.$1')
-                .replace(/\[(\d+)\]/g, '.$1');
+            // Lấy raw value (không unwrap) để kiểm tra xem nó là mảng hay tuple chứa mảng
+            let target = get(scopeVariables, path, undefined, false); // Get raw
 
-            // Lấy raw value (không unwrap tuple) để kiểm tra kiểu
-            let target = _.get(scopeVariables, normalizedPath);
-
-            // Nếu target là Tuple [Array, Desc], ta cần lấy cái Array bên trong
-            if (Array.isArray(target) && target.length === 2 && typeof target[1] === 'string' && Array.isArray(target[0])) {
-                target = target[0]; 
-                // Lưu ý: Ở đây target là tham chiếu đến mảng con trong tuple, nên thay đổi target sẽ thay đổi tuple
-                // Tuy nhiên, _.get có thể trả về deep copy hoặc reference tùy implementation, 
-                // nhưng trong context biến JS object thường là reference.
-                // Để an toàn, ta sẽ dùng push trực tiếp vào object gốc thông qua path + '[0]'.
+            // Nếu là Tuple [Array, Desc], lấy Array ra
+            if (isTuple(target) && Array.isArray(target[0])) {
+                target = target[0];
+            } else if (isTuple(target)) {
+                // Tuple nhưng không chứa mảng? Unwrap để xem có phải object không
+                target = target[0];
             }
 
-            // Case 1: Assign Key-Value (3 args total: path, key, value)
+            // Case 1: Object Set (path, key, value)
             if (args.length >= 2) {
                 const key = args[0];
                 const value = args[1];
-                const fullPath = `${normalizedPath}.${key}`;
-                
-                // Sử dụng hàm set nội bộ để xử lý an toàn
+                const fullPath = `${path}.${key}`; // Nối chuỗi đơn giản, hàm set sẽ normalize sau
                 set(scopeVariables, fullPath, value);
                 logger(`ASSIGN (KEY) ${fullPath} = ${JSON.stringify(value)}`);
             } 
-            // Case 2: Push to Array (2 args total: path, value)
+            // Case 2: Array Push (path, value)
             else if (args.length === 1) {
                 const value = args[0];
-                
-                // Lấy lại target chính xác để push (ưu tiên mảng)
-                // Ta dùng get() của mình để nó tự unwrap tuple nếu có.
-                // Nếu get() trả về mảng -> push.
-                const arr = get(scopeVariables, path); 
+                // Lấy lại target chính xác dưới dạng mảng (unwrap nếu cần)
+                const arr = get(scopeVariables, path, undefined, true); 
                 
                 if (Array.isArray(arr)) {
-                    // Xử lý ST Meta Placeholder: Xóa nó đi nếu nó là phần tử duy nhất
+                    // Xóa placeholder meta của ST nếu có (để mảng sạch)
                     if (arr.length === 1 && arr[0] === '$__META_EXTENSIBLE__$') {
                         arr.pop();
                     }
                     arr.push(value);
                     logger(`ASSIGN (PUSH) ${path} << ${JSON.stringify(value)}`);
                 } else {
-                    // Fallback: Nếu không phải mảng, có thể là object merge?
-                    // Nhưng thường ST dùng 2 tham số cho mảng.
                     logger(`WARN: ASSIGN failed. Target at '${path}' is not an array.`);
                 }
             }
         },
 
-        // Array Ops - Standard
+        // Array Specific
         push: (path: string, val: any) => {
-            const arr = get(scopeVariables, path);
+            const arr = get(scopeVariables, path, undefined, true);
             if (Array.isArray(arr)) {
                 arr.push(val);
                 logger(`PUSH ${path} << ${JSON.stringify(val)}`);
             }
         },
-        insert: (path: string, val: any) => { // Alias for push in ST prompts
-             const arr = get(scopeVariables, path);
+        
+        // ST script thường dùng 'insert' thay vì push
+        insert: (path: string, val: any) => {
+             const arr = get(scopeVariables, path, undefined, true);
              if (Array.isArray(arr)) {
                  arr.push(val);
                  logger(`INSERT ${path} << ${JSON.stringify(val)}`);
              }
         },
+        
         remove: (path: string, val: any) => {
-            const arr = get(scopeVariables, path);
+            const arr = get(scopeVariables, path, undefined, true);
             if (Array.isArray(arr)) {
-                // Remove by value match (simple or object deep match)
-                const idx = arr.findIndex(item => JSON.stringify(item) === JSON.stringify(val) || item === val);
+                // Xóa phần tử khớp giá trị (Deep equality check)
+                // Hỗ trợ xóa object trong mảng hoặc xóa string/number
+                const idx = arr.findIndex(item => _.isEqual(item, val) || item === val);
                 if (idx > -1) {
                     arr.splice(idx, 1);
                     logger(`REMOVE ${path} >> ${JSON.stringify(val)}`);
@@ -247,18 +250,21 @@ const createHybridLodash = (scopeVariables: any, logger: (msg: string) => void) 
             }
         },
 
-        // Logging
-        log: (msg: any) => logger(`SCRIPT LOG: ${msg}`)
+        // Logger nội bộ
+        log: (msg: any) => logger(`SCRIPT LOG: ${String(msg)}`)
     };
 
-    // 2. Merge với Lodash thật
-    // Lodash thật cung cấp các hàm mạnh mẽ như shuffle, chain, map, filter...
-    // Custom overrides sẽ ghi đè các hàm trùng tên (set, get, add...) của Lodash
-    return Object.assign({}, _, customOverrides);
+    // Tạo object mới kế thừa lodash gốc, sau đó ghi đè bằng customOverrides
+    // Sử dụng Object.assign lên một object mới để đảm bảo 'this' context của lodash không bị gãy
+    // (Lodash thường hoạt động như một functional library, nên copy properties là an toàn nhất)
+    const hybrid = Object.assign({}, _, customOverrides);
+    return hybrid;
 };
 
-// --- 3. EXECUTION ENGINE ---
-
+/**
+ * Hàm thực thi chính.
+ * Chạy script trong sandbox an toàn và trả về biến số đã cập nhật.
+ */
 export const processVariableUpdates = (
     rawText: string,
     currentVariables: Record<string, any>
@@ -266,7 +272,7 @@ export const processVariableUpdates = (
     
     const { script, cleanText } = extractScriptContent(rawText);
     
-    // Nếu không có script, trả về ngay
+    // Nếu không có script, trả về nguyên trạng
     if (!script) {
         return { 
             updatedVariables: currentVariables, 
@@ -275,53 +281,56 @@ export const processVariableUpdates = (
         };
     }
 
-    // Tạo bản sao sâu của variables để thao tác (Immutability)
+    // Deep Copy biến số để đảm bảo tính bất biến (Immutability) cho React state
     const workingVariables = JSON.parse(JSON.stringify(currentVariables));
+    
     const logMessages: string[] = [];
     const logger = (msg: string) => logMessages.push(msg);
 
-    // Tạo thư viện lai Hybrid Lodash
+    // Tạo thư viện _ (hybrid)
     const hybridLib = createHybridLodash(workingVariables, logger);
 
-    logMessages.push('[JS ENGINE] Bắt đầu thực thi mã thẻ...');
+    logMessages.push('[JS ENGINE] Script detected. Executing...');
 
     try {
         // --- SANDBOX CONSTRUCTION ---
-        // Chúng ta tạo một hàm mới (Native Sandbox).
-        // 'variables' và '_' là các tham số được truyền vào.
-        // Các biến toàn cục nguy hiểm như window, document bị che khuất bởi 'undefined'.
+        // Sử dụng 'new Function' thay vì eval để có scope sạch hơn.
+        // Truyền vào các tham số cần thiết và CHE KHUẤT (Shadow) các biến toàn cục.
         
         const safeRunner = new Function(
-            'variables', 
-            '_', 
-            'stat_data', // Alias phổ biến trong thẻ V3
-            'window', 'document', 'fetch', 'XMLHttpRequest', // Shadowing globals for safety
+            'variables',   // Tham số 1: Object biến số
+            '_',           // Tham số 2: Thư viện Lodash Hybrid
+            'stat_data',   // Tham số 3: Alias cho variables (V3 hay dùng)
+            'window', 'document', 'fetch', 'XMLHttpRequest', 'alert', 'console', // Shadowing globals -> undefined
             `
             "use strict";
+            // Bắt lỗi bên trong script để không crash app
             try {
                 ${script}
             } catch (e) {
+                // Ném lỗi ra ngoài để engine bắt được
                 throw e;
             }
             `
         );
 
-        // Thực thi!
+        // Thực thi
         safeRunner(
             workingVariables, 
             hybridLib, 
-            workingVariables, // stat_data alias pointing to same obj
-            undefined, undefined, undefined, undefined
+            workingVariables, // stat_data trỏ cùng vùng nhớ với variables
+            undefined, undefined, undefined, undefined, undefined, // Shadowed globals set to undefined
+            { log: logger, error: logger, warn: logger } // Mock console
         );
 
-        logMessages.push('[JS ENGINE] Thực thi thành công.');
+        logMessages.push('[JS ENGINE] Execution successful.');
 
     } catch (e) {
-        const err = e instanceof Error ? e.message : String(e);
-        logMessages.push(`[JS ENGINE ERROR] ${err}`);
-        console.error("Script Execution Failed:", e);
+        const errMessage = e instanceof Error ? e.message : String(e);
+        logMessages.push(`[JS ENGINE ERROR] ${errMessage}`);
+        console.error("Variable Script Error:", e);
         
-        // Nếu lỗi, chúng ta trả về currentVariables (dữ liệu cũ) để tránh dữ liệu bị hỏng dở dang.
+        // Nếu lỗi, trả về biến số CŨ để tránh làm hỏng dữ liệu, nhưng vẫn trả về log lỗi và text sạch
         return {
             updatedVariables: currentVariables,
             cleanedText: cleanText,
@@ -336,24 +345,32 @@ export const processVariableUpdates = (
     };
 };
 
-// --- 4. LEGACY SUPPORT WRAPPER ---
-// Giữ lại hàm này để hỗ trợ các module cũ vẫn gọi applyVariableOperation
-// Nhưng bên trong sẽ chuyển hướng sang dùng logic của set/get mới.
-
+/**
+ * Legacy Wrapper - Để tương thích ngược với các module cũ gọi applyVariableOperation.
+ * Chuyển hướng sang dùng logic mới của engine này.
+ */
 export const applyVariableOperation = (
     currentVariables: Record<string, any>,
-    command: 'set' | 'add' | 'sub' | 'mul' | 'div' | 'mod' | 'insert' | 'remove' | 'push' | 'pop' | 'shift',
+    command: 'set' | 'add' | 'sub' | 'mul' | 'div' | 'mod' | 'insert' | 'remove' | 'push',
     path: string,
     valueOrArgs: any
 ): Record<string, any> => {
+    // Tạo bản sao
     const newVars = JSON.parse(JSON.stringify(currentVariables));
     
-    // Mapping đơn giản sang logic mới
+    // Mapping thủ công sang logic mới
     if (command === 'set') set(newVars, path, valueOrArgs);
     else if (['add', 'sub', 'mul', 'div', 'mod'].includes(command)) mathOp(newVars, path, valueOrArgs, command as any);
     else if (command === 'push' || command === 'insert') {
-        const arr = get(newVars, path);
+        const arr = get(newVars, path, undefined, true);
         if (Array.isArray(arr)) arr.push(valueOrArgs);
+    }
+    else if (command === 'remove') {
+         const arr = get(newVars, path, undefined, true);
+         if (Array.isArray(arr)) {
+             const idx = arr.indexOf(valueOrArgs);
+             if (idx > -1) arr.splice(idx, 1);
+         }
     }
     
     return newVars;

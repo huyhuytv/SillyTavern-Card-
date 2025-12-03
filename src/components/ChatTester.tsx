@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { ChatMessage, SystemLogEntry, QuickReply } from '../types';
 import { Loader } from './Loader';
 import { useChatEngine } from '../hooks/useChatEngine';
@@ -17,7 +17,8 @@ import { DebugPanel } from './Chat/DebugPanel';
 import { ChatModals } from './Chat/ChatModals';
 import { ChatInput } from './Chat/ChatInput';
 import { MessageList } from './Chat/MessageList';
-import { GameHUD } from './Chat/GameHUD'; // NEW
+import { GameHUD } from './Chat/GameHUD'; 
+import { FloatingStatusHUD } from './Chat/FloatingStatusHUD'; // NEW: Import HUD
 
 interface ChatTesterProps {
     sessionId: string;
@@ -35,9 +36,11 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
     const [isImmersive, setIsImmersive] = useState(false);
     const [isLorebookCreatorOpen, setIsLorebookCreatorOpen] = useState(false);
     const [lorebookKeyword, setLorebookKeyword] = useState('');
-    const [isHUDOpen, setIsHUDOpen] = useState(false); // NEW State for HUD
+    const [isHUDOpen, setIsHUDOpen] = useState(false); // Variable HUD
+    const [isStatusHUDOpen, setIsStatusHUDOpen] = useState(false); // NEW: Visual Card HUD
     
     const iframeRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
+    const statusHudRef = useRef<HTMLIFrameElement | null>(null); // NEW: Ref for Floating HUD Iframe
     
     const { characters } = useCharacter();
     const { lorebooks } = useLorebook();
@@ -61,12 +64,12 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         updateWorldInfoState,
         worldInfoPinned,
         updateWorldInfoPinned,
-        worldInfoPlacement, // Get from engine
-        updateWorldInfoPlacement, // Get from engine
+        worldInfoPlacement, 
+        updateWorldInfoPlacement, 
         variables,
         setVariables, 
-        extensionSettings, // NEW: Get Settings
-        updateExtensionSettings, // NEW: Update Settings
+        extensionSettings, 
+        updateExtensionSettings, 
         logs,
         logSystemMessage,
         clearSystemLogs,
@@ -76,8 +79,8 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         visualState,
         quickReplies,
         setQuickReplies,
-        scriptButtons, // NEW
-        handleScriptButtonClick // NEW
+        scriptButtons, 
+        handleScriptButtonClick 
     } = useChatEngine(sessionId);
 
     // Helper to trigger visual update from engine
@@ -91,19 +94,50 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
     const characterName = card?.name || 'Character';
     const userPersonaName = activePersona?.name || 'User';
     
+    // Determine the source for the Floating HUD (Most recent interactive message WITH ACTUAL HTML UI)
+    const activeInteractiveMessage = useMemo(() => {
+        // Define regex to detect actual structural HTML tags common in cards.
+        // We want to avoid matching plain text that just happens to be in an interactive block.
+        const uiStructureRegex = /<(div|style|script|table|details|img|link|meta)/i;
+
+        // 1. Scan backwards for the latest message that looks like a UI
+        const uiMessage = [...messages].reverse().find(m => 
+            m.interactiveHtml && uiStructureRegex.test(m.interactiveHtml)
+        );
+
+        if (uiMessage) return uiMessage;
+
+        // 2. Fallback: Usually the first message (Greeting) contains the main UI initialization
+        if (messages.length > 0 && messages[0].interactiveHtml) {
+            return messages[0];
+        }
+
+        return null;
+    }, [messages]);
+
     // Post-generation triggers for Iframe
     useEffect(() => {
+        const triggers = [];
+        
+        // 1. Trigger for Chat History Iframes
         const lastInteractiveMessage = [...messages].reverse().find(m => m.interactiveHtml);
         if (lastInteractiveMessage) {
             const iframe = iframeRefs.current[lastInteractiveMessage.id];
-            if (iframe && iframe.contentWindow) {
-                 if (isLoading) {
-                     iframe.contentWindow.postMessage({ type: 'GENERATION_STARTED' }, '*');
-                 } else {
-                     iframe.contentWindow.postMessage({ type: 'GENERATION_ENDED' }, '*');
-                 }
-            }
+            if (iframe && iframe.contentWindow) triggers.push(iframe.contentWindow);
         }
+
+        // 2. Trigger for Floating HUD Iframe
+        if (statusHudRef.current && statusHudRef.current.contentWindow) {
+            triggers.push(statusHudRef.current.contentWindow);
+        }
+
+        triggers.forEach(win => {
+             if (isLoading) {
+                 win.postMessage({ type: 'GENERATION_STARTED' }, '*');
+             } else {
+                 win.postMessage({ type: 'GENERATION_ENDED' }, '*');
+             }
+        });
     }, [isLoading, messages]);
 
     const parseQuickReplies = (commandArgs: string) => {
@@ -138,14 +172,12 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 name: msg.role === 'user' ? userPersonaName : (msg.role === 'system' ? 'System' : characterName),
                 is_user: msg.role === 'user',
                 is_name: true,
-                send_date: Date.now(), // Approximate
+                send_date: Date.now(), 
                 mes: msg.content,
                 swipes: [msg.content],
                 swipes_data: [{}]
             };
 
-            // CRITICAL FIX: Inject stat_data into the first message.
-            // Many V3 card scripts check messages[0].data to initialize their status bars.
             if (index === 0) {
                 messageObj.data = { stat_data: variables };
             }
@@ -172,7 +204,7 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
             if (event.data.type === 'HANDSHAKE_INIT') {
                 const sourceWindow = event.source as Window;
                 if (sourceWindow && variables) {
-                    logSystemMessage('state', 'iframe', 'Handshake received. Sending ACK + Context + History.');
+                    // This handshake now works for BOTH history iframes AND the status HUD iframe
                     sourceWindow.postMessage({
                         type: 'HANDSHAKE_ACK',
                         payload: getHandshakePayload()
@@ -192,7 +224,6 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 
                 case 'iframe-log':
                     if (event.data.payload) {
-                        // Map legacy iframe logs to new system
                         const { level, message, stack, payload } = event.data.payload as any;
                         logSystemMessage(level, 'iframe', message, stack, payload);
                     }
@@ -228,7 +259,6 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 
                 case 'SET_INPUT_VALUE':
                     if (event.data.payload !== undefined) {
-                        // Dispatch global event so ChatInput can pick it up
                         window.dispatchEvent(new CustomEvent('sillytavern:set-input', { detail: event.data.payload }));
                     }
                     break;
@@ -244,24 +274,40 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         };
     }, [variables, card, logSystemMessage, sendMessage, addSystemMessage, showToast, showPopup, messages, sessionId, userPersonaName, characterName, executeSlashCommands, updateExtensionSettings]); 
     
+    // Broadcast State Updates to ALL Iframes (History + HUD)
     useEffect(() => {
-        const lastInteractiveMessage = [...messages].reverse().find(m => m.interactiveHtml);
-        if (!lastInteractiveMessage) return;
+        const windowsToUpdate: Window[] = [];
 
-        const iframe = iframeRefs.current[lastInteractiveMessage.id];
-        if (iframe && iframe.contentWindow) {
-             if (variables && Object.keys(variables).length > 0) {
-                iframe.contentWindow.postMessage({
-                    type: 'CARD_STUDIO_VARIABLE_UPDATE',
-                    payload: { stat_data: variables }
-                }, '*');
-             }
-             
+        // 1. History Iframes (Only active ones)
+        const lastInteractiveMessage = [...messages].reverse().find(m => m.interactiveHtml);
+        if (lastInteractiveMessage) {
+            const iframe = iframeRefs.current[lastInteractiveMessage.id];
+            if (iframe && iframe.contentWindow) windowsToUpdate.push(iframe.contentWindow);
+        }
+
+        // 2. Status HUD Iframe
+        if (statusHudRef.current && statusHudRef.current.contentWindow) {
+            windowsToUpdate.push(statusHudRef.current.contentWindow);
+        }
+
+        if (windowsToUpdate.length > 0) {
              const historyPayload = getHandshakePayload();
-             iframe.contentWindow.postMessage({
-                 type: 'CARD_STUDIO_HISTORY_UPDATE',
-                 payload: { chat_history: historyPayload.chat_history }
-             }, '*');
+             
+             windowsToUpdate.forEach(win => {
+                 // Send Variables
+                 if (variables && Object.keys(variables).length > 0) {
+                    win.postMessage({
+                        type: 'CARD_STUDIO_VARIABLE_UPDATE',
+                        payload: { stat_data: variables }
+                    }, '*');
+                 }
+                 
+                 // Send History
+                 win.postMessage({
+                     type: 'CARD_STUDIO_HISTORY_UPDATE',
+                     payload: { chat_history: historyPayload.chat_history }
+                 }, '*');
+             });
         }
     }, [variables, messages]);
 
@@ -306,7 +352,7 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
     };
     
     const handleIframeLoad = (messageId: string) => {
-         // Optional hook if needed
+         // Optional hook
     };
 
     const handleCopyIframeLogs = () => {
@@ -323,17 +369,18 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
     };
     
     const handleInspectState = () => {
-        const lastInteractiveMessage = [...messages].reverse().find(m => m.interactiveHtml);
-        if (lastInteractiveMessage) {
-            const iframe = iframeRefs.current[lastInteractiveMessage.id];
-            if (iframe && iframe.contentWindow) {
-                logSystemMessage('interaction', 'system', 'Yêu cầu kiểm tra trạng thái từ thẻ tương tác mới nhất.');
-                iframe.contentWindow.postMessage({ type: 'CHECK_STATE' }, '*');
-            } else {
-                 logSystemMessage('warn', 'system', 'Không thể tìm thấy iframe hoạt động để kiểm tra trạng thái.');
-            }
+        // Inspect logic can target both HUD and History
+        logSystemMessage('state', 'system', 'Yêu cầu kiểm tra trạng thái.');
+        if (statusHudRef.current?.contentWindow) {
+             statusHudRef.current.contentWindow.postMessage({ type: 'CHECK_STATE' }, '*');
         } else {
-            logSystemMessage('warn', 'system', 'Không có thẻ tương tác nào trong cuộc trò chuyện để kiểm tra.');
+            const lastInteractiveMessage = [...messages].reverse().find(m => m.interactiveHtml);
+            if (lastInteractiveMessage) {
+                const iframe = iframeRefs.current[lastInteractiveMessage.id];
+                if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'CHECK_STATE' }, '*');
+                }
+            }
         }
     };
 
@@ -357,6 +404,23 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 onClose={() => setIsHUDOpen(false)}
              />
 
+             {/* FLOATING STATUS HUD (New Visual Card Interface) */}
+             <FloatingStatusHUD
+                ref={statusHudRef}
+                isOpen={isStatusHUDOpen}
+                onClose={() => setIsStatusHUDOpen(false)}
+                htmlContent={activeInteractiveMessage?.interactiveHtml || ''}
+                scripts={card.extensions?.TavernHelper_scripts || []}
+                originalRawContent={activeInteractiveMessage?.originalRawContent || ''}
+                variables={variables}
+                extensionSettings={extensionSettings}
+                characterName={characterName}
+                userPersonaName={userPersonaName}
+                characterId={card.fileName}
+                sessionId={sessionId}
+                characterAvatarUrl={characterAvatarUrl}
+             />
+
             <ChatHeader 
                 characterName={card.name}
                 onBack={onBack}
@@ -366,6 +430,8 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 onVisualUpdate={handleVisualUpdate}
                 onToggleHUD={() => setIsHUDOpen(!isHUDOpen)}
                 isHUDOpen={isHUDOpen}
+                onToggleStatusHUD={() => setIsStatusHUDOpen(!isStatusHUDOpen)}
+                isStatusHUDOpen={isStatusHUDOpen}
             />
             
             <MessageList 
@@ -402,8 +468,8 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 isImmersive={isImmersive}
                 quickReplies={quickReplies}
                 onQuickReplyClick={handleQuickReplyClick}
-                scriptButtons={scriptButtons} // Pass Dynamic Buttons
-                onScriptButtonClick={handleScriptButtonClick} // Pass Handler
+                scriptButtons={scriptButtons} 
+                onScriptButtonClick={handleScriptButtonClick} 
                 authorNote={authorNote}
                 onUpdateAuthorNote={updateAuthorNote}
                 isSummarizing={isSummarizing}

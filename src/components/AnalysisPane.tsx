@@ -1,5 +1,4 @@
 
-
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import type { CharacterCard, EnhancementField, WorldInfoEntry } from '../types';
 import { analyzeCard, enhanceField } from '../services/geminiService';
@@ -15,6 +14,7 @@ interface AnalysisPaneProps {
   avatarFile: File | null;
   setAvatarUrl: (url: string | null) => void;
   setAvatarFile: (file: File | null) => void;
+  onOpenArchitect: () => void; // NEW PROP
 }
 
 const estimateTokens = (text: string = ''): number => {
@@ -29,7 +29,7 @@ const enhancementFieldLabels: Record<EnhancementField, string> = {
     mes_example: 'ví dụ hội thoại',
 };
 
-export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, fileName, avatarUrl, avatarFile, setAvatarUrl, setAvatarFile }) => {
+export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, fileName, avatarUrl, avatarFile, setAvatarUrl, setAvatarFile, onOpenArchitect }) => {
     const { lorebooks } = useLorebook();
     const [analysisResult, setAnalysisResult] = useState<string>('');
     const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -165,6 +165,20 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
                     </dl>
                 </div>
                 
+                {/* Architect Button */}
+                <div>
+                    <button
+                        onClick={onOpenArchitect}
+                        className="w-full mb-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2 group border border-white/10"
+                    >
+                        <span className="text-xl">✨</span>
+                        <span>Mở AI Studio Architect</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 transform group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                    </button>
+                </div>
+
                 <div>
                      <h4 className="font-semibold text-lg text-slate-200 mb-3">Cải tiến bằng AI</h4>
                      <div className="grid grid-cols-2 gap-2">
@@ -173,7 +187,7 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
                                 key={field}
                                 onClick={() => handleEnhance(field)}
                                 disabled={isEnhancing !== null || isAnalyzing}
-                                className="text-sm w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-semibold py-2 px-3 rounded-lg transition-colors duration-200 flex items-center justify-center capitalize"
+                                className="text-sm w-full bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold py-2 px-3 rounded-lg transition-colors duration-200 flex items-center justify-center capitalize border border-slate-600"
                              >
                                 {isEnhancing === field ? <Loader message='' /> : `Cải thiện ${enhancementFieldLabels[field]}`}
                              </button>

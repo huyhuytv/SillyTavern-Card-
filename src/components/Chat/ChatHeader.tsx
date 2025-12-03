@@ -11,6 +11,8 @@ interface ChatHeaderProps {
     onVisualUpdate: (type: 'bg' | 'music' | 'sound' | 'class', value: string) => void;
     onToggleHUD?: () => void; // NEW
     isHUDOpen?: boolean; // NEW
+    onToggleStatusHUD?: () => void; // NEW: Floating Status HUD
+    isStatusHUDOpen?: boolean; // NEW: Floating Status HUD
 }
 
 const VisualSettingsModal: React.FC<{
@@ -106,7 +108,7 @@ const VisualSettingsModal: React.FC<{
     )
 };
 
-export const ChatHeader: React.FC<ChatHeaderProps> = ({ characterName, onBack, isImmersive, setIsImmersive, visualState, onVisualUpdate, onToggleHUD, isHUDOpen }) => {
+export const ChatHeader: React.FC<ChatHeaderProps> = ({ characterName, onBack, isImmersive, setIsImmersive, visualState, onVisualUpdate, onToggleHUD, isHUDOpen, onToggleStatusHUD, isStatusHUDOpen }) => {
     const [isVisualMenuOpen, setIsVisualMenuOpen] = useState(false);
     const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -134,12 +136,25 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ characterName, onBack, i
                 {isImmersive && <p className="text-xs text-slate-400 hidden sm:block">{visualState.musicUrl ? '♫ Đang phát nhạc' : 'Chế độ Nhà hát'}</p>}
             </div>
 
-            {/* Game HUD Toggle */}
+            {/* Status Panel Toggle (New) */}
+            {onToggleStatusHUD && (
+                <button
+                    onClick={onToggleStatusHUD}
+                    className={`p-2 rounded-full transition-colors ${isStatusHUDOpen ? 'bg-amber-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                    title="Bật/Tắt Giao diện Thẻ Nổi (Card HUD)"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                </button>
+            )}
+
+            {/* Variables Inspector Toggle */}
             {onToggleHUD && (
                 <button
                     onClick={onToggleHUD}
                     className={`p-2 rounded-full transition-colors ${isHUDOpen ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
-                    title="Bật/Tắt Bảng Trạng Thái (Game HUD)"
+                    title="Bật/Tắt Bảng Biến Số (Debug HUD)"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />

@@ -125,8 +125,10 @@ export async function summarizeHistory(historySlice: ChatMessage[], cardName: st
   let prompt = "";
   
   if (customPrompt) {
-      // Use user provided prompt, replacing the placeholder
-      prompt = customPrompt.replace('{{chat_history_slice}}', historyText);
+      // Use user provided prompt, replacing the placeholder and {{char}}
+      prompt = customPrompt
+        .replace('{{chat_history_slice}}', historyText)
+        .replace(/{{char}}/g, cardName);
   } else {
       // Fallback default prompt
       prompt = `

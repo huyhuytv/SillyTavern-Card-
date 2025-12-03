@@ -382,9 +382,11 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ card, onUpdate
   const handleImportLorebook = useCallback(() => {
     if (!selectedLorebook) return;
     const lorebookToImport = lorebooks.find(lb => lb.name === selectedLorebook);
-    if (!lorebookToImport) return;
+    if (!lorebookToImport || !lorebookToImport.book) return;
 
-    const entryCount = lorebookToImport.book.entries.length;
+    const sourceEntries = lorebookToImport.book.entries || [];
+    const entryCount = sourceEntries.length;
+    
     if (entryCount === 0) {
       alert('Sổ tay này không có mục nào để nhập.');
       return;
@@ -394,7 +396,7 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ card, onUpdate
       return;
     }
 
-    const newEntries = JSON.parse(JSON.stringify(lorebookToImport.book.entries)) as WorldInfoEntry[];
+    const newEntries = JSON.parse(JSON.stringify(sourceEntries)) as WorldInfoEntry[];
 
     newEntries.forEach(entry => {
       entry.source_lorebook = lorebookToImport.name;
@@ -417,6 +419,7 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ card, onUpdate
 
     onUpdate(newCard);
     setSelectedLorebook('');
+    alert(`Đã nhập thành công ${entryCount} mục! Kiểm tra phần 'Sổ tay Nhân vật' ở trên.`);
   }, [card, onUpdate, selectedLorebook, lorebooks]);
   
   const handleRegexScriptsUpdate = useCallback((updatedScripts: RegexScript[]) => {
