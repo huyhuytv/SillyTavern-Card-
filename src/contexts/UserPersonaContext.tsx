@@ -74,6 +74,7 @@ interface UserPersonaContextType extends UserPersonaState {
   deletePersona: (personaId: string) => Promise<void>;
   setActivePersonaId: (id: string | null) => void;
   activePersona: UserPersona | null;
+  reloadPersonas: () => Promise<void>; // NEW
 }
 
 const UserPersonaContext = createContext<UserPersonaContextType | undefined>(undefined);
@@ -82,8 +83,7 @@ const UserPersonaContext = createContext<UserPersonaContextType | undefined>(und
 export const UserPersonaProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(userPersonaReducer, initialState);
 
-  useEffect(() => {
-    const loadPersonasFromDb = async () => {
+  const reloadPersonas = useCallback(async () => {
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
         let personas = await dbService.getAllUserPersonas();
@@ -111,8 +111,10 @@ export const UserPersonaProvider: React.FC<{ children: ReactNode }> = ({ childre
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
-    };
-    loadPersonasFromDb();
+  }, []);
+
+  useEffect(() => {
+    reloadPersonas();
   }, []);
 
   const addOrUpdatePersona = useCallback(async (persona: UserPersona) => {
@@ -152,7 +154,7 @@ export const UserPersonaProvider: React.FC<{ children: ReactNode }> = ({ childre
   }, [state.personas, state.activePersonaId]);
 
   return (
-    <UserPersonaContext.Provider value={{ ...state, dispatch, addOrUpdatePersona, deletePersona, setActivePersonaId, activePersona }}>
+    <UserPersonaContext.Provider value={{ ...state, dispatch, addOrUpdatePersona, deletePersona, setActivePersonaId, activePersona, reloadPersonas }}>
       {children}
     </UserPersonaContext.Provider>
   );

@@ -1,3 +1,4 @@
+
 import React, { createContext, useReducer, useContext, useCallback, ReactNode, Dispatch, useEffect } from 'react';
 import type { SillyTavernPreset } from '../types';
 import { parsePresetFile } from '../services/presetParser';
@@ -61,6 +62,7 @@ interface PresetContextType extends PresetState {
   updateActivePreset: (preset: SillyTavernPreset) => Promise<void>;
   setActivePresetName: (name: string | null) => void;
   revertActivePreset: () => Promise<void>;
+  reloadPresets: () => Promise<void>; // NEW
 }
 
 const PresetContext = createContext<PresetContextType | undefined>(undefined);
@@ -69,8 +71,7 @@ const PresetContext = createContext<PresetContextType | undefined>(undefined);
 export const PresetProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(presetReducer, initialState);
 
-  useEffect(() => {
-    const loadPresetsFromDb = async () => {
+  const reloadPresets = useCallback(async () => {
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
         let presets = await dbService.getAllPresets();
@@ -91,8 +92,10 @@ export const PresetProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
-    };
-    loadPresetsFromDb();
+  }, [state.activePresetName]);
+
+  useEffect(() => {
+    reloadPresets();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addPreset = useCallback(async (file: File) => {
@@ -150,7 +153,7 @@ export const PresetProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [state.activePresetName]);
 
   return (
-    <PresetContext.Provider value={{ ...state, dispatch, addPreset, deleteActivePreset, updateActivePreset, setActivePresetName, revertActivePreset }}>
+    <PresetContext.Provider value={{ ...state, dispatch, addPreset, deleteActivePreset, updateActivePreset, setActivePresetName, revertActivePreset, reloadPresets }}>
       {children}
     </PresetContext.Provider>
   );

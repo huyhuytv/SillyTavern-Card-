@@ -1,3 +1,4 @@
+
 import React, { createContext, useReducer, useContext, useCallback, ReactNode, Dispatch, useEffect } from 'react';
 import type { CharacterCard, Lorebook } from '../types';
 import { parseCharacterFile, processRawCard } from '../services/cardParser';
@@ -95,6 +96,7 @@ interface CharacterContextType extends CharacterState {
   updateActiveCharacter: (card: CharacterCard) => Promise<void>;
   setActiveCharacterFileName: (name: string | null) => void;
   setAvatarForActiveCharacter: (fileName: string, url: string | null, file: File | null) => void;
+  reloadCharacters: () => Promise<void>; // NEW
 }
 
 const CharacterContext = createContext<CharacterContextType | undefined>(undefined);
@@ -105,8 +107,7 @@ export const CharacterProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [state, dispatch] = useReducer(characterReducer, initialState);
   const { lorebooks, addLorebook } = useLorebook();
 
-  useEffect(() => {
-    const restoreSession = async () => {
+  const reloadCharacters = useCallback(async () => {
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
         let storedCharacters = await dbService.getAllCharacters();
@@ -139,7 +140,9 @@ export const CharacterProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           return { card: stored.card, fileName: stored.fileName, avatarUrl, avatarFile };
         });
         dispatch({ type: 'SET_CHARACTERS', payload: charactersInContext });
-        if (charactersInContext.length > 0) {
+        
+        // Only set active character if none is selected and we have characters
+        if (charactersInContext.length > 0 && !state.activeCharacterFileName) {
           dispatch({ type: 'SET_ACTIVE_CHARACTER', payload: charactersInContext[0].fileName });
         }
       } catch (err) {
@@ -148,8 +151,10 @@ export const CharacterProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
-    };
-    restoreSession();
+  }, [state.activeCharacterFileName]);
+
+  useEffect(() => {
+    reloadCharacters();
 
     return () => {
       // Cleanup blob URLs on unmount
@@ -157,7 +162,7 @@ export const CharacterProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (c.avatarUrl) URL.revokeObjectURL(c.avatarUrl);
       });
     };
-  }, [addLorebook]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Effect to synchronize characters when lorebooks are deleted.
   useEffect(() => {
@@ -297,7 +302,7 @@ export const CharacterProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   return (
-    <CharacterContext.Provider value={{ ...state, dispatch, loadCharacter, deleteActiveCharacter, updateActiveCharacter, setActiveCharacterFileName, setAvatarForActiveCharacter }}>
+    <CharacterContext.Provider value={{ ...state, dispatch, loadCharacter, deleteActiveCharacter, updateActiveCharacter, setActiveCharacterFileName, setAvatarForActiveCharacter, reloadCharacters }}>
       {children}
     </CharacterContext.Provider>
   );

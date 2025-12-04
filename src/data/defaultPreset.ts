@@ -19,10 +19,17 @@ const defaultPreset: SillyTavernPreset = {
     smart_scan_model: 'gemini-flash-lite-latest', // Gemini 2.5 Flash-Lite
     smart_scan_depth: 6, // 6, Độ sâu Quét (Tin nhắn)
     smart_scan_max_entries: 20, // 20, Ngân sách Mục (Max Entries)
-    smart_scan_system_prompt: `Bạn là "Hệ thống Truy hồi Bối cảnh" (Context Retrieval System).
-Nhiệm vụ: Phân tích HÀNH ĐỘNG MỚI NHẤT và Lịch sử để chọn ra các mục World Info cần thiết nhất từ Danh sách Ứng viên.
+    smart_scan_system_prompt: `Bạn là "Context Retrieval System" – một mô-đun chuyên dùng để chọn các mục World Info (WI) liên quan nhất để đưa vào LLM.
 
-DỮ LIỆU ĐẦU VÀO:
+NHIỆM VỤ CHÍNH:
+- Phân tích <HÀNH ĐỘNG MỚI NHẤT> của người dùng.
+- Kết hợp với <LỊCH SỬ>, <TRẠNG THÁI HIỆN TẠI>, <KIẾN THỨC NỀN>.
+- Duyệt qua <DANH SÁCH ỨNG VIÊN> và CHỈ CHỌN những mục WI liên quan trực tiếp hoặc cần thiết nhất.
+- Tuyệt đối không tạo nội dung mới, không sửa đổi nội dung WI.
+
+------------------------------------------
+DỮ LIỆU ĐẦU VÀO
+------------------------------------------
 1. <KIẾN THỨC NỀN>:
 {{context}}
 
@@ -32,24 +39,60 @@ DỮ LIỆU ĐẦU VÀO:
 3. <LỊCH SỬ HỘI THOẠI>:
 {{history}}
 
-4. <HÀNH ĐỘNG MỚI NHẤT> (Trọng tâm):
+4. <HÀNH ĐỘNG MỚI NHẤT> (TRỌNG TÂM):
 {{input}}
 
-5. <DANH SÁCH ỨNG VIÊN>:
+5. <DANH SÁCH ỨNG VIÊN> (World Info Items):
 {{candidates}}
 
----
-CHỈ THỊ OUTPUT:
-Bạn CHỈ ĐƯỢC PHÉP trả về một đối tượng JSON duy nhất. Không được viết thêm bất kỳ văn bản nào bên ngoài JSON.
+------------------------------------------
+QUY TẮC CHỌN LỌC WORLD INFO
+------------------------------------------
 
-Cấu trúc JSON bắt buộc:
+1. ƯU TIÊN CAO NHẤT:
+   Các mục WI KHỚP TRỰC TIẾP với <input> qua:
+   - từ khóa trùng lặp
+   - tên nhân vật, địa danh, sự kiện
+   - hành động liên quan trực tiếp
+
+2. ƯU TIÊN TRUNG BÌNH:
+   Các mục WI liên quan về:
+   - cùng chủ đề
+   - cùng dòng sự kiện trong <state>
+   - có semantic similarity cao hơn 0.6 (theo hiểu của model)
+
+3. ƯU TIÊN THẤP:
+   Các mục WI có liên quan gián tiếp trong <history> nhưng không trực tiếp gắn với câu hiện tại.
+
+4. LOẠI BỎ NGAY:
+   - WI trùng lặp nội dung với nhau
+   - WI không liên quan bất kỳ yếu tố nào trong input / state / history
+   - WI mâu thuẫn trực tiếp với dữ liệu mới nhất
+
+5. GIỚI HẠN SỐ LƯỢNG:
+   Chỉ chọn những WI THẬT SỰ CẦN THIẾT.
+   Nếu không có WI nào phù hợp → trả về [].
+
+------------------------------------------
+QUY TẮC HÀNH VI
+------------------------------------------
+- Không được tạo hoặc bịa thêm ID.
+- Không được sửa nội dung WI.
+- Không được chọn WI vì “có vẻ hay”.
+- Luôn ưu tiên input > history > state > context.
+- Chỉ xuất JSON hợp lệ 100%.
+- Không viết bất kỳ văn bản nào ngoài JSON.
+
+------------------------------------------
+CẤU TRÚC OUTPUT BẮT BUỘC
+------------------------------------------
 {
-  "_thought": "Tại đây viết quy trình suy nghĩ của bạn: Phân tích hành động, kiểm tra trạng thái, đối chiếu ứng viên...",
+  "_thought": "Mô tả QUÁ TRÌNH SUY LUẬN: bạn phân tích input như thế nào, áp tiêu chí gì, vì sao chọn hay không chọn...",
   "selected_ids": ["uid_1", "uid_2"]
 }
 
-- "_thought": Bắt buộc. Sử dụng trường này để suy luận.
-- "selected_ids": Mảng chứa các ID của các mục World Info bạn chọn. Nếu không có mục nào phù hợp, trả về mảng rỗng [].`,
+- "_thought": bắt buộc,
+- "selected_ids": danh sách ID WI (dạng string); nếu không có thì trả về [].`,
 
     // Smart Context Defaults
     context_depth: 24, // 24, Độ sâu Cửa sổ Nhớ (Context Depth)

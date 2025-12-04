@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { ChatSession, ChatMessage, WorldInfoEntry } from '../types';
+import type { ChatSession, ChatMessage, WorldInfoEntry, SillyTavernPreset } from '../types';
 import * as dbService from '../services/dbService';
 import { useCharacter, CharacterInContext } from '../contexts/CharacterContext';
 import { usePreset } from '../contexts/PresetContext';
@@ -11,6 +11,7 @@ import { useTimeAgo, truncateText } from '../utils';
 import { processWithRegex } from '../services/regexService';
 import { performWorldInfoScan } from '../services/worldInfoScanner';
 import { processVariableUpdates } from '../services/variableEngine';
+import { createSnapshot, importSnapshot } from '../services/snapshotService';
 
 interface ChatLobbyProps {
     onSessionSelect: (sessionId: string) => void;
@@ -21,7 +22,8 @@ const ContinueCard: React.FC<{
     character?: CharacterInContext;
     onClick: () => void;
     onDelete: () => void;
-}> = ({ session, character, onClick, onDelete }) => {
+    onExport: () => void; // New Prop
+}> = ({ session, character, onClick, onDelete, onExport }) => {
     const timeAgo = useTimeAgo(session.lastUpdated);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -44,6 +46,12 @@ const ContinueCard: React.FC<{
     const handleDeleteButtonClick = (e: React.MouseEvent) => {
         e.stopPropagation();
         onDelete();
+        setIsMenuOpen(false);
+    };
+    
+    const handleExportButtonClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onExport();
         setIsMenuOpen(false);
     };
 
@@ -91,6 +99,15 @@ const ContinueCard: React.FC<{
                 {isMenuOpen && (
                     <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-700 rounded-md shadow-lg z-10 py-1">
                         <button
+                            onClick={handleExportButtonClick}
+                            className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-sky-400 hover:bg-sky-500/10 border-b border-slate-700/50"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                            <span>Xuất Bản Ghi Phiêu Lưu</span>
+                        </button>
+                        <button
                             onClick={handleDeleteButtonClick}
                             className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10"
                         >
@@ -135,39 +152,143 @@ const NewChatCard: React.FC<{
     );
 };
 
+// --- IMPORT AREA COMPONENT ---
+const AdventureImporter: React.FC<{ onImport: (file: File) => void, isLoading: boolean }> = ({ onImport, isLoading }) => {
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 0) {
+            onImport(e.target.files[0]);
+            e.target.value = ''; // Reset
+        }
+    };
+
+    return (
+        <div 
+            onClick={() => !isLoading && fileInputRef.current?.click()}
+            className={`border-2 border-dashed border-slate-600 rounded-lg p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all hover:bg-slate-800/50 hover:border-sky-500/50 group ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+            <input
+                ref={fileInputRef}
+                type="file"
+                className="sr-only"
+                accept=".json"
+                onChange={handleFileChange}
+                disabled={isLoading}
+            />
+            <div className="bg-slate-800 p-3 rounded-full mb-3 group-hover:scale-110 transition-transform shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-sky-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+            </div>
+            <h3 className="text-sm font-bold text-slate-300 group-hover:text-white transition-colors">Tiếp tục từ Bản Ghi Phiêu Lưu</h3>
+            <p className="text-xs text-slate-500 mt-1">Kéo thả file .json hoặc nhấn để tải lên (Backup/Save File)</p>
+        </div>
+    );
+};
+
 export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
     const [sessions, setSessions] = useState<ChatSession[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const { characters, isLoading: charactersLoading } = useCharacter();
-    const { presets, activePresetName } = usePreset();
-    const { activePersonaId, activePersona } = useUserPersona();
+    const { characters, isLoading: charactersLoading, loadCharacter, reloadCharacters } = useCharacter();
+    const { presets, activePresetName, reloadPresets } = usePreset();
+    const { activePersonaId, activePersona, personas, reloadPersonas } = useUserPersona();
     const [greetingModalChar, setGreetingModalChar] = useState<CharacterInContext | null>(null);
     const [error, setError] = useState<string>('');
+    const [isImporting, setIsImporting] = useState(false);
+
+    // Function to refresh session list
+    const refreshSessions = async () => {
+        setIsLoading(true);
+        try {
+            const loadedSessions = await dbService.getAllChatSessions();
+            loadedSessions.sort((a, b) => b.lastUpdated - a.lastUpdated);
+            setSessions(loadedSessions);
+        } catch (err) {
+            setError("Không thể tải các phiên trò chuyện đã lưu.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchSessions = async () => {
-            setIsLoading(true);
-            try {
-                const loadedSessions = await dbService.getAllChatSessions();
-                loadedSessions.sort((a, b) => b.lastUpdated - a.lastUpdated);
-                setSessions(loadedSessions);
-            } catch (err) {
-                setError("Không thể tải các phiên trò chuyện đã lưu.");
-            } finally {
-                setIsLoading(false);
-            }
-        };
-        fetchSessions();
+        refreshSessions();
     }, []);
 
     const activePreset = presets.find(p => p.name === activePresetName);
 
     const handleDeleteSession = async (sessionId: string, characterName: string) => {
+        if (!window.confirm(`Bạn có chắc muốn xóa cuộc trò chuyện với ${characterName}?`)) return;
         try {
             await dbService.deleteChatSession(sessionId);
             setSessions(prev => prev.filter(s => s.sessionId !== sessionId));
         } catch (err) {
             setError("Không thể xóa phiên trò chuyện.");
+        }
+    };
+    
+    // --- IMPORT LOGIC ---
+    const handleImportSnapshot = async (file: File) => {
+        setIsImporting(true);
+        setError('');
+        try {
+            const sessionId = await importSnapshot(file);
+            
+            // Reload EVERYTHING to ensure contexts are up to date from DB
+            // This is critical because useChatEngine relies on Contexts (Character, Preset, Persona)
+            // matching the IDs stored in the Session.
+            
+            await Promise.all([
+                reloadCharacters(),
+                reloadPresets(),
+                reloadPersonas(),
+                refreshSessions()
+            ]);
+            
+            // Auto-redirect to the imported session
+            onSessionSelect(sessionId);
+            alert("Nhập bản ghi thành công! Đang chuyển hướng...");
+            
+        } catch (err) {
+            setError(`Lỗi nhập bản ghi: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    // --- EXPORT LOGIC ---
+    const handleExportSession = (session: ChatSession) => {
+        const char = characters.find(c => c.fileName === session.characterFileName);
+        const personaToExport = personas.find(p => p.id === session.userPersonaId) || activePersona;
+
+        // Logic ƯU TIÊN Active Preset nếu trùng tên (để lấy bản chỉnh sửa chưa lưu hoặc mới nhất)
+        let sourcePreset: SillyTavernPreset | undefined;
+
+        if (activePreset && activePreset.name === session.presetName) {
+            sourcePreset = activePreset;
+        } else {
+            sourcePreset = presets.find(p => p.name === session.presetName);
+        }
+
+        // Fallback về Active Preset nếu không tìm thấy (đảm bảo luôn có preset để xuất)
+        if (!sourcePreset) sourcePreset = activePreset;
+
+        if (!char || !sourcePreset) {
+            alert("Không thể xuất: Dữ liệu nhân vật hoặc preset gốc bị thiếu.");
+            return;
+        }
+
+        // Đổi tên Preset đồng bộ theo tên nhân vật
+        const presetToExport = {
+            ...sourcePreset,
+            name: `[Cài đặt] ${char.card.name}`
+        };
+
+        try {
+            createSnapshot(session, char.card, presetToExport, personaToExport);
+        } catch (e) {
+            console.error(e);
+            alert("Lỗi khi tạo bản ghi xuất.");
         }
     };
 
@@ -323,8 +444,13 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
 
     return (
         <div className="space-y-10">
-            {error && <p className="text-red-400 text-center">{error}</p>}
+            {error && <p className="text-red-400 text-center bg-red-900/20 p-3 rounded">{error}</p>}
             
+            {/* Import / Snapshot Area */}
+            <div className="animate-fade-in-up">
+                <AdventureImporter onImport={handleImportSnapshot} isLoading={isImporting} />
+            </div>
+
             {/* Continue Section */}
             <div>
                 <h2 className="text-2xl font-bold text-sky-400 mb-4 border-b-2 border-slate-700 pb-2">Tiếp tục nhân vật</h2>
@@ -337,6 +463,7 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
                                 character={character}
                                 onClick={() => onSessionSelect(session.sessionId)}
                                 onDelete={() => handleDeleteSession(session.sessionId, character?.card.name || session.characterFileName)}
+                                onExport={() => handleExportSession(session)}
                             />
                         ))}
                     </div>

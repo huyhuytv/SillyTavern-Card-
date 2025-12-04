@@ -85,6 +85,23 @@ export interface ChatSession {
   initialDiagnosticLog?: string;
 }
 
+// NEW: Adventure Snapshot Structure for Import/Export
+export interface AdventureSnapshot {
+    version: number;
+    timestamp: number;
+    meta: {
+        exportedBy: string;
+        description: string;
+    };
+    data: {
+        character: CharacterCard;
+        characterFileName: string;
+        preset: SillyTavernPreset;
+        session: ChatSession;
+        userPersona: UserPersona | null;
+    };
+}
+
 export interface WorldInfoEntry {
   id?: number; // V3 chara_card_v3 character_book
   keys: string[];

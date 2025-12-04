@@ -12,7 +12,7 @@ export interface MessageMenuAction {
     className?: string;
 }
 
-const MessageMenu: React.FC<{
+export const MessageMenu: React.FC<{
     actions: MessageMenuAction[];
     isUser: boolean;
 }> = ({ actions, isUser }) => {

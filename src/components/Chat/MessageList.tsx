@@ -2,7 +2,7 @@
 import React, { useRef, useEffect } from 'react';
 import type { ChatMessage, TavernHelperScript } from '../../types';
 import { InteractiveHtmlMessage } from '../InteractiveHtmlMessage';
-import { MessageBubble, ThinkingReveal } from './MessageBubble';
+import { MessageBubble, ThinkingReveal, MessageMenu } from './MessageBubble';
 import { Loader } from '../Loader';
 
 interface MessageListProps {
@@ -91,6 +91,31 @@ export const MessageList: React.FC<MessageListProps> = ({
             className={`flex-grow p-4 md:p-6 overflow-y-auto custom-scrollbar relative z-10 w-full ${isImmersive ? 'max-w-5xl mx-auto transition-all' : ''}`}
         >
             {messages.map((msg, index) => {
+                // Calculate logic for ALL messages types
+                const isLastMessage = index === lastMessageIndex;
+                const isLastModelMessage = index === lastModelMsgIndex;
+                
+                // Allow actions if it is the LAST Model message OR the LAST User message (e.g. error case)
+                const canRegenerate = (isLastModelMessage || (isLastMessage && msg.role === 'user')) && !isLoading && msg.role !== 'system';
+                const canDelete = (isLastModelMessage || isLastMessage) && !isLoading && messages.length > 0;
+
+                const menuActions = [
+                    { label: 'Chỉnh sửa', onClick: () => onStartEdit(msg) },
+                    { label: 'Ghi chú của Tác giả', onClick: onOpenAuthorNote },
+                    { label: 'Quản lý World Info', onClick: onOpenWorldInfo },
+                    { 
+                        label: msg.role === 'user' ? 'Thử lại (Gửi lại)' : 'Tạo lại', 
+                        onClick: regenerateLastResponse, 
+                        disabled: !canRegenerate 
+                    },
+                    { 
+                        label: msg.role === 'user' ? 'Xóa tin nhắn này' : 'Xóa Lượt gần nhất', 
+                        onClick: deleteLastTurn, 
+                        disabled: !canDelete, 
+                        className: 'text-red-400 hover:bg-red-800/50' 
+                    },
+                ];
+
                 if (msg.interactiveHtml) {
                     // Logic to separate <thinking> content from interactive HTML
                     let finalHtml = msg.interactiveHtml;
@@ -107,7 +132,14 @@ export const MessageList: React.FC<MessageListProps> = ({
                     }
 
                     return (
-                        <div key={msg.id} className="my-4">
+                        <div key={msg.id} className="my-4 relative group">
+                            {/* Floating Menu for Interactive Messages */}
+                            <div className="absolute top-0 right-0 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none group-hover:pointer-events-auto p-2">
+                                <div className="bg-slate-800/90 rounded-full shadow-md backdrop-blur-sm border border-slate-600/50">
+                                    <MessageMenu actions={menuActions} isUser={false} />
+                                </div>
+                            </div>
+
                             {thinkingContent && (
                                 <div className="mb-2">
                                     <ThinkingReveal content={thinkingContent} />
@@ -134,30 +166,6 @@ export const MessageList: React.FC<MessageListProps> = ({
                 
                 // Skip empty messages unless editing
                 if (!msg.content.trim() && editingMessageId !== msg.id) return null;
-
-                const isLastMessage = index === lastMessageIndex;
-                const isLastModelMessage = index === lastModelMsgIndex;
-                
-                // Allow actions if it is the LAST Model message OR the LAST User message (e.g. error case)
-                const canRegenerate = (isLastModelMessage || (isLastMessage && msg.role === 'user')) && !isLoading && msg.role !== 'system';
-                const canDelete = (isLastModelMessage || isLastMessage) && !isLoading && messages.length > 0;
-
-                const menuActions = [
-                    { label: 'Chỉnh sửa', onClick: () => onStartEdit(msg) },
-                    { label: 'Ghi chú của Tác giả', onClick: onOpenAuthorNote },
-                    { label: 'Quản lý World Info', onClick: onOpenWorldInfo },
-                    { 
-                        label: msg.role === 'user' ? 'Thử lại (Gửi lại)' : 'Tạo lại', 
-                        onClick: regenerateLastResponse, 
-                        disabled: !canRegenerate 
-                    },
-                    { 
-                        label: msg.role === 'user' ? 'Xóa tin nhắn này' : 'Xóa Lượt gần nhất', 
-                        onClick: deleteLastTurn, 
-                        disabled: !canDelete, 
-                        className: 'text-red-400 hover:bg-red-800/50' 
-                    },
-                ];
 
                 return (
                     <MessageBubble 
