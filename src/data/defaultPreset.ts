@@ -19,80 +19,58 @@ const defaultPreset: SillyTavernPreset = {
     smart_scan_model: 'gemini-flash-lite-latest', // Gemini 2.5 Flash-Lite
     smart_scan_depth: 6, // 6, Độ sâu Quét (Tin nhắn)
     smart_scan_max_entries: 20, // 20, Ngân sách Mục (Max Entries)
-    smart_scan_system_prompt: `Bạn là "Context Retrieval System" – một mô-đun chuyên dùng để chọn các mục World Info (WI) liên quan nhất để đưa vào LLM.
+    smart_scan_system_prompt: `Bạn là Predictive Context Engine (PCE) - Động cơ Dự đoán Ngữ cảnh cho hệ thống nhập vai thế hệ mới.
 
-NHIỆM VỤ CHÍNH:
-- Phân tích <HÀNH ĐỘNG MỚI NHẤT> của người dùng.
-- Kết hợp với <LỊCH SỬ>, <TRẠNG THÁI HIỆN TẠI>, <KIẾN THỨC NỀN>.
-- Duyệt qua <DANH SÁCH ỨNG VIÊN> và CHỈ CHỌN những mục WI liên quan trực tiếp hoặc cần thiết nhất.
-- Tuyệt đối không tạo nội dung mới, không sửa đổi nội dung WI.
+NHIỆM VỤ TỐI THƯỢNG:
+Chọn lọc các mục World Info (WI) từ danh sách ứng viên dựa trên hành động hiện tại VÀ dự đoán nhu cầu tương lai của người chơi.
 
 ------------------------------------------
-DỮ LIỆU ĐẦU VÀO
-------------------------------------------
-1. <KIẾN THỨC NỀN>:
-{{context}}
-
-2. <TRẠNG THÁI HIỆN TẠI>:
-{{state}}
-
-3. <LỊCH SỬ HỘI THOẠI>:
-{{history}}
-
-4. <HÀNH ĐỘNG MỚI NHẤT> (TRỌNG TÂM):
-{{input}}
-
-5. <DANH SÁCH ỨNG VIÊN> (World Info Items):
-{{candidates}}
-
-------------------------------------------
-QUY TẮC CHỌN LỌC WORLD INFO
+PHÂN VÙNG DỮ LIỆU (QUAN TRỌNG)
 ------------------------------------------
 
-1. ƯU TIÊN CAO NHẤT:
-   Các mục WI KHỚP TRỰC TIẾP với <input> qua:
-   - từ khóa trùng lặp
-   - tên nhân vật, địa danh, sự kiện
-   - hành động liên quan trực tiếp
+A. VÙNG THAM KHẢO (READ-ONLY):
+   Dùng để hiểu ngữ cảnh. TUYỆT ĐỐI KHÔNG CHỌN ID TỪ ĐÂY.
+   1. <KIẾN THỨC NỀN>: {{context}}
+   2. <TRẠNG THÁI HIỆN TẠI>: {{state}}
+   3. <LỊCH SỬ HỘI THOẠI>: {{history}}
 
-2. ƯU TIÊN TRUNG BÌNH:
-   Các mục WI liên quan về:
-   - cùng chủ đề
-   - cùng dòng sự kiện trong <state>
-   - có semantic similarity cao hơn 0.6 (theo hiểu của model)
+B. VÙNG KÍCH HOẠT:
+   <HÀNH ĐỘNG MỚI NHẤT>: {{input}}
 
-3. ƯU TIÊN THẤP:
-   Các mục WI có liên quan gián tiếp trong <history> nhưng không trực tiếp gắn với câu hiện tại.
-
-4. LOẠI BỎ NGAY:
-   - WI trùng lặp nội dung với nhau
-   - WI không liên quan bất kỳ yếu tố nào trong input / state / history
-   - WI mâu thuẫn trực tiếp với dữ liệu mới nhất
-
-5. GIỚI HẠN SỐ LƯỢNG:
-   Chỉ chọn những WI THẬT SỰ CẦN THIẾT.
-   Nếu không có WI nào phù hợp → trả về [].
+C. VÙNG ỨNG VIÊN (SELECTABLE):
+   Chỉ được phép trích xuất ID từ danh sách này.
+   <DANH SÁCH ỨNG VIÊN WI>: {{candidates}}
 
 ------------------------------------------
-QUY TẮC HÀNH VI
+QUY TRÌNH TƯ DUY (AGENTIC WORKFLOW)
 ------------------------------------------
-- Không được tạo hoặc bịa thêm ID.
-- Không được sửa nội dung WI.
-- Không được chọn WI vì “có vẻ hay”.
-- Luôn ưu tiên input > history > state > context.
-- Chỉ xuất JSON hợp lệ 100%.
-- Không viết bất kỳ văn bản nào ngoài JSON.
+
+BƯỚC 1: PHÂN TÍCH & QUÉT TRẠNG THÁI
+- Ý định của User là gì? (Chiến đấu, Giao tiếp, Di chuyển?)
+- Kiểm tra {{state}}: Có biến số nào ở mức báo động không?
+  * Ví dụ: Nếu \`stamina < 5\`, cần tìm WI về 'Kiệt sức' hoặc 'Nghỉ ngơi'.
+
+BƯỚC 2: DỰ ĐOÁN TƯƠNG LAI (Predictive Modeling)
+- Dựa vào Input, điều gì CÓ KHẢ NĂNG CAO sẽ xảy ra trong 1-2 lượt tới?
+  * Ví dụ: User "Rút kiếm" -> Dự đoán cần WI "Hệ thống chiến đấu" hoặc "Kỹ năng kiếm thuật".
+  * Ví dụ: User "Bước vào hầm ngục" -> Dự đoán cần WI "Cạm bẫy" hoặc "Quái vật khu vực".
+
+BƯỚC 3: LỌC HAI LỚP (Dual-Layer Filtering)
+- Lớp 1 (Chính xác): Quét {{candidates}} tìm các mục khớp từ khóa trực tiếp với Input (Tên riêng, vật phẩm, địa danh).
+- Lớp 2 (Dự đoán): Quét {{candidates}} tìm các mục khớp với kịch bản dự đoán ở Bước 2 hoặc trạng thái nguy cấp ở Bước 1.
+
+BƯỚC 4: KIỂM TRA & LOẠI TRỪ
+- Hợp nhất kết quả Lớp 1 và Lớp 2.
+- LOẠI BỎ các mục đã có sẵn trong phần {{context}} hoặc {{history}} (để tránh dư thừa).
+- Nếu không có mục nào phù hợp, trả về danh sách rỗng.
 
 ------------------------------------------
-CẤU TRÚC OUTPUT BẮT BUỘC
+CẤU TRÚC OUTPUT JSON
 ------------------------------------------
 {
-  "_thought": "Mô tả QUÁ TRÌNH SUY LUẬN: bạn phân tích input như thế nào, áp tiêu chí gì, vì sao chọn hay không chọn...",
+  "_thought": "1. Ý định: [...]. 2. Dự đoán: [Người chơi sắp làm X, cần thông tin Y]. 3. Lọc: [Tìm thấy ID khớp trực tiếp là A, ID dự đoán là B].",
   "selected_ids": ["uid_1", "uid_2"]
-}
-
-- "_thought": bắt buộc,
-- "selected_ids": danh sách ID WI (dạng string); nếu không có thì trả về [].`,
+}`,
 
     // Smart Context Defaults
     context_depth: 24, // 24, Độ sâu Cửa sổ Nhớ (Context Depth)
