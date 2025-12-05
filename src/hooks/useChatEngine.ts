@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ChatMessage, QuickReply, VisualState, PromptSection, ScriptButton } from '../types'; // Import ScriptButton
 import { prepareChat, constructChatPrompt, cleanMessageContent } from '../services/promptManager';
@@ -34,7 +33,8 @@ export const useChatEngine = (sessionId: string | null) => {
         mergedSettings,
         isLoading: isSessionLoading,
         error: sessionError,
-        saveSession
+        saveSession,
+        changePreset
     } = useChatSession(sessionId);
 
     // --- 2. AI & Engine State ---
@@ -645,6 +645,8 @@ export const useChatEngine = (sessionId: string | null) => {
         executeSlashCommands, visualState,
         quickReplies, setQuickReplies,
         scriptButtons, handleScriptButtonClick, // NEW EXPORTS
-        isInputLocked
+        isInputLocked,
+        preset,
+        changePreset
     };
 };

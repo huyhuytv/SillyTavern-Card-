@@ -74,6 +74,8 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         logSystemMessage,
         clearSystemLogs,
         card,
+        preset, // EXPOSE PRESET
+        changePreset, // EXPOSE CHANGE PRESET FUNCTION
         longTermSummaries,
         executeSlashCommands,
         visualState,
@@ -432,6 +434,8 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 isHUDOpen={isHUDOpen}
                 onToggleStatusHUD={() => setIsStatusHUDOpen(!isStatusHUDOpen)}
                 isStatusHUDOpen={isStatusHUDOpen}
+                activePresetName={preset?.name} 
+                onPresetChange={changePreset}
             />
             
             <MessageList 

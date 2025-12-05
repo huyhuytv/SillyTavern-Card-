@@ -152,6 +152,9 @@ export const useChatSession = (sessionId: string | null) => {
         const currentLastStateBlock = overrides.lastStateBlock ?? lastStateBlock;
         const currentSummaries = overrides.longTermSummaries ?? longTermSummaries;
         const currentPersona = overrides.persona ?? persona;
+        
+        // Handle Preset Override Logic
+        const currentPreset = overrides.preset ?? preset;
 
         const lastMessageContent = currentMessages.length > 0 
             ? currentMessages[currentMessages.length - 1].content 
@@ -160,7 +163,7 @@ export const useChatSession = (sessionId: string | null) => {
         const sessionToSave: ChatSession = {
             sessionId,
             characterFileName: card.fileName,
-            presetName: preset.name,
+            presetName: currentPreset.name, // Use updated preset name
             userPersonaId: currentPersona?.id || null,
             chatHistory: currentMessages,
             longTermSummaries: currentSummaries,
@@ -186,6 +189,23 @@ export const useChatSession = (sessionId: string | null) => {
         }
     }, [sessionId, card, preset, persona, messages, variables, extensionSettings, worldInfoState, worldInfoPinned, worldInfoPlacement, worldInfoRuntime, visualState, authorNote, lastStateBlock, longTermSummaries, initialDiagnosticLog]);
 
+    // --- NEW: LIVE TUNING FEATURE ---
+    const changePreset = useCallback(async (presetName: string) => {
+        if (!card) return;
+        
+        const newPreset = presets.find(p => p.name === presetName);
+        if (!newPreset) return;
+
+        // 1. Update React State
+        setPreset(newPreset);
+        setMergedSettings(mergeSettings(card, newPreset));
+
+        // 2. Persist to DB immediately
+        await saveSession({ preset: newPreset });
+        
+        console.log(`[Session] Live Tuned to preset: ${newPreset.name}`);
+    }, [card, presets, saveSession]);
+
     return {
         // State
         messages, setMessages,
@@ -207,6 +227,7 @@ export const useChatSession = (sessionId: string | null) => {
         isLoading,
         error,
         // Actions
-        saveSession
+        saveSession,
+        changePreset // EXPORT NEW FUNCTION
     };
 };

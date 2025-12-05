@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import type { VisualState } from '../../types';
+import { usePreset } from '../../contexts/PresetContext';
 
 interface ChatHeaderProps {
     characterName: string;
@@ -13,6 +14,9 @@ interface ChatHeaderProps {
     isHUDOpen?: boolean; // NEW
     onToggleStatusHUD?: () => void; // NEW: Floating Status HUD
     isStatusHUDOpen?: boolean; // NEW: Floating Status HUD
+    // NEW: Live Tuning Props
+    activePresetName?: string;
+    onPresetChange?: (presetName: string) => void;
 }
 
 const VisualSettingsModal: React.FC<{
@@ -108,8 +112,64 @@ const VisualSettingsModal: React.FC<{
     )
 };
 
-export const ChatHeader: React.FC<ChatHeaderProps> = ({ characterName, onBack, isImmersive, setIsImmersive, visualState, onVisualUpdate, onToggleHUD, isHUDOpen, onToggleStatusHUD, isStatusHUDOpen }) => {
+const PresetTuningModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    activePresetName?: string;
+    onPresetChange?: (name: string) => void;
+}> = ({ isOpen, onClose, activePresetName, onPresetChange }) => {
+    const { presets } = usePreset();
+    const modalRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
+                onClose();
+            }
+        };
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen, onClose]);
+
+    if (!isOpen || !onPresetChange) return null;
+
+    return (
+        <div ref={modalRef} className="absolute top-14 right-16 w-64 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 animate-fade-in-up flex flex-col max-h-[60vh]">
+            <div className="p-3 border-b border-slate-700 bg-slate-900/50 rounded-t-xl shrink-0">
+                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z" /></svg>
+                    Live Tuning (Preset)
+                </h3>
+            </div>
+            <div className="overflow-y-auto custom-scrollbar p-2 space-y-1">
+                {presets.map(preset => (
+                    <button
+                        key={preset.name}
+                        onClick={() => { onPresetChange(preset.name); onClose(); }}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
+                            activePresetName === preset.name 
+                            ? 'bg-indigo-600 text-white shadow-sm' 
+                            : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+                        }`}
+                    >
+                        <span className="truncate">{preset.name}</span>
+                        {activePresetName === preset.name && <span className="text-[10px]">●</span>}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+export const ChatHeader: React.FC<ChatHeaderProps> = ({ 
+    characterName, onBack, isImmersive, setIsImmersive, visualState, onVisualUpdate, 
+    onToggleHUD, isHUDOpen, onToggleStatusHUD, isStatusHUDOpen,
+    activePresetName, onPresetChange
+}) => {
     const [isVisualMenuOpen, setIsVisualMenuOpen] = useState(false);
+    const [isTuningMenuOpen, setIsTuningMenuOpen] = useState(false); // NEW
     const triggerRef = useRef<HTMLButtonElement>(null);
 
     const handleCloseMenu = () => {
@@ -131,12 +191,15 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ characterName, onBack, i
                     }
                 </svg>
             </button>
-            <div className="flex-grow">
+            <div className="flex-grow min-w-0">
                 <h2 className="text-lg font-bold text-slate-200 truncate">Trò chuyện với {characterName}</h2>
-                {isImmersive && <p className="text-xs text-slate-400 hidden sm:block">{visualState.musicUrl ? '♫ Đang phát nhạc' : 'Chế độ Nhà hát'}</p>}
+                <div className="flex items-center gap-2">
+                    {isImmersive && <p className="text-xs text-slate-400 hidden sm:block">{visualState.musicUrl ? '♫ Đang phát nhạc' : 'Chế độ Nhà hát'}</p>}
+                    {!isImmersive && activePresetName && <span className="text-xs text-indigo-400 truncate hidden sm:block">Preset: {activePresetName}</span>}
+                </div>
             </div>
 
-            {/* Status Panel Toggle (New) */}
+            {/* Status Panel Toggle */}
             {onToggleStatusHUD && (
                 <button
                     onClick={onToggleStatusHUD}
@@ -160,6 +223,27 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ characterName, onBack, i
                         <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
                     </svg>
                 </button>
+            )}
+
+            {/* Live Tuning Toggle (NEW) */}
+            {onPresetChange && (
+                <div className="relative">
+                    <button
+                        onClick={() => setIsTuningMenuOpen(!isTuningMenuOpen)}
+                        className={`p-2 rounded-full transition-colors ${isTuningMenuOpen ? 'bg-fuchsia-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                        title="Live Tuning (Đổi Preset Nóng)"
+                    >
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z" />
+                        </svg>
+                    </button>
+                    <PresetTuningModal 
+                        isOpen={isTuningMenuOpen}
+                        onClose={() => setIsTuningMenuOpen(false)}
+                        activePresetName={activePresetName}
+                        onPresetChange={onPresetChange}
+                    />
+                </div>
             )}
 
             {/* Visual Settings Toggle */}
