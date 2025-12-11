@@ -93,9 +93,11 @@ const PlacementControl: React.FC<{
     onChange: (val: string | undefined) => void;
 }> = ({ value, onChange }) => {
     const currentMode = (() => {
-        if (!value) return undefined;
-        if (value.includes('after')) return 'after';
-        if (value.includes('before')) return 'before';
+        if (value === undefined || value === null) return undefined;
+        // Fix: Ensure value is string before checking includes (handles numeric positions from V3 cards)
+        const valStr = String(value);
+        if (valStr.includes('after')) return 'after';
+        if (valStr.includes('before')) return 'before';
         return undefined;
     })();
 

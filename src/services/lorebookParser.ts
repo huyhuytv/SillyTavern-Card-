@@ -66,6 +66,12 @@ export const normalizeCharacterBook = (book: any): CharacterBook => {
              newEntry.uid = `imported_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         }
 
+        // 4. Sanitize Position (Fix for crash)
+        // V3 cards may use numbers for position (e.g., 4). React components expect string | undefined.
+        if (newEntry.position !== undefined && newEntry.position !== null) {
+            newEntry.position = String(newEntry.position);
+        }
+
         return newEntry;
     });
 
