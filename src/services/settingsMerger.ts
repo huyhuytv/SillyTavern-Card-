@@ -13,7 +13,7 @@ export const mergeSettings = (card: CharacterCard, preset: SillyTavernPreset): S
     const mergedSettings = JSON.parse(JSON.stringify(preset));
 
     // Define a map of possible keys in the card and their corresponding key in the preset
-    const keyMap: { [key in keyof CharacterCard]?: keyof SillyTavernPreset } = {
+    const keyMap: { [key: string]: keyof SillyTavernPreset } = {
         temperature: 'temp',
         temp: 'temp',
         top_p: 'top_p',
@@ -29,7 +29,7 @@ export const mergeSettings = (card: CharacterCard, preset: SillyTavernPreset): S
 
     for (const cardKey in keyMap) {
         if (card.hasOwnProperty(cardKey) && card[cardKey] !== undefined && card[cardKey] !== null) {
-            const presetKey = keyMap[cardKey as keyof typeof keyMap];
+            const presetKey = keyMap[cardKey];
             if (presetKey) {
                 mergedSettings[presetKey] = card[cardKey];
             }

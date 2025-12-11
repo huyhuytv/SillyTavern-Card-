@@ -34,7 +34,7 @@ export const useChatLogger = () => {
     const logPrompt = useCallback((promptData: PromptSection[] | string) => {
         // Normalize to array if string passed (legacy compat)
         const promptSections: PromptSection[] = typeof promptData === 'string' 
-            ? [{ id: 'legacy_raw', name: 'Raw Prompt', content: promptData }] 
+            ? [{ id: 'legacy_raw', name: 'Raw Prompt', content: promptData, role: 'system' }] 
             : promptData;
 
         setTurns(prev => {

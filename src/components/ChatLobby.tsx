@@ -218,7 +218,6 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
     const activePreset = presets.find(p => p.name === activePresetName);
 
     const handleDeleteSession = async (sessionId: string, characterName: string) => {
-        if (!window.confirm(`Bạn có chắc muốn xóa cuộc trò chuyện với ${characterName}?`)) return;
         try {
             await dbService.deleteChatSession(sessionId);
             setSessions(prev => prev.filter(s => s.sessionId !== sessionId));

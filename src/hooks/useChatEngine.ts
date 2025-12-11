@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ChatMessage, QuickReply, VisualState, PromptSection, ScriptButton } from '../types'; // Import ScriptButton
 import { prepareChat, constructChatPrompt, cleanMessageContent } from '../services/promptManager';
@@ -11,6 +12,7 @@ import { useChatSession } from './useChatSession';
 import { useAICompletion } from './useAICompletion';
 import { useWorldSystem } from './useWorldSystem';
 import { processWithRegex } from '../services/regexService';
+import { useTTS } from '../contexts/TTSContext'; // NEW Import
 
 export const useChatEngine = (sessionId: string | null) => {
     // --- 1. State & Data Layer (Managed by useChatSession) ---
@@ -46,6 +48,7 @@ export const useChatEngine = (sessionId: string | null) => {
     const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
     const [scriptButtons, setScriptButtons] = useState<ScriptButton[]>([]); // NEW: Dynamic Script Buttons
     const [isInputLocked, setIsInputLocked] = useState(false); // NEW: UI Lock State
+    const [isAutoLooping, setIsAutoLooping] = useState(false); // NEW: Auto Loop State
     
     const messageIdCounter = useRef(0);
     
@@ -61,6 +64,9 @@ export const useChatEngine = (sessionId: string | null) => {
     const { lorebooks } = useLorebook();
     const { showToast } = useToast();
     const { showPopup } = usePopup();
+    
+    // TTS INTEGRATION
+    const { autoPlayEnabled, addToQueue } = useTTS();
     
     const isLoading = isSessionLoading || isGenerating || isScanning;
     const error = sessionError || aiError;
@@ -187,18 +193,45 @@ export const useChatEngine = (sessionId: string | null) => {
         
         const finalNewMessages = [...currentMessages, ...modelMessages];
         
+        // --- TTS AUTO-PLAY TRIGGER ---
+        // If auto-play is enabled, push new model text to queue
+        if (autoPlayEnabled && mergedSettings.tts_enabled) {
+            modelMessages.forEach(msg => {
+                const textToRead = msg.content || (msg.originalRawContent ? cleanMessageContent(msg.originalRawContent) : '');
+                if (textToRead.trim()) {
+                    // Extract full settings from merged preset
+                    const voice = mergedSettings.tts_provider === 'native' 
+                        ? (mergedSettings.tts_native_voice || '') 
+                        : (mergedSettings.tts_voice || 'Kore');
+                    
+                    // Strip HTML/Action tags before queuing
+                    const cleanText = textToRead.replace(/<[^>]*>/g, '');
+                    if (cleanText.trim()) {
+                        addToQueue(cleanText, voice, msg.id, {
+                            provider: mergedSettings.tts_provider || 'gemini',
+                            rate: mergedSettings.tts_rate,
+                            pitch: mergedSettings.tts_pitch
+                        });
+                    }
+                }
+            });
+        }
+        
         setVariables(updatedVariables);
         setMessages(finalNewMessages);
         setLastStateBlock(nextStateBlock);
 
-        const contextDepth = mergedSettings.context_depth || defaultPageSize;
+        // --- SMART CONTEXT / MEMORY LOGIC UPDATE ---
+        const contextDepth = mergedSettings.context_depth || defaultPageSize; // Trigger Threshold
+        const chunkSize = mergedSettings.summarization_chunk_size || 10; // Sliding Window Size
         const summarizationPrompt = mergedSettings.summarization_prompt;
 
         const newSummaries = await checkForSummarizationAndStore(
             finalNewMessages, 
             logSummary, 
             contextDepth, 
-            summarizationPrompt
+            summarizationPrompt,
+            chunkSize // NEW PARAM
         );
         
         const finalSummaries = newSummaries || longTermSummaries;
@@ -211,7 +244,7 @@ export const useChatEngine = (sessionId: string | null) => {
             longTermSummaries: finalSummaries
         });
 
-    }, [card, preset, mergedSettings, logResponse, logDiagnostic, checkForSummarizationAndStore, logSummary, saveSession, longTermSummaries, variables, lastStateBlock, setVariables, setMessages, setLongTermSummaries, setLastStateBlock, processOutput, defaultPageSize]);
+    }, [card, preset, mergedSettings, logResponse, logDiagnostic, checkForSummarizationAndStore, logSummary, saveSession, longTermSummaries, variables, lastStateBlock, setVariables, setMessages, setLongTermSummaries, setLastStateBlock, processOutput, defaultPageSize, autoPlayEnabled, addToQueue]);
 
 
     const sendMessage = useCallback(async (messageContent: string) => {
@@ -273,7 +306,9 @@ export const useChatEngine = (sessionId: string | null) => {
                 worldInfoPlacement
             );
             
-            const contextDepth = mergedSettings.context_depth || defaultPageSize;
+            // --- SMART CONTEXT / PROMPT LOGIC UPDATE ---
+            // Pass chunkSize as pageSize to promptManager so it calculates the history slice correctly
+            const chunkSize = mergedSettings.summarization_chunk_size || 10; 
             const contextMode = mergedSettings.context_mode || 'standard';
 
             // Construct the full prompt (returns both string and structure)
@@ -283,7 +318,7 @@ export const useChatEngine = (sessionId: string | null) => {
                 authorNote,
                 card,
                 longTermSummaries,
-                contextDepth,
+                chunkSize, // Use chunk size to determine how many messages are "eaten" by summaries
                 variables,
                 lastStateBlock,
                 lorebooks, 
@@ -319,6 +354,46 @@ export const useChatEngine = (sessionId: string | null) => {
         }
     }, [baseSections, messages, authorNote, card, preset, mergedSettings, longTermSummaries, defaultPageSize, isGenerating, isScanning, isSummarizing, logPrompt, processAndSetModelResponse, variables, lastStateBlock, worldInfoState, worldInfoRuntime, worldInfoPinned, worldInfoPlacement, lorebooks, persona, saveSession, logWorldInfo, logSmartScan, setMessages, setWorldInfoRuntime, generate, clearAiError, scanInput, startTurn, logDiagnostic]);
     
+    // --- AUTO LOOP LOGIC ---
+    useEffect(() => {
+        // Only run if AutoLoop is enabled, not currently generating, and there are messages
+        if (!isAutoLooping || isGenerating || isScanning || isSummarizing || messages.length === 0) return;
+
+        const lastMessage = messages[messages.length - 1];
+
+        // Trigger only if the last message was from the Model (AI)
+        if (lastMessage.role === 'model') {
+            const rawContent = lastMessage.originalRawContent || lastMessage.content || "";
+            
+            // 1. Extract [CHOICE: "..."]
+            // Note: We use the raw content to ensure we capture choices even if they were hidden in display
+            const choiceRegex = /\[CHOICE:\s*"([^"]+)"\]/gi;
+            const choices: string[] = [];
+            let match;
+            while ((match = choiceRegex.exec(rawContent)) !== null) {
+                choices.push(match[1]);
+            }
+
+            let nextPrompt = "";
+
+            if (choices.length > 0) {
+                // If choices exist, pick one randomly to simulate player action
+                const randomIndex = Math.floor(Math.random() * choices.length);
+                nextPrompt = choices[randomIndex];
+            } else {
+                // If no choices, use the "Nudge Prompt" from preset or default
+                // This keeps the story going if AI forgets to output a choice
+                nextPrompt = preset?.continue_nudge_prompt || "[Tiếp tục...]";
+            }
+
+            // Execute the next turn immediately (no delay as requested)
+            // Using setTimeout 0 to ensure stack clears and React updates flow
+            setTimeout(() => {
+                sendMessage(nextPrompt);
+            }, 0);
+        }
+    }, [isAutoLooping, isGenerating, isScanning, isSummarizing, messages, sendMessage, preset]);
+
     const addSystemMessage = useCallback(async (content: string) => {
         if (!content.trim()) return;
         startTurn();
@@ -451,7 +526,8 @@ export const useChatEngine = (sessionId: string | null) => {
                 worldInfoPlacement
             );
 
-            const contextDepth = mergedSettings.context_depth || defaultPageSize;
+            // --- SMART CONTEXT / PROMPT LOGIC UPDATE (REGEN) ---
+            const chunkSize = mergedSettings.summarization_chunk_size || 10;
             const contextMode = mergedSettings.context_mode || 'standard';
 
             const { fullPrompt, structuredPrompt } = await constructChatPrompt(
@@ -460,7 +536,7 @@ export const useChatEngine = (sessionId: string | null) => {
                 authorNote,
                 card,
                 longTermSummaries,
-                contextDepth,
+                chunkSize, // Use chunk size here
                 restoredVariables,
                 restoredStateBlock,
                 lorebooks,
@@ -640,13 +716,16 @@ export const useChatEngine = (sessionId: string | null) => {
         worldInfoPlacement, updateWorldInfoPlacement,
         variables, setVariables,
         extensionSettings, updateExtensionSettings,
-        logs, logSystemMessage, clearSystemLogs,
+        logs, logSystemMessage, clearSystemLogs, clearLogs, // NEW: Export clearLogs
         card, longTermSummaries,
         executeSlashCommands, visualState,
         quickReplies, setQuickReplies,
         scriptButtons, handleScriptButtonClick, // NEW EXPORTS
         isInputLocked,
         preset,
-        changePreset
+        changePreset,
+        updateVisualState, // EXPORT NEW FUNCTION
+        saveSession, // Added to fix ChatTester.tsx error
+        isAutoLooping, setIsAutoLooping // NEW EXPORTS for Auto Loop
     };
 };

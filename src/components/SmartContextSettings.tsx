@@ -89,13 +89,23 @@ export const SmartContextSettings: React.FC<SmartContextSettingsProps> = ({ pres
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-6">
                     <SliderInput
-                        label="Độ sâu Cửa sổ Nhớ (Context Depth)"
+                        label="Ngưỡng Kích Hoạt Tóm Tắt (Context Depth)"
                         value={preset.context_depth || 20}
                         onChange={(v) => handleUpdate('context_depth', v)}
                         min={4}
                         max={100}
                         step={2}
-                        tooltipText="Số lượng tin nhắn gần nhất được giữ lại nguyên văn trong ngữ cảnh (Trí nhớ ngắn hạn) trước khi bị đẩy vào tóm tắt (Trí nhớ dài hạn). Giá trị cao hơn giúp AI nhớ chi tiết tốt hơn nhưng tốn nhiều token hơn."
+                        tooltipText="Khi số lượng tin nhắn chưa tóm tắt đạt đến ngưỡng này, hệ thống sẽ kích hoạt tóm tắt. (Ví dụ: 20 tin nhắn)."
+                    />
+
+                    <SliderInput
+                        label="Kích Thước Gói Tóm Tắt (Chunk Size)"
+                        value={preset.summarization_chunk_size || 10}
+                        onChange={(v) => handleUpdate('summarization_chunk_size', v)}
+                        min={1}
+                        max={preset.context_depth || 20}
+                        step={1}
+                        tooltipText="Số lượng tin nhắn CŨ NHẤT sẽ được cắt ra để tóm tắt mỗi lần kích hoạt. (Ví dụ: Cắt 10 tin cũ nhất, giữ lại 10 tin mới nhất làm ngữ cảnh)."
                     />
 
                     <SelectInput 

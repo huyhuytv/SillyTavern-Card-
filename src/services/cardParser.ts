@@ -202,10 +202,13 @@ export const parseCharacterFile = async (file: File): Promise<ParseResult> => {
   let rawCardData: any;
   let avatarUrl: string | null = null;
 
-  if (file.type === 'application/json' || file.name.endsWith('.json')) {
+  // Use case-insensitive extension check and prioritize extension over MIME type
+  const fileName = file.name.toLowerCase();
+
+  if (fileName.endsWith('.json')) {
     const text = await file.text();
     rawCardData = JSON.parse(text);
-  } else if (file.type === 'image/png' || file.name.endsWith('.png')) {
+  } else if (fileName.endsWith('.png')) {
       const buffer = await file.arrayBuffer();
       const jsonData = await extractPngData(buffer);
       rawCardData = JSON.parse(jsonData);

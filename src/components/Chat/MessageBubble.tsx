@@ -3,7 +3,10 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import type { ChatMessage } from '../../types';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { useUserPersona } from '../../contexts/UserPersonaContext'; // Import context
+import { useUserPersona } from '../../contexts/UserPersonaContext';
+import { usePreset } from '../../contexts/PresetContext'; // Import Preset Context
+import { useToast } from '../ToastSystem';
+import { useTTS } from '../../contexts/TTSContext'; // NEW Import
 
 export interface MessageMenuAction {
     label: string;
@@ -134,9 +137,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     isImmersive 
 }) => {
     const { activePersona } = useUserPersona();
+    const { activePresetName, presets } = usePreset();
+    const { showToast } = useToast();
     const isUser = message.role === 'user';
     const isSystem = message.role === 'system';
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    
+    // TTS Context Usage
+    const { playImmediately, currentPlayingId, isLoading } = useTTS();
+    const isPlayingThis = currentPlayingId === message.id;
+
+    // Get Active Preset settings for TTS
+    const activePreset = presets.find(p => p.name === activePresetName);
+    const ttsEnabled = activePreset?.tts_enabled === true;
+    const ttsVoice = activePreset?.tts_voice || 'Kore';
+    const ttsProvider = activePreset?.tts_provider || 'gemini';
+    const ttsNativeVoice = activePreset?.tts_native_voice || '';
+    const ttsRate = activePreset?.tts_rate ?? 1;
+    const ttsPitch = activePreset?.tts_pitch ?? 1;
 
     const { mainHtml, thinkingContent } = useMemo(() => {
         if (isUser || !message.content) {
@@ -152,7 +170,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         let extractedThinking = null;
 
         // Extract <thinking> block using regex
-        // Matches <thinking> ... </thinking> across multiple lines, case insensitive
         const thinkingMatch = contentToRender.match(/<thinking>([\s\S]*?)<\/thinking>/i);
         
         if (thinkingMatch) {
@@ -178,6 +195,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             textarea.focus();
         }
     }, [isEditing, editingContent]);
+
+    const handlePlayTTS = async () => {
+        if (!message.content) return;
+        
+        try {
+            const voice = ttsProvider === 'native' ? ttsNativeVoice : ttsVoice;
+            playImmediately(message.content, voice, message.id, {
+                provider: ttsProvider,
+                rate: ttsRate,
+                pitch: ttsPitch
+            });
+        } catch (e) {
+            showToast(`TTS Error: ${e instanceof Error ? e.message : String(e)}`, 'error');
+        }
+    };
 
     if (isEditing) {
         return (
@@ -231,7 +263,33 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     )}
                 </div>
             )}
-            <div className={`rounded-lg px-4 py-2 max-w-lg shadow-sm ${isUser ? 'bg-sky-600 text-white rounded-br-none' : 'bg-slate-700/90 backdrop-blur-md text-slate-200 rounded-bl-none'}`}>
+            <div className={`rounded-lg px-4 py-2 max-w-lg shadow-sm relative ${isUser ? 'bg-sky-600 text-white rounded-br-none' : 'bg-slate-700/90 backdrop-blur-md text-slate-200 rounded-bl-none'}`}>
+                {/* TTS Button */}
+                {!isUser && ttsEnabled && (
+                    <div className="absolute -top-3 -right-2 flex items-center gap-1">
+                        
+                        <button 
+                            onClick={handlePlayTTS} 
+                            disabled={isPlayingThis}
+                            className={`p-1.5 rounded-full shadow-sm border transition-colors ${
+                                isPlayingThis ? 'bg-sky-500 text-white border-sky-400 animate-bounce' : 
+                                'bg-slate-800 text-slate-400 border-slate-600 hover:text-sky-400 hover:border-sky-500'
+                            }`}
+                            title={isPlayingThis ? "Đang đọc..." : "Đọc tin nhắn (TTS)"}
+                        >
+                            {isPlayingThis ? (
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                </svg>
+                            ) : (
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                </svg>
+                            )}
+                        </button>
+                    </div>
+                )}
+
                 {isUser ? (
                      <p className="whitespace-pre-wrap">{message.content}</p>
                 ) : (

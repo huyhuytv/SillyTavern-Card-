@@ -1,13 +1,13 @@
 
-
 import React, { useState } from 'react';
 import { UserPersonaManager } from './UserPersonaManager';
 import { ApiSettings } from './ApiSettings';
 import { SmartScanSettings } from './SmartScanSettings';
-import { SmartContextSettings } from './SmartContextSettings'; // Import mới
+import { SmartContextSettings } from './SmartContextSettings'; 
+import { TtsSettings } from './TtsSettings'; // New Import
 import { usePreset } from '../contexts/PresetContext';
 
-type ActiveSubTab = 'persona' | 'api' | 'smartscan' | 'context';
+type ActiveSubTab = 'persona' | 'api' | 'smartscan' | 'context' | 'tts';
 
 const SubTabButton: React.FC<{
   tabId: ActiveSubTab;
@@ -44,6 +44,7 @@ export const SettingsTab: React.FC = () => {
                  <div className="p-1 bg-slate-800 rounded-lg flex space-x-1 border border-slate-700 flex-wrap justify-center gap-y-2">
                     <SubTabButton tabId="persona" currentTab={activeSubTab} onClick={setActiveSubTab}>Hồ sơ Người dùng</SubTabButton>
                     <SubTabButton tabId="api" currentTab={activeSubTab} onClick={setActiveSubTab}>Thiết lập API</SubTabButton>
+                    <SubTabButton tabId="tts" currentTab={activeSubTab} onClick={setActiveSubTab}>Giọng nói (TTS)</SubTabButton>
                     <SubTabButton tabId="context" currentTab={activeSubTab} onClick={setActiveSubTab}>Ngữ cảnh & Bộ nhớ</SubTabButton>
                     <SubTabButton tabId="smartscan" currentTab={activeSubTab} onClick={setActiveSubTab}>Quét Thông Minh</SubTabButton>
                  </div>
@@ -58,6 +59,16 @@ export const SettingsTab: React.FC = () => {
             >
                 {activeSubTab === 'persona' && <UserPersonaManager />}
                 {activeSubTab === 'api' && <ApiSettings />}
+                {activeSubTab === 'tts' && (
+                    activePreset ? (
+                        <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-2xl mx-auto">
+                            <h3 className="text-xl font-bold text-sky-400 mb-4">Cấu hình Text-to-Speech (Preset: {activePreset.name})</h3>
+                            <TtsSettings preset={activePreset} onUpdate={updateActivePreset} />
+                        </div>
+                    ) : (
+                         <div className="text-center text-slate-500 p-8">Vui lòng chọn một Preset đang hoạt động để cấu hình tính năng này.</div>
+                    )
+                )}
                 {activeSubTab === 'smartscan' && (
                     activePreset ? (
                         <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-2xl mx-auto">

@@ -3,6 +3,7 @@ const ACTIVE_MODEL_KEY = 'sillyTavernStudio_activeModel';
 const API_SETTINGS_KEY = 'sillyTavernStudio_apiSettings';
 const API_KEY_INDEX_KEY = 'sillyTavernStudio_apiKeyIndex';
 const OPENROUTER_API_KEY_KEY = 'sillyTavernStudio_openRouterApiKey';
+const PROXY_URL_KEY = 'sillyTavernStudio_proxyUrl';
 
 export const MODEL_OPTIONS = [
     { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro Preview' },
@@ -13,6 +14,7 @@ export const MODEL_OPTIONS = [
 ];
 
 const DEFAULT_MODEL_ID = 'gemini-3-pro-preview';
+const DEFAULT_PROXY_URL = 'http://127.0.0.1:8889';
 
 interface ApiSettings {
     useDefault: boolean;
@@ -112,4 +114,22 @@ export const getOpenRouterApiKey = (): string => {
  */
 export const saveOpenRouterApiKey = (key: string): void => {
     localStorage.setItem(OPENROUTER_API_KEY_KEY, key.trim());
+};
+
+/**
+ * Lấy URL Reverse Proxy từ localStorage.
+ * @returns {string} URL của proxy.
+ */
+export const getProxyUrl = (): string => {
+    return localStorage.getItem(PROXY_URL_KEY) || DEFAULT_PROXY_URL;
+};
+
+/**
+ * Lưu URL Reverse Proxy vào localStorage.
+ * @param {string} url URL để lưu.
+ */
+export const saveProxyUrl = (url: string): void => {
+    // Đảm bảo không có dấu / ở cuối để chuẩn hóa
+    const cleanUrl = url.trim().replace(/\/$/, '');
+    localStorage.setItem(PROXY_URL_KEY, cleanUrl);
 };

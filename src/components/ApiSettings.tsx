@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { getActiveModel, setActiveModel, MODEL_OPTIONS, getApiSettings, saveApiSettings, getOpenRouterApiKey, saveOpenRouterApiKey } from '../services/settingsService';
+import { getActiveModel, setActiveModel, MODEL_OPTIONS, getApiSettings, saveApiSettings, getOpenRouterApiKey, saveOpenRouterApiKey, getProxyUrl, saveProxyUrl } from '../services/settingsService';
 import { validateOpenRouterKey } from '../services/geminiService';
 import { Loader } from './Loader';
 
@@ -33,11 +34,17 @@ export const ApiSettings: React.FC = () => {
     const [useDefaultKey, setUseDefaultKey] = useState(true);
     const [geminiApiKeys, setGeminiApiKeys] = useState('');
     const [openRouterApiKey, setOpenRouterApiKey] = useState('');
+    const [proxyUrl, setProxyUrl] = useState('');
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
 
     const [isValidating, setIsValidating] = useState(false);
     const [validationStatus, setValidationStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [validationError, setValidationError] = useState('');
+    
+    // Proxy Ping State
+    const [isPingingProxy, setIsPingingProxy] = useState(false);
+    const [proxyPingStatus, setProxyPingStatus] = useState<'idle' | 'success' | 'error'>('idle');
+    const [proxyErrorMessage, setProxyErrorMessage] = useState('');
 
     useEffect(() => {
         const settings = getApiSettings();
@@ -45,6 +52,7 @@ export const ApiSettings: React.FC = () => {
         setUseDefaultKey(settings.useDefault);
         setGeminiApiKeys(settings.keys.join('\n'));
         setOpenRouterApiKey(getOpenRouterApiKey());
+        setProxyUrl(getProxyUrl());
     }, []);
 
     const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -58,6 +66,7 @@ export const ApiSettings: React.FC = () => {
             const keys = geminiApiKeys.split('\n').map(k => k.trim()).filter(Boolean);
             saveApiSettings({ useDefault: useDefaultKey, keys });
             saveOpenRouterApiKey(openRouterApiKey);
+            saveProxyUrl(proxyUrl);
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus('idle'), 2000);
         } catch (e) {
@@ -79,6 +88,49 @@ export const ApiSettings: React.FC = () => {
             setValidationError(error instanceof Error ? error.message : 'Lỗi không xác định');
         } finally {
             setIsValidating(false);
+        }
+    };
+
+    const handlePingProxy = async () => {
+        if (!proxyUrl) return;
+        setIsPingingProxy(true);
+        setProxyPingStatus('idle');
+        setProxyErrorMessage('');
+        
+        try {
+            const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); 
+
+            // CHIẾN THUẬT MỚI: Dùng 'no-cors'.
+            // Điều này cho phép gửi request đi ngay cả khi server không có header CORS chuẩn.
+            // Nếu server đang chạy, promise sẽ được resolve (dù status là 0/opaque).
+            // Nếu server tắt hoặc sai port, promise sẽ reject (Failed to fetch).
+            await fetch(`${cleanUrl}/v1/models`, { 
+                method: 'GET',
+                mode: 'no-cors', // Bỏ qua kiểm tra bảo mật trình duyệt để Ping
+                signal: controller.signal,
+            });
+            
+            clearTimeout(timeoutId);
+
+            // Nếu code chạy đến đây mà không bị nhảy vào catch -> Kết nối thành công!
+            setProxyPingStatus('success');
+
+        } catch (error: any) {
+            console.error("Ping Error:", error);
+            clearTimeout(0); 
+            
+            if (error.name === 'AbortError') {
+                setProxyErrorMessage("Timeout: Server phản hồi quá chậm.");
+            } else if (error.message.includes('Failed to fetch')) {
+                setProxyErrorMessage("Không thể kết nối. Server chưa chạy hoặc sai Port.");
+            } else {
+                setProxyErrorMessage(error.message || "Lỗi không xác định");
+            }
+            setProxyPingStatus('error');
+        } finally {
+            setIsPingingProxy(false);
         }
     };
 
@@ -137,6 +189,60 @@ export const ApiSettings: React.FC = () => {
                         </p>
                     </div>
                 </div>
+            </div>
+
+            <div className="border-t border-slate-700"></div>
+            
+            {/* Reverse Proxy Section */}
+            <div>
+                 <h3 className="text-xl font-bold text-sky-400 mb-6">Reverse Proxy (Kingfall Mode)</h3>
+                 <div className="space-y-6">
+                    <div>
+                        <label htmlFor="proxy-url" className="block text-sm font-medium text-slate-300 mb-1">
+                            Địa chỉ Proxy Server (Localhost)
+                        </label>
+                        <div className="flex items-center gap-2">
+                            <input
+                                id="proxy-url"
+                                type="text"
+                                value={proxyUrl}
+                                onChange={e => {
+                                    setProxyUrl(e.target.value);
+                                    setProxyPingStatus('idle');
+                                    setProxyErrorMessage('');
+                                }}
+                                className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 font-mono text-sm"
+                                placeholder="http://127.0.0.1:8889"
+                            />
+                            <button
+                                onClick={handlePingProxy}
+                                disabled={isPingingProxy || !proxyUrl}
+                                className="flex-shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
+                            >
+                                {isPingingProxy ? <Loader message="" /> : 'Ping'}
+                            </button>
+                             {proxyPingStatus === 'success' && (
+                                <div className="flex items-center gap-1 text-green-400">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    <span className="text-sm font-medium">Kết nối tốt</span>
+                                </div>
+                            )}
+                            {proxyPingStatus === 'error' && (
+                                <div className="flex items-center gap-1 text-red-400">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    <span className="text-sm font-medium">Lỗi</span>
+                                </div>
+                            )}
+                        </div>
+                        {proxyErrorMessage && (
+                            <p className="text-xs text-red-400 mt-2">{proxyErrorMessage}</p>
+                        )}
+                         <p className="text-xs text-slate-500 mt-2">
+                           Nhập địa chỉ của server trung gian (ví dụ: dark-server.js). Chế độ này KHÔNG yêu cầu API Key. <br/>
+                           Để sử dụng, hãy chọn "Reverse Proxy" trong phần Preset.
+                        </p>
+                    </div>
+                 </div>
             </div>
 
             <div className="border-t border-slate-700"></div>

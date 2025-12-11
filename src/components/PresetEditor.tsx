@@ -1,3 +1,4 @@
+
 import React, { useCallback, useState, useEffect, useMemo, useRef, useId } from 'react';
 import type { SillyTavernPreset } from '../types';
 import { Tooltip } from './Tooltip';
@@ -33,7 +34,7 @@ const CopyButton: React.FC<{ textToCopy: string; onClick: (e: React.MouseEvent<H
 };
 
 // Reusable Input Components
-const LabeledInput: React.FC<{ label: string; value: string | number; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; type?: string; tooltipText?: string }> = ({ label, value, onChange, type = 'text', tooltipText }) => {
+const LabeledInput: React.FC<{ label: string; value: string | number; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; type?: string; tooltipText?: string; placeholder?: string }> = ({ label, value, onChange, type = 'text', tooltipText, placeholder }) => {
     const [copied, setCopied] = useState(false);
     const handleCopy = (e: React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
@@ -55,6 +56,7 @@ const LabeledInput: React.FC<{ label: string; value: string | number; onChange: 
                 type={type}
                 value={value}
                 onChange={onChange}
+                placeholder={placeholder}
                 className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 pr-10 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition"
             />
             <CopyButton textToCopy={String(value)} onClick={handleCopy} copied={copied} />
@@ -318,7 +320,7 @@ const SearchableSelect: React.FC<{
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (!isOpen) {
-            if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 setIsOpen(true);
             }
@@ -522,12 +524,13 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) 
                     onChange={(e) => handleChange('chat_completion_source', e.target.value)}
                     options={[
                         { value: 'custom', label: 'Custom / Gemini' },
-                        { value: 'openrouter', label: 'OpenRouter' }
+                        { value: 'openrouter', label: 'OpenRouter' },
+                        { value: 'proxy', label: 'Reverse Proxy (Kingfall)' }
                     ]}
-                    tooltipText="Chọn dịch vụ AI sẽ xử lý các yêu cầu trò chuyện. 'Custom/Gemini' sử dụng cài đặt Gemini. 'OpenRouter' cho phép bạn sử dụng bất kỳ mô hình nào được OpenRouter hỗ trợ."
+                    tooltipText="Chọn dịch vụ AI sẽ xử lý các yêu cầu trò chuyện. 'Custom/Gemini' sử dụng cài đặt Gemini. 'OpenRouter' cho phép bạn sử dụng bất kỳ mô hình nào được OpenRouter hỗ trợ. 'Reverse Proxy' cho phép kết nối với Server trung gian không cần API Key."
                 />
 
-                {preset.chat_completion_source === 'openrouter' ? (
+                {preset.chat_completion_source === 'openrouter' && (
                     <>
                         <div className="md:col-span-2">
                              {isFetchingModels ? (
@@ -587,10 +590,21 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) 
                              </div>
                         )}
                     </>
-                ) : (
-                    <>
-                        {/* These inputs are now hidden when OpenRouter is selected */}
-                    </>
+                )}
+                
+                {preset.chat_completion_source === 'proxy' && (
+                    <div className="md:col-span-2 space-y-4">
+                        <LabeledInput 
+                            label="Model ID (Tên mã model)" 
+                            value={preset.proxy_model || ''} 
+                            onChange={(e) => handleChange('proxy_model', e.target.value)} 
+                            placeholder="ví dụ: gemini-3-pro-preview"
+                            tooltipText="Nhập chính xác ID của Model mà bạn muốn sử dụng trên Google. Ví dụ: 'gemini-3-pro-preview', 'gemini-2.5-pro'. Hệ thống Proxy sẽ chuyển tiếp tên này."
+                        />
+                        <div className="bg-blue-900/20 border border-blue-500/30 p-3 rounded-lg text-xs text-blue-200">
+                            <strong>Lưu ý:</strong> Khi dùng Proxy, các tham số Nhiệt độ (Temp), Top P, Top K bên dưới sẽ được gửi kèm đến Proxy để 'cook' mô hình theo ý bạn.
+                        </div>
+                    </div>
                 )}
             </Section>
 
@@ -612,6 +626,18 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) 
                 <SliderInput label="Top P" value={preset.top_p ?? 0.9} onChange={v => handleChange('top_p', v)} min={0} max={1} step={0.01} tooltipText="Còn gọi là 'Nucleus Sampling'. AI chỉ xem xét một nhóm các từ có xác suất cao nhất cộng lại bằng giá trị này (ví dụ: 0.9 = 90%). Giúp cân bằng giữa sáng tạo và mạch lạc." />
                 <SliderInput label="Top K" value={preset.top_k ?? 0} onChange={v => handleChange('top_k', v)} min={0} max={100} step={1} tooltipText="Giới hạn AI chỉ chọn từ trong số 'K' từ có xác suất cao nhất. Giá trị 0 sẽ tắt chức năng này. Thường thì không cần dùng cả Top P và Top K cùng lúc." />
                 <SliderInput label="Typical P" value={preset.typical_p ?? 1} onChange={v => handleChange('typical_p', v)} min={0} max={1} step={0.01} tooltipText="Một kỹ thuật sampling nhằm loại bỏ các token có xác suất thấp 'không điển hình'. Giá trị 1 vô hiệu hóa nó. Giá trị thấp hơn làm cho đầu ra ít ngạc nhiên hơn." />
+            </Section>
+
+            <Section title="Thử nghiệm (Experimental)" description="Các tính năng mới của API Gemini. Sử dụng cẩn thận.">
+                <SliderInput
+                    label="Thinking Budget (Token Suy Nghĩ)"
+                    value={preset.thinking_budget ?? 0}
+                    onChange={v => handleChange('thinking_budget', v)}
+                    min={0}
+                    max={32768}
+                    step={1024}
+                    tooltipText="TÍNH NĂNG THỬ NGHIỆM: Đặt ngân sách token cho quá trình suy luận nội tại của mô hình. Đặt về 0 để tắt. Lưu ý: Không phải mọi mô hình đều hỗ trợ tính năng này (có thể gây lỗi API). Gemini 2.5 Pro hỗ trợ tối đa 32768."
+                />
             </Section>
 
             <Section title="Sampling Nâng cao" description="Các tham số sampling ít phổ biến hơn để tinh chỉnh thêm.">
@@ -698,7 +724,7 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) 
                     <ToggleInput label="Wrap in Quotes" checked={preset.wrap_in_quotes ?? false} onChange={v => handleChange('wrap_in_quotes', v)} tooltipText="Tự động bao bọc phản hồi của AI trong dấu ngoặc kép." />
                     <ToggleInput label="Max Context Unlocked" checked={preset.max_context_unlocked ?? false} onChange={v => handleChange('max_context_unlocked', v)} tooltipText="Bỏ qua các giới hạn ngữ cảnh được đề xuất của mô hình và cố gắng gửi càng nhiều càng tốt." />
                     
-                    {preset.chat_completion_source !== 'openrouter' && (
+                    {preset.chat_completion_source !== 'openrouter' && preset.chat_completion_source !== 'proxy' && (
                         <>
                             <ToggleInput label="Stream OpenAI" checked={preset.stream_openai ?? true} onChange={v => handleChange('stream_openai', v)} tooltipText="Bật chế độ streaming cho các phản hồi từ API OpenAI." />
                             <ToggleInput label="Claude Use SysPrompt" checked={preset.claude_use_sysprompt ?? true} onChange={v => handleChange('claude_use_sysprompt', v)} tooltipText="Sử dụng trường lời nhắc hệ thống gốc khi tương tác với các mô hình Claude." />

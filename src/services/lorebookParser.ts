@@ -39,11 +39,12 @@ export const normalizeCharacterBook = (book: any): CharacterBook => {
         // 1. Sanitize Keys
         if (!Array.isArray(newEntry.keys)) {
             // Check legacy 'key' field
-            if (newEntry.key) {
-                newEntry.keys = Array.isArray(newEntry.key) 
-                    ? newEntry.key 
-                    : [String(newEntry.key)];
-                delete (newEntry as any).key;
+            const entryAny = newEntry as any;
+            if (entryAny.key) {
+                newEntry.keys = Array.isArray(entryAny.key) 
+                    ? entryAny.key 
+                    : [String(entryAny.key)];
+                delete entryAny.key;
             } else {
                 newEntry.keys = [];
             }

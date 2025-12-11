@@ -1,254 +1,17 @@
 
-export interface SystemLogEntry {
-    level: 'log' | 'warn' | 'error' | 'script-success' | 'script-error' | 'interaction' | 'api' | 'api-error' | 'state';
-    source: 'system' | 'iframe' | 'regex' | 'variable' | 'api' | 'console' | 'network';
-    message: string;
-    timestamp: number;
-    stack?: string;
-    payload?: string;
-}
-
-export interface QuickReply {
-    label: string;
-    message?: string; // Nội dung gửi đi (mặc định giống label)
-    action?: string; // Lệnh đặc biệt nếu có
-}
-
-// NEW: Definition for dynamic script buttons from TavernHelper/Cards
-export interface ScriptButton {
-    id: string; // Usually generated based on label or index
-    label: string;
-    scriptId: string; // ID of the script requesting the button
-    eventId: string; // The event to emit when clicked
-}
-
-export interface UserPersona {
-  id: string;
-  name: string;
-  description: string;
-}
-
-// ... (Keep existing interfaces: OpenRouterModel, ChatMessage, VisualState, WorldInfoRuntimeStats) ...
-
-export interface OpenRouterModel {
-  id: string;
-  name: string;
-  description: string;
-  context_length: number;
-  pricing: {
-    prompt: string;
-    completion: string;
-    [key: string]: any;
-  };
-  [key: string]: any;
-}
-
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'model' | 'system';
-  content: string;
-  interactiveHtml?: string;
-  originalRawContent?: string; // Store original pre-regex content for interactive cards
-  contextState?: Record<string, any>; // NEW: Snapshot of variables at this point in time
-}
-
-export interface VisualState {
-    backgroundImage?: string;
-    musicUrl?: string;
-    ambientSoundUrl?: string;
-    globalClass?: string; // For applying CSS filters/effects to the whole screen
-}
-
-export interface WorldInfoRuntimeStats {
-    stickyDuration: number; // Số lượt còn lại mục này sẽ "dính" trong context
-    cooldownDuration: number; // Số lượt còn lại mục này bị chặn kích hoạt
-}
-
-export interface ChatSession {
-  sessionId: string; // Unique ID, usually characterFileName
-  characterFileName: string;
-  presetName: string;
-  userPersonaId: string | null;
-  chatHistory: ChatMessage[];
-  longTermSummaries: string[];
-  authorNote?: string; // Ghi chú của tác giả, bền bỉ cho phiên này
-  worldInfoState?: Record<string, boolean>; // Trạng thái bật/tắt thủ công (Manual override)
-  worldInfoPinned?: Record<string, boolean>; // Trạng thái ghim thủ công (Manual pin)
-  worldInfoPlacement?: Record<string, 'before' | 'after' | undefined>; // Vị trí thủ công (Manual placement override)
-  worldInfoRuntime?: Record<string, WorldInfoRuntimeStats>; // Trạng thái động (Runtime state: sticky/cooldown)
-  variables?: Record<string, any>; // Trạng thái biến động
-  extensionSettings?: Record<string, any>; // NEW: Lưu trữ dữ liệu mở rộng của thẻ (inventory, status, achievements...)
-  lastStateBlock?: string; // NEW: Last captured HTML state block for persistence
-  visualState?: VisualState; // NEW: Persist visual/audio state
-  lastMessageSnippet: string;
-  lastUpdated: number; // timestamp
-  initialDiagnosticLog?: string;
-}
-
-// NEW: Adventure Snapshot Structure for Import/Export
-export interface AdventureSnapshot {
-    version: number;
-    timestamp: number;
-    meta: {
-        exportedBy: string;
-        description: string;
-    };
-    data: {
-        character: CharacterCard;
-        characterFileName: string;
-        preset: SillyTavernPreset;
-        session: ChatSession;
-        userPersona: UserPersona | null;
-    };
-}
-
-export interface WorldInfoEntry {
-  id?: number; // V3 chara_card_v3 character_book
-  keys: string[];
-  secondary_keys?: string[]; // V3
-  comment?: string; // V3
-  content: string;
-  constant?: boolean; // V3 - Luôn bật
-  selective?: boolean; // V3
-  insertion_order?: number; // V3
-  enabled?: boolean; // V3, default is true
-  position?: string; // V3
-  use_regex?: boolean; // V3
-  extensions?: Record<string, any>; // V3
-  
-  // Advanced Logic Properties
-  sticky?: number; // Giữ trong context X lượt sau khi kích hoạt
-  cooldown?: number; // Không kích hoạt lại trong Y lượt sau khi hết hiệu lực
-  
-  // Các trường dành riêng cho Studio để quản lý nâng cao
-  source_lorebook?: string; // Theo dõi nguồn gốc của các mục được nhập
-  uid?: string; // ID duy nhất cho việc render ổn định và quản lý trạng thái
-  
-  [key: string]: any; // Allows other fields
-}
-
-export interface CharacterBook {
-  entries: WorldInfoEntry[];
-  name?: string; // V3
-  [key: string]: any; // Allows other book-level properties
-}
-
-// A standalone, manageable Lorebook file
-export interface Lorebook {
-  name: string; // Filename acts as the unique ID
-  book: CharacterBook;
-}
-
-export interface RegexScript {
-  id: string;
-  scriptName: string;
-  findRegex: string;
-  replaceString: string;
-  trimStrings?: string[];
-  placement?: number[];
-  disabled: boolean;
-  markdownOnly?: boolean;
-  promptOnly?: boolean;
-  runOnEdit?: boolean;
-  substituteRegex?: number;
-  minDepth?: number | null;
-  maxDepth?: number | null;
-  [key: string]: any; // for other potential fields
-}
-
-export interface TavernHelperScriptButton {
-    name: string;
-    visible: boolean;
-}
-
-export interface TavernHelperScript {
-    type: 'script';
-    value: {
-        id: string;
-        name: string;
-        content: string;
-        info?: string;
-        buttons?: TavernHelperScriptButton[];
-        data?: Record<string, any>;
-        enabled: boolean;
-    };
-}
-
-
-export interface CharacterCard {
-  spec?: string;
-  spec_version?: string;
-  name: string;
-  description: string;
-  personality?: string; // V3 has it in data
-  first_mes: string;
-  mes_example: string;
-  scenario?: string;
-  creator_notes?: string;
-  system_prompt?: string;
-  post_history_instructions?: string;
-  tags?: string[];
-  creator?: string;
-  character_version?: string;
-  alternate_greetings?: string[];
-  group_only_greetings?: string[]; // New field
-  
-  // V3 specific fields that might appear at root or in data
-  creatorcomment?: string;
-  char_persona?: string;
-  
-  // World info can be char_book (older/internal) or character_book (V3)
-  char_book?: CharacterBook;
-  character_book?: CharacterBook; 
-
-  attached_lorebooks?: string[]; // Array of attached lorebook names (IDs)
-  
-  extensions?: {
-    talkativeness?: string;
-    fav?: boolean;
-    world?: string;
-    depth_prompt?: {
-      prompt: string;
-      depth: number;
-      role: string;
-    };
-    TavernHelper_scripts?: TavernHelperScript[];
-    regex_scripts?: RegexScript[];
-    tavern_helper?: any[]; // For the other format found in the card
-    [key: string]: any;
-  };
-  
-  // Allow any other string properties
-  [key: string]: any;
-}
-
-export type EnhancementField = 'description' | 'personality' | 'first_mes' | 'mes_example';
-
-// Added for Preset Editor
 export interface PromptEntry {
-  name: string;
-  content: string;
-  role: string;
-  identifier: string;
-  enabled?: boolean;
-  system_prompt?: boolean;
-  include_title?: boolean;
-  [key: string]: any;
-}
-
-// NEW: Structured Prompt Section for Debugging
-export interface PromptSection {
-    id: string;
     name: string;
     content: string;
-    role?: string; // 'system', 'user', 'model'
-    subSections?: string[]; // NEW: For exploding large sections (like World Info) into lists in Debug UI
+    enabled: boolean;
+    role?: 'system' | 'user' | 'assistant';
+    identifier?: string;
+    include_title?: boolean;
 }
 
 export interface SillyTavernPreset {
   name: string;
   comment: string;
-  // Core Sampling - relaxed to allow strings for macros
+  // Core Sampling
   temp: number | string;
   top_p: number | string;
   top_k: number | string;
@@ -291,10 +54,11 @@ export interface SillyTavernPreset {
   
   // Newly added comprehensive fields
   // API and Model Settings
-  chat_completion_source?: string;
+  chat_completion_source?: string; // 'custom', 'openrouter', 'proxy'
   openai_model?: string;
   claude_model?: string;
   openrouter_model?: string;
+  proxy_model?: string; // NEW: Custom model ID for proxy (e.g. gemini-exp-1121)
   ai21_model?: string;
   mistralai_model?: string;
   cohere_model?: string;
@@ -311,6 +75,17 @@ export interface SillyTavernPreset {
   google_model?: string;
   vertexai_model?: string;
   
+  // Thinking Config (Experimental)
+  thinking_budget?: number; // Ngân sách token cho suy nghĩ
+
+  // TTS Settings (NEW)
+  tts_enabled?: boolean;
+  tts_provider?: 'gemini' | 'native'; // Provider
+  tts_voice?: string; // 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'
+  tts_native_voice?: string; // URI of native voice
+  tts_rate?: number; // 0.1 to 10
+  tts_pitch?: number; // 0 to 2
+
   // OpenRouter Settings
   openrouter_use_fallback?: boolean;
   openrouter_group_models?: boolean;
@@ -329,6 +104,7 @@ export interface SillyTavernPreset {
 
   // NEW: Smart Context & Memory Settings
   context_depth?: number; // Độ sâu cửa sổ nhớ (số tin nhắn trước khi tóm tắt)
+  summarization_chunk_size?: number; // Kích thước gói tóm tắt (số tin nhắn bị nén mỗi lần)
   context_mode?: 'standard' | 'ai_only'; // Chế độ ghép nối lịch sử
   summarization_prompt?: string; // Lời nhắc tóm tắt tùy chỉnh
 
@@ -372,15 +148,226 @@ export interface SillyTavernPreset {
   enable_web_search?: boolean;
   request_images?: boolean;
 
+  extensions?: Record<string, any>;
+
   // Allow any other properties that might exist in various presets
   [key: string]: any;
 }
 
-// Updated structure for logging
+export interface PromptSection {
+    id: string;
+    name: string;
+    content: string;
+    role: string;
+    subSections?: string[];
+}
+
+export interface SystemLogEntry {
+    level: 'error' | 'warn' | 'script-error' | 'api-error' | 'script-success' | 'interaction' | 'api' | 'state' | 'log';
+    source: 'iframe' | 'regex' | 'variable' | 'system' | 'console' | 'network' | 'script';
+    message: string;
+    timestamp: number;
+    stack?: string;
+    payload?: any;
+}
+
 export interface ChatTurnLog {
     timestamp: number;
-    prompt: PromptSection[]; // Changed from string[] to PromptSection[]
+    prompt: PromptSection[]; 
     response: string;
     summary?: string;
     systemLogs: SystemLogEntry[];
+}
+
+export interface WorldInfoEntry {
+  id?: number;
+  keys: string[];
+  secondary_keys?: string[];
+  comment?: string;
+  content: string;
+  constant?: boolean;
+  selective?: boolean;
+  insertion_order?: number;
+  enabled?: boolean;
+  position?: 'before_char' | 'after_char' | string;
+  use_regex?: boolean;
+  extensions?: Record<string, any>;
+  sticky?: number;
+  cooldown?: number;
+  uid?: string;
+  __deleted?: boolean;
+  source_lorebook?: string;
+}
+
+export interface CharacterBook {
+  entries: WorldInfoEntry[];
+  name?: string;
+}
+
+export interface RegexScript {
+  id: string;
+  scriptName: string;
+  findRegex: string;
+  replaceString: string;
+  trimStrings?: string[];
+  placement?: number[];
+  disabled: boolean;
+  markdownOnly?: boolean;
+  promptOnly?: boolean;
+  runOnEdit?: boolean;
+  substituteRegex?: number;
+  minDepth?: number | null;
+  maxDepth?: number | null;
+}
+
+export interface TavernHelperScript {
+    type: 'script';
+    value: {
+        id: string;
+        name: string;
+        content: string;
+        info?: string;
+        buttons?: {name: string, visible: boolean}[];
+        data?: Record<string, any>;
+        enabled: boolean;
+    };
+}
+
+export interface CharacterCard {
+  name: string;
+  description: string;
+  personality?: string;
+  first_mes: string;
+  mes_example: string;
+  scenario?: string;
+  system_prompt?: string;
+  post_history_instructions?: string;
+  tags?: string[];
+  creator?: string;
+  character_version?: string;
+  alternate_greetings?: string[];
+  char_book?: CharacterBook;
+  extensions?: {
+    TavernHelper_scripts?: TavernHelperScript[];
+    regex_scripts?: RegexScript[];
+    [key: string]: any;
+  };
+  creator_notes?: string;
+  creatorcomment?: string;
+  char_persona?: string;
+  group_only_greetings?: string[];
+  attached_lorebooks?: string[];
+  data?: any;
+  spec?: string;
+  spec_version?: string;
+  create_date?: string;
+  avatar?: string;
+  [key: string]: any;
+}
+
+export type EnhancementField = 'description' | 'personality' | 'first_mes' | 'mes_example';
+
+export interface Lorebook {
+    name: string;
+    book: CharacterBook;
+}
+
+export interface ChatMessage {
+    id: string;
+    role: 'user' | 'model' | 'system';
+    content: string;
+    interactiveHtml?: string;
+    originalRawContent?: string;
+    contextState?: Record<string, any>;
+    timestamp?: number;
+}
+
+export interface OpenRouterModel {
+    id: string;
+    name: string;
+    description?: string;
+    pricing: {
+        prompt: string;
+        completion: string;
+    };
+    context_length: number;
+    architecture?: {
+        modality?: string;
+        tokenizer?: string;
+        instruct_type?: string;
+    };
+    top_provider?: {
+        max_completion_tokens?: number;
+        is_moderated?: boolean;
+    };
+    per_request_limits?: any;
+}
+
+export interface QuickReply {
+    label: string;
+    message?: string;
+    action?: string;
+}
+
+export interface ScriptButton {
+    id: string;
+    label: string;
+    scriptId: string;
+    eventId: string;
+}
+
+export interface WorldInfoRuntimeStats {
+    stickyDuration: number;
+    cooldownDuration: number;
+}
+
+export interface VisualState {
+    backgroundImage?: string;
+    musicUrl?: string;
+    ambientSoundUrl?: string;
+    globalClass?: string;
+}
+
+export interface UserPersona {
+    id: string;
+    name: string;
+    description: string;
+    avatar?: string;
+}
+
+export interface ChatSession {
+    sessionId: string;
+    characterFileName: string;
+    presetName: string;
+    userPersonaId: string | null;
+    chatHistory: ChatMessage[];
+    longTermSummaries: string[];
+    variables: Record<string, any>;
+    extensionSettings?: Record<string, any>;
+    worldInfoState?: Record<string, boolean>;
+    worldInfoPinned?: Record<string, boolean>;
+    worldInfoPlacement?: Record<string, 'before' | 'after' | undefined>;
+    worldInfoRuntime?: Record<string, WorldInfoRuntimeStats>;
+    visualState?: VisualState;
+    authorNote?: string;
+    lastStateBlock?: string;
+    lastMessageSnippet?: string;
+    lastUpdated: number;
+    initialDiagnosticLog?: string;
+}
+
+export interface AdventureSnapshot {
+    version: number;
+    timestamp: number;
+    meta: {
+        exportedBy: string;
+        description: string;
+    };
+    data: {
+        character: CharacterCard;
+        characterFileName: string;
+        preset: SillyTavernPreset;
+        session: ChatSession;
+        userPersona: UserPersona | null;
+    };
 }

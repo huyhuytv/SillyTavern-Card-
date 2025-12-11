@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { CharacterTab } from './components/CharacterTab';
@@ -15,6 +14,7 @@ import { ToastProvider } from './components/ToastSystem';
 import { PopupProvider } from './components/PopupSystem';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { initGlobalErrorHandling } from './services/globalErrorLogger';
+import { TTSProvider } from './contexts/TTSContext';
 
 // Initialize global error listeners immediately
 initGlobalErrorHandling();
@@ -102,17 +102,19 @@ export default function App() {
   return (
     <GlobalErrorBoundary>
       <ToastProvider>
-        <PopupProvider>
-          <LorebookProvider>
-            <CharacterProvider>
-              <PresetProvider>
-                <UserPersonaProvider>
-                  <AppContent />
-                </UserPersonaProvider>
-              </PresetProvider>
-            </CharacterProvider>
-          </LorebookProvider>
-        </PopupProvider>
+        <TTSProvider>
+          <PopupProvider>
+            <LorebookProvider>
+              <CharacterProvider>
+                <PresetProvider>
+                  <UserPersonaProvider>
+                    <AppContent />
+                  </UserPersonaProvider>
+                </PresetProvider>
+              </CharacterProvider>
+            </LorebookProvider>
+          </PopupProvider>
+        </TTSProvider>
       </ToastProvider>
     </GlobalErrorBoundary>
   );

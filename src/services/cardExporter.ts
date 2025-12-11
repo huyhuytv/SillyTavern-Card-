@@ -99,11 +99,11 @@ export const buildExportObject = (card: CharacterCard): any => {
             if (cardKey === 'char_book' && cardToProcess.char_book) {
                 data.character_book = cardToProcess.char_book;
             } else {
-                 data[cardKey] = cardToProcess[cardKey as keyof typeof cardToProcess];
+                 data[cardKey] = cardToProcess[cardKey];
             }
 
             if (duplicatedFields.includes(key)) {
-                root[key] = cardToProcess[cardKey as keyof typeof cardToProcess];
+                root[key] = cardToProcess[cardKey];
             }
         }
         root.data = data;

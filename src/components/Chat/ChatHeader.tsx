@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { VisualState } from '../../types';
 import { usePreset } from '../../contexts/PresetContext';
+import { useTTS } from '../../contexts/TTSContext';
 
 interface ChatHeaderProps {
     characterName: string;
@@ -17,6 +18,8 @@ interface ChatHeaderProps {
     // NEW: Live Tuning Props
     activePresetName?: string;
     onPresetChange?: (presetName: string) => void;
+    onToggleAssistant?: () => void; // NEW: Assistant Toggle
+    isAssistantOpen?: boolean; // NEW: Assistant State
 }
 
 const VisualSettingsModal: React.FC<{
@@ -163,13 +166,70 @@ const PresetTuningModal: React.FC<{
     );
 };
 
+// --- TTS Controls Component ---
+const TTSControls: React.FC = () => {
+    const { isPlaying, isPaused, autoPlayEnabled, toggleAutoPlay, togglePause, skip, isLoading } = useTTS();
+    const { activePresetName, presets } = usePreset();
+    const activePreset = presets.find(p => p.name === activePresetName);
+    const ttsEnabled = activePreset?.tts_enabled === true;
+
+    if (!ttsEnabled) return null;
+
+    return (
+        <div className="flex items-center bg-slate-800/80 rounded-full px-2 py-1 gap-1 border border-slate-600/50 mr-2">
+            {/* Auto Play Toggle */}
+            <button
+                onClick={toggleAutoPlay}
+                className={`p-1.5 rounded-full transition-colors ${autoPlayEnabled ? 'text-sky-400 bg-sky-900/20' : 'text-slate-500 hover:text-slate-300'}`}
+                title={autoPlayEnabled ? "Tự động đọc: BẬT" : "Tự động đọc: TẮT"}
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                </svg>
+            </button>
+
+            {/* Play/Pause/Loading/Skip Group (Visible when active or paused) */}
+            {(isPlaying || isPaused || isLoading) && (
+                <>
+                    <div className="w-px h-3 bg-slate-600 mx-1"></div>
+                    
+                    {/* Pause/Resume */}
+                    <button
+                        onClick={togglePause}
+                        className={`p-1.5 rounded-full text-slate-200 hover:text-white hover:bg-slate-700 transition-colors ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title={isPaused ? "Tiếp tục" : "Tạm dừng"}
+                        disabled={isLoading}
+                    >
+                        {isLoading ? (
+                             <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        ) : isPaused ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+                        ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                        )}
+                    </button>
+
+                    {/* Skip */}
+                    <button
+                        onClick={skip}
+                        className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                        title="Bỏ qua (Next)"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M4.555 5.168A1 1 0 003 6v8a1 1 0 001.555.832L9 12.323V14a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 009 6v1.677L4.555 5.168z" /></svg>
+                    </button>
+                </>
+            )}
+        </div>
+    );
+};
+
 export const ChatHeader: React.FC<ChatHeaderProps> = ({ 
     characterName, onBack, isImmersive, setIsImmersive, visualState, onVisualUpdate, 
     onToggleHUD, isHUDOpen, onToggleStatusHUD, isStatusHUDOpen,
-    activePresetName, onPresetChange
+    activePresetName, onPresetChange, onToggleAssistant, isAssistantOpen
 }) => {
     const [isVisualMenuOpen, setIsVisualMenuOpen] = useState(false);
-    const [isTuningMenuOpen, setIsTuningMenuOpen] = useState(false); // NEW
+    const [isTuningMenuOpen, setIsTuningMenuOpen] = useState(false);
     const triggerRef = useRef<HTMLButtonElement>(null);
 
     const handleCloseMenu = () => {
@@ -198,6 +258,23 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                     {!isImmersive && activePresetName && <span className="text-xs text-indigo-400 truncate hidden sm:block">Preset: {activePresetName}</span>}
                 </div>
             </div>
+
+            {/* TTS Controls (NEW) */}
+            <TTSControls />
+
+            {/* Assistant Toggle (NEW) */}
+            {onToggleAssistant && (
+                <button
+                    onClick={onToggleAssistant}
+                    className={`p-2 rounded-full transition-colors ${isAssistantOpen ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                    title="Bật/Tắt Trợ lý Co-pilot"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
+                        <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767c.28.149.599.233.938.233h2l3 3v-3h2a2 2 0 002-2V9a2 2 0 00-2-2h-1z" />
+                    </svg>
+                </button>
+            )}
 
             {/* Status Panel Toggle */}
             {onToggleStatusHUD && (

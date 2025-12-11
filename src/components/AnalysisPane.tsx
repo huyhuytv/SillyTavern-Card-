@@ -104,7 +104,8 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObject, null, 2));
         const downloadAnchorNode = document.createElement('a');
         downloadAnchorNode.setAttribute("href", dataStr);
-        const exportFileName = fileName.replace(/\.(png|json)$/i, '_edited.json');
+        // Clean export name: Replace extension with .json, no _edited suffix
+        const exportFileName = fileName.replace(/\.(png|json)$/i, '') + '.json';
         downloadAnchorNode.setAttribute("download", exportFileName);
         document.body.appendChild(downloadAnchorNode);
         downloadAnchorNode.click();
@@ -117,7 +118,8 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
         setError('');
         try {
             const cardToExport = assembleCompleteCard(card);
-            const exportFileName = fileName.replace(/\.(png|json)$/i, '_edited.png');
+            // Clean export name: Replace extension with .png, no _edited suffix
+            const exportFileName = fileName.replace(/\.(png|json)$/i, '') + '.png';
             await exportToPng(cardToExport, avatarFile, exportFileName);
         } catch (e) {
             setError(e instanceof Error ? `Lỗi xuất PNG: ${e.message}` : 'Đã xảy ra lỗi không xác định khi xuất tệp PNG.');

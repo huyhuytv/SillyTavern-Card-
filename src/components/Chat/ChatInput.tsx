@@ -1,5 +1,5 @@
 
-import React, { useState, FormEvent, KeyboardEvent, useEffect } from 'react';
+import React, { useState, FormEvent, KeyboardEvent, useEffect, useRef } from 'react';
 import type { QuickReply, ScriptButton } from '../../types';
 import { Loader } from '../Loader';
 import { truncateText } from '../../utils';
@@ -18,8 +18,26 @@ interface ChatInputProps {
     onUpdateAuthorNote: (note: string) => void;
     isSummarizing: boolean;
     isInputLocked?: boolean; 
-    children?: React.ReactNode; 
+    children?: React.ReactNode;
+    
+    // NEW: Auto Loop Props
+    isAutoLooping?: boolean;
+    onToggleAutoLoop?: () => void;
 }
+
+const AVAILABLE_COMMANDS = [
+    { cmd: '/help', desc: 'Xem danh sách lệnh hỗ trợ' },
+    { cmd: '/bg', desc: 'Đổi hình nền (URL hoặc "off")', example: '/bg https://...' },
+    { cmd: '/music', desc: 'Phát nhạc nền (URL hoặc "off")', example: '/music https://...' },
+    { cmd: '/sound', desc: 'Phát âm thanh FX (URL)', example: '/sound https://...' },
+    { cmd: '/sys', desc: 'Gửi tin nhắn hệ thống (ẩn danh)', example: '/sys Trời bắt đầu mưa...' },
+    { cmd: '/echo', desc: 'Hiển thị thông báo (Toast)', example: '/echo Đã lưu game!' },
+    { cmd: '/set', desc: 'Đặt biến số (Variable)', example: '/set hp=100' },
+    { cmd: '/get', desc: 'Xem giá trị biến số', example: '/get hp' },
+    { cmd: '/input', desc: 'Đặt nội dung khung chat', example: '/input Xin chào' },
+    { cmd: '/lock', desc: 'Khóa khung chat' },
+    { cmd: '/unlock', desc: 'Mở khóa khung chat' },
+];
 
 export const ChatInput: React.FC<ChatInputProps> = ({
     onSend,
@@ -33,9 +51,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     onUpdateAuthorNote,
     isSummarizing,
     isInputLocked = false,
-    children
+    children,
+    isAutoLooping = false,
+    onToggleAutoLoop
 }) => {
     const [userInput, setUserInput] = useState('');
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [filteredCommands, setFilteredCommands] = useState(AVAILABLE_COMMANDS);
+    const [selectedCmdIndex, setSelectedCmdIndex] = useState(0);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     // Listen for input updates from interactive cards (e.g. Landlord Sim buttons)
     useEffect(() => {
@@ -49,15 +73,59 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         return () => window.removeEventListener('sillytavern:set-input', handleSetInput);
     }, []);
 
+    // Command Autocomplete Logic
+    useEffect(() => {
+        if (userInput.startsWith('/')) {
+            const searchTerm = userInput.toLowerCase();
+            const matches = AVAILABLE_COMMANDS.filter(c => c.cmd.startsWith(searchTerm));
+            setFilteredCommands(matches);
+            setShowSuggestions(matches.length > 0 && userInput !== matches[0].cmd); // Hide if exact match
+            setSelectedCmdIndex(0);
+        } else {
+            setShowSuggestions(false);
+        }
+    }, [userInput]);
+
+    const handleSelectCommand = (cmd: string, example?: string) => {
+        setUserInput(example ? `${cmd} ` : cmd); // Auto add space if it needs args usually
+        setShowSuggestions(false);
+        inputRef.current?.focus();
+    };
+
     const handleSubmit = (e: FormEvent) => {
         e.preventDefault();
+        // If looping is on, hitting enter might stop it? Or just send message.
+        // Usually if looping is ON, sending a message breaks the loop in some systems, but here we just let it be concurrent or user can stop it.
+        if (isAutoLooping && onToggleAutoLoop) {
+             onToggleAutoLoop(); // Stop loop on manual intervention? Or just let user stop it via button. 
+             // Let's make "Send" button turn into "Stop" if looping is on.
+             return;
+        }
+
         if (!userInput.trim() || isLoading || isInputLocked) return;
         onSend(userInput);
         setUserInput('');
+        setShowSuggestions(false);
     };
 
     const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-        // Optional: You can add Shift+Enter logic here if using a textarea later
+        if (showSuggestions) {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setSelectedCmdIndex(prev => (prev > 0 ? prev - 1 : filteredCommands.length - 1));
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setSelectedCmdIndex(prev => (prev < filteredCommands.length - 1 ? prev + 1 : 0));
+            } else if (e.key === 'Tab' || e.key === 'Enter') {
+                e.preventDefault();
+                const selected = filteredCommands[selectedCmdIndex];
+                if (selected) {
+                    handleSelectCommand(selected.cmd);
+                }
+            } else if (e.key === 'Escape') {
+                setShowSuggestions(false);
+            }
+        }
     };
 
     const inputAreaClasses = isImmersive
@@ -70,6 +138,31 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
     return (
         <div className={inputAreaClasses}>
+            {/* Command Suggestions Popup */}
+            {showSuggestions && !isInputLocked && (
+                <div className={`absolute bottom-full left-4 md:left-6 mb-2 w-72 bg-slate-900 border border-slate-600 rounded-lg shadow-2xl overflow-hidden z-50 animate-fade-in-up flex flex-col`}>
+                    <div className="bg-slate-800 px-3 py-2 text-xs font-bold text-slate-400 border-b border-slate-700 uppercase tracking-wider">
+                        Gợi ý lệnh hệ thống
+                    </div>
+                    <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                        {filteredCommands.map((item, idx) => (
+                            <button
+                                key={item.cmd}
+                                onClick={() => handleSelectCommand(item.cmd)}
+                                className={`w-full text-left px-4 py-2 text-sm flex flex-col transition-colors ${
+                                    idx === selectedCmdIndex 
+                                    ? 'bg-sky-600 text-white' 
+                                    : 'text-slate-200 hover:bg-slate-800'
+                                }`}
+                            >
+                                <span className="font-mono font-bold">{item.cmd}</span>
+                                <span className={`text-xs ${idx === selectedCmdIndex ? 'text-sky-200' : 'text-slate-500'}`}>{item.desc}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {/* SCRIPT BUTTONS BAR (NEW) */}
             {!isInputLocked && scriptButtons.length > 0 && onScriptButtonClick && (
                 <div className="px-4 pt-2 pb-1 flex flex-wrap gap-2 justify-center md:justify-start animate-fade-in-up border-b border-white/5">
@@ -139,18 +232,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 <form onSubmit={handleSubmit} className="flex gap-4">
                     <div className="relative flex-grow">
                         <input
+                            ref={inputRef}
                             type="text"
                             value={userInput}
                             onChange={(e) => setUserInput(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            placeholder={isInputLocked ? "Đang chờ kịch bản..." : (isImmersive ? "Nhập tin nhắn..." : "Nhập tin nhắn... (Sử dụng /help để xem các lệnh)")}
+                            placeholder={isInputLocked ? "Đang chờ kịch bản..." : (isAutoLooping ? "Đang tự động chạy..." : (isImmersive ? "Nhập tin nhắn..." : "Nhập tin nhắn... (Gõ / để xem lệnh)"))}
                             className={`w-full rounded-lg p-3 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition disabled:opacity-50 ${
                                 isImmersive 
                                 ? 'bg-slate-800/70 border-slate-600/50 backdrop-blur-md placeholder-slate-400' 
                                 : 'bg-slate-700 border border-slate-600'
                             } ${isInputLocked ? 'cursor-not-allowed opacity-60' : ''}`}
-                            disabled={isLoading || isInputLocked}
+                            disabled={isLoading || isInputLocked || isAutoLooping}
                             aria-label="Chat input"
+                            autoComplete="off"
                         />
                         {isInputLocked && (
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
@@ -159,19 +254,53 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                                 </svg>
                             </div>
                         )}
+                        {/* Auto Loop Indicator in Input (Optional) */}
+                        {isAutoLooping && (
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-sky-400 animate-pulse">
+                                <span className="text-xl">♾️</span>
+                            </div>
+                        )}
                     </div>
+                    
+                    {/* Send / Stop Button */}
                     <button
                         type="submit"
-                        disabled={isLoading || isInputLocked || !userInput.trim()}
-                        className={`text-white font-bold py-2 px-5 rounded-lg transition-colors duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed flex-shrink-0 ${
+                        disabled={!isAutoLooping && (isLoading || isInputLocked || !userInput.trim())}
+                        className={`text-white font-bold py-2 px-5 rounded-lg transition-colors duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed flex-shrink-0 flex items-center justify-center gap-2 min-w-[80px] ${
                             isImmersive 
                             ? 'bg-sky-600/80 hover:bg-sky-600 backdrop-blur-md' 
-                            : 'bg-sky-600 hover:bg-sky-700'
+                            : isAutoLooping ? 'bg-red-600 hover:bg-red-700' : 'bg-sky-600 hover:bg-sky-700'
                         }`}
-                        aria-label="Gửi tin nhắn"
+                        aria-label={isAutoLooping ? "Dừng tự động" : "Gửi tin nhắn"}
+                        title={isAutoLooping ? "Dừng chạy tự động" : "Gửi tin nhắn"}
                     >
-                        Gửi
+                        {isAutoLooping ? (
+                            <>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+                                </svg>
+                                <span>Dừng</span>
+                            </>
+                        ) : (
+                            <span>Gửi</span>
+                        )}
                     </button>
+
+                    {/* Auto Loop Toggle Button (Small) */}
+                    {onToggleAutoLoop && !isInputLocked && (
+                        <button
+                            type="button"
+                            onClick={onToggleAutoLoop}
+                            className={`py-2 px-3 rounded-lg transition-all duration-300 border flex items-center justify-center ${
+                                isAutoLooping 
+                                ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.3)]' 
+                                : 'bg-slate-700 border-slate-600 text-slate-400 hover:bg-slate-600 hover:text-white'
+                            }`}
+                            title={isAutoLooping ? "Tắt chế độ tự động (Auto-Play)" : "Bật chế độ tự động (Auto-Play)"}
+                        >
+                            <span className={`text-xl leading-none ${isAutoLooping ? 'animate-pulse' : ''}`}>♾️</span>
+                        </button>
+                    )}
                 </form>
                 
                 {/* Footer Content (DebugPanel, etc.) */}

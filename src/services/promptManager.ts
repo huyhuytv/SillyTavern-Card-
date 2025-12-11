@@ -397,10 +397,19 @@ export async function constructChatPrompt(
 
     // Tầng 1: Ngữ cảnh Tức thời (Lượt gần nhất)
     const lastTurnList: string[] = [];
-    if (currentPageMessages.length > 0) {
+    
+    // FIXED: Use full 'history' (everything before current input) instead of 'currentPageMessages'
+    // to ensure {{last_turn}} always has content even if context window is full/summarized.
+    const contextForLastTurn = history; 
+
+    if (contextForLastTurn.length > 0) {
         // Simplified logic to get the most recent exchange
-        const lastUserIndex = currentPageMessages.map(m => m.role).lastIndexOf('user');
-        const relevantMsgs = lastUserIndex !== -1 ? currentPageMessages.slice(lastUserIndex) : currentPageMessages.slice(-2);
+        const lastUserIndex = contextForLastTurn.map(m => m.role).lastIndexOf('user');
+        // If user found, take from there. If not, just take last 2.
+        const relevantMsgs = lastUserIndex !== -1 
+            ? contextForLastTurn.slice(lastUserIndex) 
+            : contextForLastTurn.slice(-2);
+        
         relevantMsgs.forEach(msg => {
              const rawText = getMessageContent(msg);
              // We also clean the last turn to ensure immediate context isn't polluted

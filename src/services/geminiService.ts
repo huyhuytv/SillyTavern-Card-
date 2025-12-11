@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import type { CharacterCard, EnhancementField, SillyTavernPreset, Lorebook, ChatMessage, OpenRouterModel } from '../types';
-import { getActiveModel, getApiKey, getOpenRouterApiKey } from './settingsService';
+import { getActiveModel, getApiKey, getOpenRouterApiKey, getProxyUrl } from './settingsService';
 import { cleanMessageContent } from './promptManager';
 import defaultPreset from '../data/defaultPreset';
 
@@ -176,6 +176,68 @@ export async function sendChatRequest(
 ): Promise<{ response: GenerateContentResponse }> {
     
     // --- API Dispatch ---
+    
+    // 1. REVERSE PROXY (Kingfall Mode)
+    if (settings.chat_completion_source === 'proxy') {
+        const proxyUrl = getProxyUrl();
+        const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
+        const endpoint = `${cleanUrl}/v1/chat/completions`; // Standard OpenAI format
+        const model = settings.proxy_model || 'gemini-3-pro-preview'; // Default fallback to Gemini 3.0 Pro Preview
+
+        try {
+            // Construct OpenAI-compatible body
+            const payload = {
+                model: model,
+                messages: [
+                    // SillyTavern usually packs everything into a single prompt for completion models,
+                    // or a series of messages for Chat models.
+                    // Given our `fullPrompt` is already a constructed string, we treat it as a single User message.
+                    { role: 'user', content: fullPrompt }
+                ],
+                temperature: Number(settings.temp) || 1,
+                top_p: Number(settings.top_p) || 1,
+                top_k: Number(settings.top_k) || 40,
+                max_tokens: Number(settings.max_tokens) || 4096,
+                stop: settings.stopping_strings && settings.stopping_strings.length > 0 ? settings.stopping_strings : undefined,
+                stream: false
+            };
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    // MẸO QUAN TRỌNG: Sử dụng 'text/plain' thay vì 'application/json'
+                    // Điều này ngăn trình duyệt gửi yêu cầu OPTIONS (Preflight) trước khi gửi POST.
+                    // Các server proxy local (như Kingfall/Dark-Server) thường không xử lý tốt CORS OPTIONS và trả về 404, gây lỗi "Failed to fetch".
+                    // Tuy nhiên, body vẫn là chuỗi JSON, và server thường vẫn parse được nó.
+                    'Content-Type': 'text/plain',
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                // Thử đọc lỗi dưới dạng text
+                const errorText = await response.text();
+                // Nếu server trả về 404 cho POST, có nghĩa là endpoint sai
+                if (response.status === 404) {
+                     throw new Error(`Server không tìm thấy endpoint (${endpoint}). Vui lòng kiểm tra lại URL.`);
+                }
+                throw new Error(`Proxy Error (${response.status}): ${errorText}`);
+            }
+
+            const data = await response.json();
+            const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
+            
+            return { response: { text } as GenerateContentResponse };
+
+        } catch (error) {
+            console.error("Proxy API error:", error);
+            // Cung cấp thông báo lỗi chi tiết hơn cho người dùng
+            const msg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Lỗi kết nối Proxy: ${msg}`);
+        }
+    }
+
+    // 2. OPEN ROUTER
     if (settings.chat_completion_source === 'openrouter' && settings.openrouter_model) {
         // --- OpenRouter Logic ---
         const openRouterKey = getOpenRouterApiKey();
@@ -220,26 +282,71 @@ export async function sendChatRequest(
             throw new Error(`Không thể tạo phản hồi từ OpenRouter. ${error instanceof Error ? error.message : 'Vui lòng kiểm tra API key và kết nối mạng.'}`);
         }
 
-    } else {
+    } 
+    
+    // 3. DEFAULT (GEMINI DIRECT)
+    else {
         // --- Default Gemini Logic ---
         const ai = getGeminiClient();
         try {
+            // Xây dựng config với thinkingConfig (nếu có)
+            const config: any = {
+                safetySettings,
+                temperature: settings.temp,
+                topP: settings.top_p,
+                topK: settings.top_k,
+                maxOutputTokens: settings.max_tokens,
+                stopSequences: settings.stopping_strings,
+            };
+
+            // Inject Thinking Config nếu budget > 0
+            if (settings.thinking_budget && Number(settings.thinking_budget) > 0) {
+                config.thinkingConfig = { thinkingBudget: Number(settings.thinking_budget) };
+            }
+
             const response = await ai.models.generateContent({
                 model: getActiveModel(),
                 contents: fullPrompt,
-                config: {
-                    safetySettings,
-                    temperature: settings.temp,
-                    topP: settings.top_p,
-                    topK: settings.top_k,
-                    maxOutputTokens: settings.max_tokens,
-                    stopSequences: settings.stopping_strings,
-                },
+                config: config,
             });
+
+            // --- NATIVE THINKING EXTRACTION ---
+            // Nếu có suy nghĩ native, nó sẽ nằm trong 'parts' nhưng thường bị ẩn khỏi '.text' mặc định.
+            // Ta cần lấy nó ra và bọc vào <thinking> để UI hiển thị.
+            if (settings.thinking_budget && Number(settings.thinking_budget) > 0) {
+                const parts = response.candidates?.[0]?.content?.parts || [];
+                let thoughtContent = '';
+                let finalContent = '';
+
+                for (const part of parts) {
+                    // Kiểm tra thuộc tính 'thought' (casting as any vì type SDK có thể chưa cập nhật kịp)
+                    if ((part as any).thought) {
+                        thoughtContent += part.text;
+                    } else {
+                        // Nội dung chính
+                        finalContent += part.text;
+                    }
+                }
+
+                // Nếu tìm thấy suy nghĩ native
+                if (thoughtContent) {
+                    // Ghép lại: Suy nghĩ (trong thẻ) + Nội dung chính
+                    // Việc bọc trong <thinking> sẽ kích hoạt UI "Xem quy trình suy nghĩ" ở MessageBubble.tsx
+                    const combinedText = `<thinking>${thoughtContent}</thinking>\n${finalContent}`;
+                    
+                    // Ghi đè getter .text của response object để trả về chuỗi đã ghép
+                    Object.defineProperty(response, 'text', {
+                        get: () => combinedText,
+                        configurable: true
+                    });
+                }
+            }
+            // ----------------------------------
+
             return { response };
         } catch (error) {
             console.error("Gemini API error in sendChatRequest:", error);
-            throw new Error("Không thể tạo phản hồi từ Gemini. Vui lòng kiểm tra API key và kết nối mạng.");
+            throw new Error("Không thể tạo phản hồi từ Gemini. Vui lòng kiểm tra API key, mạng, hoặc sự hỗ trợ model (Thinking Config).");
         }
     }
 }

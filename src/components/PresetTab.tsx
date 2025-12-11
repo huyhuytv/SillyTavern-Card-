@@ -1,5 +1,4 @@
 
-
 import React, { useRef } from 'react';
 import { PresetEditor } from './PresetEditor';
 import { PromptEditor } from './PromptEditor';
@@ -58,7 +57,8 @@ export const PresetTab: React.FC = () => {
 
     const handleExport = () => {
         if (!activePreset) return;
-        const exportFileName = `${activePreset.name.replace(/\.json$/i, '')}_edited.json`;
+        // Clean export name: Remove extension and add .json back, no _edited
+        const exportFileName = `${activePreset.name.replace(/\.json$/i, '')}.json`;
         exportPresetToJson(activePreset, exportFileName);
     }
 
