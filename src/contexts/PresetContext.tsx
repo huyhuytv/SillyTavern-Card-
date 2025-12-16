@@ -4,6 +4,7 @@ import type { SillyTavernPreset } from '../types';
 import { parsePresetFile } from '../services/presetParser';
 import * as dbService from '../services/dbService';
 import defaultPreset from '../data/defaultPreset';
+import geminiCoT12kPreset from '../data/geminiCoT12kPreset';
 
 // 1. Define State and Action Types
 interface PresetState {
@@ -75,17 +76,31 @@ export const PresetProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
         let presets = await dbService.getAllPresets();
-        if (presets.length === 0) {
+        let needsSave = false;
+
+        // Ensure defaultPreset exists
+        if (!presets.some(p => p.name === defaultPreset.name)) {
           await dbService.savePreset(defaultPreset);
-          presets.push(defaultPreset);
-        } else if (!presets.some(p => p.name === defaultPreset.name)) {
-          // If default is missing for some reason, add it.
           presets.unshift(defaultPreset);
-          await dbService.savePreset(defaultPreset);
+          needsSave = true;
         }
+
+        // Ensure geminiCoT12kPreset exists
+        if (!presets.some(p => p.name === geminiCoT12kPreset.name)) {
+          await dbService.savePreset(geminiCoT12kPreset);
+          presets.push(geminiCoT12kPreset);
+          needsSave = true;
+        }
+
+        // Re-fetch to guarantee sort order and consistency if we modified DB
+        if (needsSave) {
+            presets = await dbService.getAllPresets();
+        }
+
         dispatch({ type: 'SET_PRESETS', payload: presets });
+        
         if (!state.activePresetName) {
-            dispatch({ type: 'SET_ACTIVE_PRESET', payload: presets[0].name });
+            dispatch({ type: 'SET_ACTIVE_PRESET', payload: defaultPreset.name });
         }
       } catch (err) {
         dispatch({ type: 'SET_ERROR', payload: err instanceof Error ? err.message : 'Lỗi không xác định khi tải presets.' });
@@ -117,7 +132,7 @@ export const PresetProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [state.presets]);
 
   const deleteActivePreset = useCallback(async () => {
-    if (!state.activePresetName || state.activePresetName === defaultPreset.name) return;
+    if (!state.activePresetName || state.activePresetName === defaultPreset.name || state.activePresetName === geminiCoT12kPreset.name) return;
     try {
       await dbService.deletePreset(state.activePresetName);
       dispatch({ type: 'DELETE_PRESET', payload: state.activePresetName });
@@ -142,6 +157,18 @@ export const PresetProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const revertActivePreset = useCallback(async () => {
       if (!state.activePresetName) return;
       try {
+          // Check for built-in presets to revert to code-defined state
+          if (state.activePresetName === defaultPreset.name) {
+              await dbService.savePreset(defaultPreset);
+              dispatch({ type: 'UPDATE_PRESET', payload: defaultPreset });
+              return;
+          }
+          if (state.activePresetName === geminiCoT12kPreset.name) {
+              await dbService.savePreset(geminiCoT12kPreset);
+              dispatch({ type: 'UPDATE_PRESET', payload: geminiCoT12kPreset });
+              return;
+          }
+
           const allPresets = await dbService.getAllPresets();
           const originalPreset = allPresets.find(p => p.name === state.activePresetName);
           if (originalPreset) {

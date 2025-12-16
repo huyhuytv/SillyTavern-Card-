@@ -392,9 +392,7 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ card, onUpdate
       return;
     }
 
-    if (!window.confirm(`Thao tác này sẽ sao chép ${entryCount} mục từ "${selectedLorebook}" vào Sổ tay Nhân vật. Các mục này sẽ trở thành một phần của nhân vật và có thể được chỉnh sửa độc lập. Tiếp tục?`)) {
-      return;
-    }
+    // REMOVED CONFIRMATION DIALOG AS REQUESTED
 
     const newEntries = JSON.parse(JSON.stringify(sourceEntries)) as WorldInfoEntry[];
 

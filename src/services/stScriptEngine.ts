@@ -68,22 +68,9 @@ const parseArguments = (str: string): string[] => {
 const resolveMacros = (text: string, context: ScriptContext): string => {
     let processed = text;
 
-    // 1. Variable Macros: {{getvar::path}}
-    processed = processed.replace(/{{getvar::([^}]+)}}/gi, (_, path) => {
-        const val = get(context.variables, path);
-        return val !== undefined ? String(val) : '';
-    });
-
-    // 2. Identity
-    processed = processed.replace(/{{char}}/gi, context.characterName);
-    processed = processed.replace(/{{user}}/gi, context.userPersonaName);
+    // --- PRIORITY 1: RANDOM & ROLL (Must resolve BEFORE being set into variables) ---
     
-    // 3. Time
-    const now = new Date();
-    processed = processed.replace(/{{time}}/gi, now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    processed = processed.replace(/{{date}}/gi, now.toLocaleDateString());
-    
-    // 4. Randoms
+    // Random: {{random:a,b,c}}
     processed = processed.replace(/{{random:(.*?)}}/gi, (_, content) => {
         const args = content.split(',');
         if (args.length === 2 && !isNaN(Number(args[0])) && !isNaN(Number(args[1]))) {
@@ -96,6 +83,7 @@ const resolveMacros = (text: string, context: ScriptContext): string => {
         return '';
     });
     
+    // Pick: {{pick:a,b,c}}
     processed = processed.replace(/{{pick:(.*?)}}/gi, (_, content) => {
         const args = content.split(',').map((s: string) => s.trim());
         if (args.length > 0) {
@@ -104,8 +92,9 @@ const resolveMacros = (text: string, context: ScriptContext): string => {
         return '';
     });
 
-    processed = processed.replace(/{{dice:(\s*\d+)\s*d\s*(\d+)\s*([+-]\s*\d+)?\s*}}/gi, (_, countStr, sidesStr, modStr) => {
-        const count = parseInt(countStr, 10);
+    // Dice/Roll: {{dice:XdY+Z}} AND {{roll:XdY+Z}}
+    const rollHandler = (_: string, countStr: string, sidesStr: string, modStr: string) => {
+        const count = countStr ? parseInt(countStr, 10) : 1; // Default to 1 die if X is missing
         const sides = parseInt(sidesStr, 10);
         let total = 0;
         for (let i = 0; i < count; i++) {
@@ -116,9 +105,47 @@ const resolveMacros = (text: string, context: ScriptContext): string => {
             total += parseInt(cleanMod, 10);
         }
         return String(total);
+    };
+
+    processed = processed.replace(/{{dice:(\s*\d*)d(\d+)\s*([+-]\s*\d+)?\s*}}/gi, rollHandler);
+    processed = processed.replace(/{{roll:(\s*\d*)d(\d+)\s*([+-]\s*\d+)?\s*}}/gi, rollHandler); 
+
+    // --- PRIORITY 2: IDENTITY & TIME ---
+    processed = processed.replace(/{{char}}/gi, context.characterName);
+    processed = processed.replace(/{{user}}/gi, context.userPersonaName);
+    
+    const now = new Date();
+    processed = processed.replace(/{{time}}/gi, now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    processed = processed.replace(/{{date}}/gi, now.toLocaleDateString());
+
+    // --- PRIORITY 3: VARIABLE OPERATIONS (GET/SET) ---
+
+    // 1. Variable Macros: {{getvar::path}}
+    processed = processed.replace(/{{getvar::([^}]+)}}/gi, (_, path) => {
+        const val = get(context.variables, path);
+        return val !== undefined ? String(val) : '';
     });
 
-    // 5. Fallback: Simple {{key}} lookup
+    // 2. Global Variable Macros: {{getglobalvar::key}} & {{setglobalvar::key::value}}
+    processed = processed.replace(/{{getglobalvar::([^}]+)}}/gi, (_, key) => {
+        const val = get(context.variables, 'globals.' + key);
+        return val !== undefined ? String(val) : '';
+    });
+
+    processed = processed.replace(/{{setglobalvar::([^:]+)::(.*?)}}/gi, (_, key, val) => {
+        const newVars = applyVariableOperation(context.variables, 'set', 'globals.' + key, val);
+        context.setVariables(newVars);
+        return ''; 
+    });
+
+    // 3. Set Variable Generic: {{setvar::key::value}} (New support)
+    processed = processed.replace(/{{setvar::([^:]+)::(.*?)}}/gi, (_, key, val) => {
+        const newVars = applyVariableOperation(context.variables, 'set', key, val);
+        context.setVariables(newVars);
+        return ''; 
+    });
+
+    // 4. Fallback: Simple {{key}} lookup
     processed = processed.replace(/{{\s*([a-zA-Z0-9_.[\]]+)\s*}}/g, (match, key) => {
          if (key.includes(':')) return match;
          const val = get(context.variables, key);
@@ -203,6 +230,15 @@ const commands: Record<string, CommandHandler> = {
     'div': async (args, ctx) => {
         const newVars = applyVariableOperation(ctx.variables, 'div', args[0], args[1]);
         ctx.setVariables(newVars);
+    },
+    // Support globalvar command alias
+    'setglobalvar': async (args, ctx) => {
+        const key = 'globals.' + args[0];
+        const value = args[1];
+        if (key && value !== undefined) {
+            const newVars = applyVariableOperation(ctx.variables, 'set', key, value);
+            ctx.setVariables(newVars);
+        }
     },
     
     // --- ARRAY & STRING MANIPULATION (NEW) ---

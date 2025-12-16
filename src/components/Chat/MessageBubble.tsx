@@ -83,7 +83,7 @@ export const MessageMenu: React.FC<{
 };
 
 // New component to display hidden thoughts
-export const ThinkingReveal: React.FC<{ content: string }> = ({ content }) => {
+export const ThinkingReveal: React.FC<{ content: string; label?: string }> = ({ content, label = 'Quy trình suy nghĩ' }) => {
     const [isOpen, setIsOpen] = useState(false);
 
     return (
@@ -94,7 +94,7 @@ export const ThinkingReveal: React.FC<{ content: string }> = ({ content }) => {
                 aria-expanded={isOpen}
             >
                 <span className="text-lg" aria-hidden="true">🧠</span>
-                <span>{isOpen ? 'Ẩn quy trình suy nghĩ' : 'Xem quy trình suy nghĩ'}</span>
+                <span>{isOpen ? `Ẩn ${label}` : `Xem ${label}`}</span>
                 <svg 
                     xmlns="http://www.w3.org/2000/svg" 
                     className={`h-4 w-4 ml-auto transform transition-transform ${isOpen ? 'rotate-180' : ''}`} 
@@ -156,9 +156,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     const ttsRate = activePreset?.tts_rate ?? 1;
     const ttsPitch = activePreset?.tts_pitch ?? 1;
 
-    const { mainHtml, thinkingContent } = useMemo(() => {
+    const { mainHtml, thinkingBlocks } = useMemo(() => {
         if (isUser || !message.content) {
-            return { mainHtml: '', thinkingContent: null };
+            return { mainHtml: '', thinkingBlocks: [] };
         }
 
         // Replace display macros for the UI
@@ -167,24 +167,40 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             contentToRender = contentToRender.replace(/{{user}}/gi, activePersona.name);
         }
 
-        let extractedThinking = null;
+        const foundThinkingBlocks: { label: string; content: string }[] = [];
 
-        // Extract <thinking> block using regex
-        const thinkingMatch = contentToRender.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+        // Regex to capture various thinking tags including custom ones from CoT cards
+        // Captures: <thinking>, <thinking_requirements>, <step_outline>, <plan>
+        const thinkingRegex = /<(thinking|thinking_requirements|step_outline|plan)>([\s\S]*?)<\/\1>/gi;
         
-        if (thinkingMatch) {
-            extractedThinking = thinkingMatch[1].trim();
-            // Remove the thinking block from the content to be rendered as markdown
-            contentToRender = contentToRender.replace(thinkingMatch[0], '').trim();
+        let match;
+        // Reset lastIndex because we are running in a loop if we used 'exec' on a global regex variable, 
+        // but string.matchAll or loop replace is safer.
+        
+        // We use a loop to extract all blocks and remove them from main content
+        let extractedContent = contentToRender;
+        while ((match = thinkingRegex.exec(contentToRender)) !== null) {
+            const tagName = match[1];
+            const innerContent = match[2].trim();
+            
+            let label = 'Suy nghĩ';
+            if (tagName === 'thinking_requirements') label = 'Yêu cầu Suy nghĩ';
+            if (tagName === 'step_outline') label = 'Dàn ý Bước đi';
+            if (tagName === 'plan') label = 'Kế hoạch';
+
+            foundThinkingBlocks.push({ label, content: innerContent });
+            
+            // Remove from main content
+            extractedContent = extractedContent.replace(match[0], '');
         }
 
-        const rawHtml = marked.parse(contentToRender) as string;
+        const rawHtml = marked.parse(extractedContent.trim()) as string;
         const sanitized = DOMPurify.sanitize(rawHtml, { 
             ADD_TAGS: ['style', 'details', 'summary'],
             ADD_ATTR: ['style', 'class', 'open'] // Allow styling attributes for custom regex blocks like Night Sky
         });
         
-        return { mainHtml: sanitized, thinkingContent: extractedThinking };
+        return { mainHtml: sanitized, thinkingBlocks: foundThinkingBlocks };
     }, [isUser, message.content, activePersona]);
     
     useEffect(() => {
@@ -294,7 +310,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                      <p className="whitespace-pre-wrap">{message.content}</p>
                 ) : (
                     <>
-                        {thinkingContent && <ThinkingReveal content={thinkingContent} />}
+                        {thinkingBlocks.map((block, idx) => (
+                            <ThinkingReveal key={idx} content={block.content} label={block.label} />
+                        ))}
                         <div
                             className="markdown-content"
                             dangerouslySetInnerHTML={{ __html: mainHtml }}

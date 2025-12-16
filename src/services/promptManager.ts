@@ -1,6 +1,7 @@
+
 import type { CharacterCard, SillyTavernPreset, Lorebook, WorldInfoEntry, ChatMessage, UserPersona, PromptSection } from '../types';
 import ejs from 'ejs';
-import { get } from './variableEngine';
+import { get, applyVariableOperation } from './variableEngine';
 
 /**
  * Helper to filter active entries based on state and placement.
@@ -430,7 +431,8 @@ export async function constructChatPrompt(
     
     const resolvedSections: PromptSection[] = [];
     
-    const processSectionPromises = baseSections.map(async (section) => {
+    // Use SEQUENTIAL LOOP to ensure variable updates propagate correctly between prompts
+    for (const section of baseSections) {
         let content = section.content;
         
         // Inject Lists into subSections if macros present (for Debug Panel visualization)
@@ -448,7 +450,49 @@ export async function constructChatPrompt(
         if (content.includes('{{current_page_history}}')) addToSubSections(currentPageHistoryList);
         if (content.includes('{{last_turn}}')) addToSubSections(lastTurnList);
 
-        // Macro Replacement
+        // Macro Replacement - Order Matters: Randoms -> Vars SET -> Vars GET -> Text
+        
+        // 1. RANDOM/ROLL (Highest Priority for nested macros inside variables)
+        const rollHandler = (_: string, countStr: string, sidesStr: string, modStr: string) => {
+            const count = countStr ? parseInt(countStr, 10) : 1; 
+            const sides = parseInt(sidesStr, 10);
+            let total = 0;
+            for (let i = 0; i < count; i++) total += Math.floor(Math.random() * sides) + 1;
+            if (modStr) total += parseInt(modStr.replace(/\s/g, ''), 10);
+            return String(total);
+        };
+        content = content.replace(/{{dice:(\s*\d*)d(\d+)\s*([+-]\s*\d+)?\s*}}/gi, rollHandler)
+                         .replace(/{{roll:(\s*\d*)d(\d+)\s*([+-]\s*\d+)?\s*}}/gi, rollHandler)
+                         .replace(/{{random:(.*?)}}/gi, (_, c) => {
+                             const args = c.split(',');
+                             return args[Math.floor(Math.random() * args.length)].trim();
+                         });
+
+        // 2. VARIABLES SETTERS (CRITICAL: Prioritize SET before GET to propagate state)
+        // We update the local 'variables' reference so subsequent replacement logic sees the new value.
+        
+        content = content.replace(/{{setglobalvar::([^:]+)::(.*?)}}/gi, (_, key, val) => {
+            variables = applyVariableOperation(variables, 'set', 'globals.' + key, val);
+            return ''; 
+        });
+
+        content = content.replace(/{{setvar::([^:]+)::(.*?)}}/gi, (_, key, val) => {
+            variables = applyVariableOperation(variables, 'set', key, val);
+            return ''; 
+        });
+
+        // 3. VARIABLES GETTERS
+        content = content.replace(/{{getvar::([^}]+)}}/gi, (_, path) => {
+            const val = get(variables, path);
+            return val !== undefined ? String(val) : '';
+        });
+        
+        content = content.replace(/{{getglobalvar::([^}]+)}}/gi, (_, key) => {
+            const val = get(variables, 'globals.' + key);
+            return val !== undefined ? String(val) : '';
+        });
+
+        // 4. STANDARD REPLACEMENTS
         content = content
             .replace(/{{worldInfo_before}}/g, worldInfoBeforeString)
             .replace(/{{worldInfo_after}}/g, worldInfoAfterString)
@@ -480,14 +524,8 @@ export async function constructChatPrompt(
         content = await processEjsTemplate(content, variables, card, lorebooks);
         content = content.trim();
         
-        return { ...section, content, subSections };
-    });
-
-    const processedSections = await Promise.all(processSectionPromises);
-    
-    for (const section of processedSections) {
-        if (section.content) {
-            resolvedSections.push(section);
+        if (content) {
+            resolvedSections.push({ ...section, content, subSections });
         }
     }
 

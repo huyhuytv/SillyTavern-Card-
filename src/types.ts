@@ -6,6 +6,7 @@ export interface PromptEntry {
     role?: 'system' | 'user' | 'assistant';
     identifier?: string;
     include_title?: boolean;
+    order?: number;
 }
 
 export interface SillyTavernPreset {
