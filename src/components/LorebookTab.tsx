@@ -5,6 +5,7 @@ import { Loader } from './Loader';
 import { useLorebook } from '../contexts/LorebookContext';
 import { exportLorebookToJson } from '../services/lorebookExporter';
 import { CharacterBookFullScreenView } from './CharacterBookFullScreenView';
+import { ExportModal } from './ExportModal';
 
 // --- Card Component cho mỗi Lorebook ---
 const LorebookCard: React.FC<{
@@ -70,6 +71,7 @@ export const LorebookTab: React.FC = () => {
     } = useLorebook();
     
     const [editingLorebookName, setEditingLorebookName] = useState<string | null>(null);
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -94,9 +96,14 @@ export const LorebookTab: React.FC = () => {
         setEditingLorebookName(null);
     };
 
-    const handleExport = () => {
+    const handleExportClick = () => {
         if (!activeLorebook) return;
-        exportLorebookToJson(activeLorebook, activeLorebook.name);
+        setIsExportModalOpen(true);
+    };
+
+    const performExport = (filename: string) => {
+        if (!activeLorebook) return;
+        exportLorebookToJson(activeLorebook, filename);
     };
 
     const handleDelete = () => {
@@ -150,10 +157,19 @@ export const LorebookTab: React.FC = () => {
                     initialEntries={activeLorebook.book.entries || []}
                     onSave={handleSave}
                     onClose={() => setEditingLorebookName(null)}
-                    onExport={handleExport}
+                    onExport={handleExportClick}
                     onDelete={handleDelete}
                 />
             )}
+
+            <ExportModal 
+                isOpen={isExportModalOpen}
+                onClose={() => setIsExportModalOpen(false)}
+                onConfirm={performExport}
+                initialFileName={activeLorebook?.name || 'Lorebook'}
+                title="Xuất Sổ tay Thế giới"
+                fileExtension=".json"
+            />
         </div>
     );
 };

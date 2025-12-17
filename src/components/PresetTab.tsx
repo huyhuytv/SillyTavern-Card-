@@ -1,10 +1,11 @@
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { PresetEditor } from './PresetEditor';
 import { PromptEditor } from './PromptEditor';
 import { exportPresetToJson } from '../services/presetExporter';
 import { usePreset } from '../contexts/PresetContext';
 import { Loader } from './Loader';
+import { ExportModal } from './ExportModal';
 
 type ActiveSubTab = 'config' | 'prompts';
 
@@ -43,6 +44,7 @@ export const PresetTab: React.FC = () => {
         revertActivePreset,
     } = usePreset();
     const [activeSubTab, setActiveSubTab] = React.useState<'config' | 'prompts'>('config');
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const activePreset = presets.find(p => p.name === activePresetName) || null;
@@ -55,11 +57,14 @@ export const PresetTab: React.FC = () => {
         }
     };
 
-    const handleExport = () => {
+    const handleExportClick = () => {
         if (!activePreset) return;
-        // Clean export name: Remove extension and add .json back, no _edited
-        const exportFileName = `${activePreset.name.replace(/\.json$/i, '')}.json`;
-        exportPresetToJson(activePreset, exportFileName);
+        setIsExportModalOpen(true);
+    }
+
+    const performExport = (filename: string) => {
+        if (!activePreset) return;
+        exportPresetToJson(activePreset, filename);
     }
 
     if (isLoading && presets.length === 0) {
@@ -124,7 +129,7 @@ export const PresetTab: React.FC = () => {
                            Hoàn tác
                         </button>
                         <button
-                            onClick={handleExport}
+                            onClick={handleExportClick}
                             disabled={!activePreset}
                             className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-3 text-sm rounded-lg transition-colors duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed"
                         >
@@ -163,6 +168,15 @@ export const PresetTab: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            <ExportModal 
+                isOpen={isExportModalOpen}
+                onClose={() => setIsExportModalOpen(false)}
+                onConfirm={performExport}
+                initialFileName={activePreset?.name || 'Preset'}
+                title="Xuất Preset"
+                fileExtension=".json"
+            />
         </div>
     );
 };

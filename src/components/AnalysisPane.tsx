@@ -5,6 +5,7 @@ import { analyzeCard, enhanceField } from '../services/geminiService';
 import { exportToPng, buildExportObject } from '../services/cardExporter';
 import { Loader } from './Loader';
 import { useLorebook } from '../contexts/LorebookContext';
+import { ExportModal } from './ExportModal';
 
 interface AnalysisPaneProps {
   card: CharacterCard;
@@ -37,6 +38,10 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
     const [isExporting, setIsExporting] = useState<boolean>(false);
     const [error, setError] = useState<string>('');
     const avatarInputRef = useRef<HTMLInputElement>(null);
+
+    // Export Modal State
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [exportType, setExportType] = useState<'json' | 'png'>('json');
 
     const assembleCompleteCard = useCallback((characterCard: CharacterCard): CharacterCard => {
       if (!characterCard) return characterCard;
@@ -97,34 +102,36 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
         }
     }, [card, onUpdate, assembleCompleteCard]);
 
-    const handleJsonExport = () => {
-        const cardToExport = assembleCompleteCard(card);
-        const exportObject = buildExportObject(cardToExport);
-
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObject, null, 2));
-        const downloadAnchorNode = document.createElement('a');
-        downloadAnchorNode.setAttribute("href", dataStr);
-        // Clean export name: Replace extension with .json, no _edited suffix
-        const exportFileName = fileName.replace(/\.(png|json)$/i, '') + '.json';
-        downloadAnchorNode.setAttribute("download", exportFileName);
-        document.body.appendChild(downloadAnchorNode);
-        downloadAnchorNode.click();
-        downloadAnchorNode.remove();
+    // Opens the modal
+    const handleExportClick = (type: 'json' | 'png') => {
+        setExportType(type);
+        setIsExportModalOpen(true);
     };
-    
-    const handlePngExport = async () => {
-        if (!card || !avatarFile) return;
-        setIsExporting(true);
-        setError('');
-        try {
+
+    // Executes the export after name confirmation
+    const performExport = async (finalFileName: string) => {
+        if (exportType === 'json') {
             const cardToExport = assembleCompleteCard(card);
-            // Clean export name: Replace extension with .png, no _edited suffix
-            const exportFileName = fileName.replace(/\.(png|json)$/i, '') + '.png';
-            await exportToPng(cardToExport, avatarFile, exportFileName);
-        } catch (e) {
-            setError(e instanceof Error ? `Lỗi xuất PNG: ${e.message}` : 'Đã xảy ra lỗi không xác định khi xuất tệp PNG.');
-        } finally {
-            setIsExporting(false);
+            const exportObject = buildExportObject(cardToExport);
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObject, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", finalFileName);
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+        } else {
+            if (!card || !avatarFile) return;
+            setIsExporting(true);
+            setError('');
+            try {
+                const cardToExport = assembleCompleteCard(card);
+                await exportToPng(cardToExport, avatarFile, finalFileName);
+            } catch (e) {
+                setError(e instanceof Error ? `Lỗi xuất PNG: ${e.message}` : 'Đã xảy ra lỗi không xác định khi xuất tệp PNG.');
+            } finally {
+                setIsExporting(false);
+            }
         }
     };
 
@@ -233,15 +240,23 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
                     </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                    <button onClick={handleJsonExport} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                    <button onClick={() => handleExportClick('json')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
                         Xuất ra JSON
                     </button>
-                    <button onClick={handlePngExport} disabled={!avatarFile || isExporting} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                    <button onClick={() => handleExportClick('png')} disabled={!avatarFile || isExporting} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
                         {isExporting ? <Loader message="" /> : 'Xuất ra PNG'}
                     </button>
                 </div>
             </div>
 
+            <ExportModal
+                isOpen={isExportModalOpen}
+                onClose={() => setIsExportModalOpen(false)}
+                onConfirm={performExport}
+                initialFileName={fileName || card.name || 'character'}
+                title={exportType === 'json' ? 'Xuất thẻ JSON' : 'Xuất thẻ PNG'}
+                fileExtension={exportType === 'json' ? '.json' : '.png'}
+            />
         </div>
     );
 };

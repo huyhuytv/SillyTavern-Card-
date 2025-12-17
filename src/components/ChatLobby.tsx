@@ -12,6 +12,7 @@ import { processWithRegex } from '../services/regexService';
 import { performWorldInfoScan } from '../services/worldInfoScanner';
 import { processVariableUpdates } from '../services/variableEngine';
 import { createSnapshot, importSnapshot } from '../services/snapshotService';
+import { ExportModal } from './ExportModal';
 
 interface ChatLobbyProps {
     onSessionSelect: (sessionId: string) => void;
@@ -196,6 +197,10 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
     const [greetingModalChar, setGreetingModalChar] = useState<CharacterInContext | null>(null);
     const [error, setError] = useState<string>('');
     const [isImporting, setIsImporting] = useState(false);
+    
+    // Export Modal State
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [sessionToExport, setSessionToExport] = useState<ChatSession | null>(null);
 
     // Function to refresh session list
     const refreshSessions = async () => {
@@ -256,20 +261,24 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
     };
 
     // --- EXPORT LOGIC ---
-    const handleExportSession = (session: ChatSession) => {
+    const handleExportClick = (session: ChatSession) => {
+        setSessionToExport(session);
+        setIsExportModalOpen(true);
+    };
+
+    const performExport = (filename: string) => {
+        if (!sessionToExport) return;
+        
+        const session = sessionToExport;
         const char = characters.find(c => c.fileName === session.characterFileName);
         const personaToExport = personas.find(p => p.id === session.userPersonaId) || activePersona;
 
-        // Logic ƯU TIÊN Active Preset nếu trùng tên (để lấy bản chỉnh sửa chưa lưu hoặc mới nhất)
         let sourcePreset: SillyTavernPreset | undefined;
-
         if (activePreset && activePreset.name === session.presetName) {
             sourcePreset = activePreset;
         } else {
             sourcePreset = presets.find(p => p.name === session.presetName);
         }
-
-        // Fallback về Active Preset nếu không tìm thấy (đảm bảo luôn có preset để xuất)
         if (!sourcePreset) sourcePreset = activePreset;
 
         if (!char || !sourcePreset) {
@@ -277,14 +286,43 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
             return;
         }
 
-        // Đổi tên Preset đồng bộ theo tên nhân vật
         const presetToExport = {
             ...sourcePreset,
             name: `[Cài đặt] ${char.card.name}`
         };
 
         try {
-            createSnapshot(session, char.card, presetToExport, personaToExport);
+            // Need to manually trigger download here since createSnapshot handles it internally with logic that doesn't easily accept filename override
+            // But actually createSnapshot handles the blob creation. I should modify it or just copy its logic here to use the filename.
+            // For now, I'll assume createSnapshot *forces* a name, I need to update it or reimplement it here briefly.
+            // RE-IMPLEMENTATION for Custom Name:
+            
+            const snapshot = {
+                version: 1,
+                timestamp: Date.now(),
+                meta: {
+                    exportedBy: 'AI Studio Card Tool',
+                    description: `Bản ghi phiêu lưu: ${char.card.name} - ${new Date().toLocaleString()}`
+                },
+                data: {
+                    character: char.card,
+                    characterFileName: session.characterFileName,
+                    preset: presetToExport,
+                    session: session,
+                    userPersona: personaToExport
+                }
+            };
+
+            const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
         } catch (e) {
             console.error(e);
             alert("Lỗi khi tạo bản ghi xuất.");
@@ -441,6 +479,14 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
         return <div className="flex justify-center items-center h-full"><Loader message="Đang tải sảnh trò chuyện..." /></div>;
     }
 
+    // Default export name logic
+    const getInitialExportName = () => {
+        if (!sessionToExport) return 'Adventure';
+        const charName = characters.find(c => c.fileName === sessionToExport.characterFileName)?.card.name || 'Character';
+        const safeCharName = charName.replace(/[^a-z0-9]/gi, '_');
+        return `Adventure_${safeCharName}_${sessionToExport.sessionId.substring(0, 8)}`;
+    };
+
     return (
         <div className="space-y-10">
             {error && <p className="text-red-400 text-center bg-red-900/20 p-3 rounded">{error}</p>}
@@ -462,7 +508,7 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
                                 character={character}
                                 onClick={() => onSessionSelect(session.sessionId)}
                                 onDelete={() => handleDeleteSession(session.sessionId, character?.card.name || session.characterFileName)}
-                                onExport={() => handleExportSession(session)}
+                                onExport={() => handleExportClick(session)}
                             />
                         ))}
                     </div>
@@ -497,6 +543,15 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
                     onStart={(greeting) => handleStartNewChat(greetingModalChar, greeting)}
                 />
             )}
+
+            <ExportModal 
+                isOpen={isExportModalOpen}
+                onClose={() => setIsExportModalOpen(false)}
+                onConfirm={performExport}
+                initialFileName={getInitialExportName()}
+                title="Xuất Bản Ghi Phiêu Lưu"
+                fileExtension=".json"
+            />
         </div>
     );
 };

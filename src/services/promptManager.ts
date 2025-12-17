@@ -413,9 +413,12 @@ export async function constructChatPrompt(
         
         relevantMsgs.forEach(msg => {
              const rawText = getMessageContent(msg);
-             // We also clean the last turn to ensure immediate context isn't polluted
-             const cleanText = cleanMessageContent(rawText);
-             const content = replaceHistoryMacros(cleanText);
+             
+             // --- RAW CONTENT MODIFICATION ---
+             // We DO NOT clean the last turn content.
+             // This preserves <thinking>, <UpdateVariable>, HTML, and Chain of Thought for the AI to see.
+             // This consumes more tokens but allows CoT continuation and logic retention.
+             const content = replaceHistoryMacros(rawText);
              
              if (content.trim()) {
                  const role = msg.role === 'user' ? userPersonaName : card.name;
