@@ -686,6 +686,12 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) 
                     <ToggleInput label="Do Sample" checked={preset.do_sample ?? true} onChange={v => handleChange('do_sample', v)} tooltipText="Bật hoặc tắt các phương pháp sampling (như Temperature, Top P, Top K). Nếu tắt, AI sẽ luôn chọn từ có xác suất cao nhất." />
                     <ToggleInput label="Ban EOS Token" checked={preset.ban_eos_token ?? false} onChange={v => handleChange('ban_eos_token', v)} tooltipText="Ngăn mô hình tạo ra token 'Kết thúc chuỗi' (End-Of-Sequence). Có thể khiến AI nói dài hơn nhưng cũng có thể dẫn đến các câu không hoàn chỉnh." />
                     <ToggleInput label="Add BOS Token" checked={preset.add_bos_token ?? true} onChange={v => handleChange('add_bos_token', v)} tooltipText="Tự động thêm token 'Bắt đầu chuỗi' (Beginning-Of-Sequence) vào đầu lời nhắc. Hầu hết các mô hình đều yêu cầu điều này." />
+                    <ToggleInput 
+                        label="Stream Response (Hiển thị từng từ)" 
+                        checked={preset.stream_response ?? false} 
+                        onChange={v => handleChange('stream_response', v)} 
+                        tooltipText="Bật chế độ Streaming: Văn bản sẽ hiện ra ngay lập tức khi AI đang viết. Tắt đi để chờ AI viết xong mới hiện toàn bộ (ổn định hơn cho script)." 
+                    />
                  </div>
             </Section>
 

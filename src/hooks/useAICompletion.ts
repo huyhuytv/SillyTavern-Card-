@@ -1,7 +1,7 @@
 
 import { useState, useCallback } from 'react';
 import { GenerateContentResponse } from "@google/genai";
-import { sendChatRequest } from '../services/geminiService';
+import { sendChatRequest, sendChatRequestStream } from '../services/geminiService';
 import type { SillyTavernPreset } from '../types';
 
 export const useAICompletion = () => {
@@ -31,10 +31,36 @@ export const useAICompletion = () => {
         }
     }, []);
 
+    /**
+     * Sends a chat request via Stream.
+     * Yields chunks of text.
+     */
+    const generateStream = useCallback(async function* (
+        fullPrompt: string,
+        settings: SillyTavernPreset
+    ): AsyncGenerator<string, void, unknown> {
+        setIsGenerating(true);
+        setError('');
+
+        try {
+            const stream = sendChatRequestStream(fullPrompt, settings);
+            for await (const chunk of stream) {
+                yield chunk;
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Lỗi không xác định khi gọi AI Stream.';
+            setError(msg);
+            throw err; // Re-throw to handle in UI
+        } finally {
+            setIsGenerating(false);
+        }
+    }, []);
+
     const clearError = useCallback(() => setError(''), []);
 
     return {
         generate,
+        generateStream,
         isGenerating,
         error,
         clearError

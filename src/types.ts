@@ -76,6 +76,9 @@ export interface SillyTavernPreset {
   google_model?: string;
   vertexai_model?: string;
   
+  // Streaming Config (NEW)
+  stream_response?: boolean;
+
   // Thinking Config (Experimental)
   thinking_budget?: number; // Ngân sách token cho suy nghĩ
 

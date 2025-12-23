@@ -351,6 +351,174 @@ export async function sendChatRequest(
     }
 }
 
+/**
+ * Handles OpenAI-compatible streaming (Server-Sent Events)
+ * Used for Proxy and OpenRouter.
+ */
+async function* streamOpenAICompatible(
+    fullPrompt: string, 
+    settings: SillyTavernPreset
+): AsyncGenerator<string, void, unknown> {
+    let url = '';
+    let headers: Record<string, string> = {};
+    let model = '';
+
+    // 1. Configuration
+    if (settings.chat_completion_source === 'proxy') {
+        const proxyUrl = getProxyUrl();
+        const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
+        url = `${cleanUrl}/v1/chat/completions`;
+        model = settings.proxy_model || 'gemini-3-pro-preview';
+        
+        // Proxy optimization: use text/plain to avoid CORS preflight (OPTIONS) issues on some local proxies
+        headers = { 'Content-Type': 'text/plain' }; 
+    } else {
+        // OpenRouter
+        const openRouterKey = getOpenRouterApiKey();
+        if (!openRouterKey) throw new Error("API Key OpenRouter bị thiếu.");
+        url = "https://openrouter.ai/api/v1/chat/completions";
+        model = settings.openrouter_model || '';
+        headers = {
+            'Authorization': `Bearer ${openRouterKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': window.location.origin,
+            'X-Title': 'SillyTavern Card Studio'
+        };
+    }
+
+    // 2. Request
+    const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            model: model,
+            messages: [{ role: 'user', content: fullPrompt }],
+            temperature: Number(settings.temp) || 1,
+            top_p: Number(settings.top_p) || 1,
+            top_k: Number(settings.top_k) || 40,
+            max_tokens: Number(settings.max_tokens) || 4096,
+            stop: settings.stopping_strings && settings.stopping_strings.length > 0 ? settings.stopping_strings : undefined,
+            stream: true // Enable Streaming
+        })
+    });
+
+    if (!response.ok || !response.body) {
+        const text = await response.text();
+        throw new Error(`Streaming Error (${response.status}): ${text}`);
+    }
+
+    // 3. SSE Parser
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = '';
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            
+            // Keep the last partial line in the buffer
+            buffer = lines.pop() || ''; 
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                if (trimmed.startsWith('data: ')) {
+                    const dataStr = trimmed.slice(6);
+                    if (dataStr === '[DONE]') return; // End of stream
+
+                    try {
+                        const json = JSON.parse(dataStr);
+                        const content = json.choices?.[0]?.delta?.content || '';
+                        if (content) {
+                            yield content;
+                        }
+                    } catch (e) {
+                        // Ignore parse errors for keep-alive chunks or invalid JSON lines
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Stream reading error:", e);
+        throw new Error("Mất kết nối khi đang Stream dữ liệu.");
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+/**
+ * Sends a STREAMING chat request.
+ * Returns an Async Generator that yields chunks of text.
+ */
+export async function* sendChatRequestStream(
+    fullPrompt: string,
+    settings: SillyTavernPreset
+): AsyncGenerator<string, void, unknown> {
+    
+    // --- 1. PROXY / OPENROUTER STREAMING ---
+    if (settings.chat_completion_source === 'proxy' || settings.chat_completion_source === 'openrouter') {
+        yield* streamOpenAICompatible(fullPrompt, settings);
+        return;
+    }
+
+    // --- 2. GEMINI DIRECT STREAMING ---
+    const ai = getGeminiClient();
+    
+    const config: any = {
+        safetySettings,
+        temperature: settings.temp,
+        topP: settings.top_p,
+        topK: settings.top_k,
+        maxOutputTokens: settings.max_tokens,
+        stopSequences: settings.stopping_strings,
+    };
+
+    if (settings.thinking_budget && Number(settings.thinking_budget) > 0) {
+        config.thinkingConfig = { thinkingBudget: Number(settings.thinking_budget) };
+    }
+
+    try {
+        const streamResponse = await ai.models.generateContentStream({
+            model: getActiveModel(),
+            contents: fullPrompt,
+            config: config,
+        });
+
+        for await (const chunk of streamResponse) {
+            // Native Thinking extraction for stream
+            // Chunk might contain parts with 'thought' or 'text'
+            // We reconstruct it to XML style for consistency with MessageBubble parser
+            
+            const parts = chunk.candidates?.[0]?.content?.parts || [];
+            let chunkText = '';
+            
+            // Check if parts exist (Native Thinking structure)
+            if (parts.length > 0) {
+                for (const part of parts) {
+                    if ((part as any).thought) {
+                        // Wrap thought chunks in tags so MessageBubble can strip/hide them
+                        chunkText += `<thinking>${part.text}</thinking>`; 
+                    } else {
+                        chunkText += part.text;
+                    }
+                }
+            } else {
+                // Standard text response
+                chunkText = chunk.text || '';
+            }
+            
+            yield chunkText;
+        }
+    } catch (error) {
+        console.error("Gemini Streaming API error:", error);
+        throw new Error("Lỗi khi stream từ Gemini. Vui lòng kiểm tra kết nối.");
+    }
+}
+
 
 export async function generateLorebookEntry(
   keyword: string,
@@ -563,7 +731,7 @@ export async function scanWorldInfoWithAI(
             },
         });
 
-        const text = response.text?.trim() || '{}';
+        const text = response.text || '{}';
         let selectedIds: string[] = [];
         
         try {

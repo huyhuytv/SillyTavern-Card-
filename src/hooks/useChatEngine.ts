@@ -40,7 +40,7 @@ export const useChatEngine = (sessionId: string | null) => {
     } = useChatSession(sessionId);
 
     // --- 2. AI & Engine State ---
-    const { generate, isGenerating, error: aiError, clearError: clearAiError } = useAICompletion();
+    const { generate, generateStream, isGenerating, error: aiError, clearError: clearAiError } = useAICompletion();
     const { scanInput, processOutput, isScanning } = useWorldSystem(card);
     
     // Local transient state
@@ -338,21 +338,63 @@ export const useChatEngine = (sessionId: string | null) => {
                 worldInfoRuntime: updatedRuntimeState
             });
             
-            // Send full string to AI
-            const response = await generate(fullPrompt, mergedSettings);
-            
-            if (response) {
-                const rawContent = response.text || '[Lỗi: AI đã trả về một phản hồi trống]';
-                await processAndSetModelResponse(rawContent, currentMessages, variables);
+            // --- STREAMING OR NON-STREAMING BRANCH ---
+            if (mergedSettings.stream_response) {
+                // STREAMING MODE (Live Parser)
+                
+                // 1. Create temporary placeholder message
+                const streamMessage = createMessage('model', '...', undefined, undefined, variables);
+                setMessages(prev => [...prev, streamMessage]);
+                
+                let rawAccumulatedText = '';
+                
+                // 2. Stream loop
+                const stream = generateStream(fullPrompt, mergedSettings);
+                for await (const chunk of stream) {
+                    rawAccumulatedText += chunk;
+                    
+                    // Live Filter: Apply cleanMessageContent dynamically to hide partial technical tags
+                    // Note: This regex is robust enough to hide <thinking> even if unfinished, usually.
+                    // But for strict "hiding", we rely on the fact that cleanMessageContent removes completed tags.
+                    // To hide unfinished tags, we'd need a stream parser. 
+                    // MVP: We accept short blips of <thi... but prompt manager cleaner handles it decently.
+                    
+                    // Simple hack to hide unfinished thinking tags for cleaner UI:
+                    // If text ends with <th or <Update, we hold back update? 
+                    // No, let's just use cleanMessageContent on the whole buffer.
+                    const display = cleanMessageContent(rawAccumulatedText);
+                    
+                    setMessages(prev => {
+                        const newMsgs = [...prev];
+                        const idx = newMsgs.findIndex(m => m.id === streamMessage.id);
+                        if (idx !== -1) {
+                            newMsgs[idx] = { ...newMsgs[idx], content: display };
+                        }
+                        return newMsgs;
+                    });
+                }
+                
+                // 3. Finalize: Remove placeholder and run full post-processor on the complete raw text
+                setMessages(prev => prev.filter(m => m.id !== streamMessage.id)); // Remove streaming placeholder
+                await processAndSetModelResponse(rawAccumulatedText, currentMessages, variables); // Process properly and add final message
+
             } else {
-                 setMessages(prev => prev.filter(m => m.id !== userMessage.id));
+                // STANDARD MODE (Wait for full response)
+                const response = await generate(fullPrompt, mergedSettings);
+            
+                if (response) {
+                    const rawContent = response.text || '[Lỗi: AI đã trả về một phản hồi trống]';
+                    await processAndSetModelResponse(rawContent, currentMessages, variables);
+                } else {
+                     setMessages(prev => prev.filter(m => m.id !== userMessage.id));
+                }
             }
 
         } catch (e) {
             console.error("SendMessage Error:", e);
              setMessages(prev => prev.filter(m => m.id !== userMessage.id));
         }
-    }, [baseSections, messages, authorNote, card, preset, mergedSettings, longTermSummaries, defaultPageSize, isGenerating, isScanning, isSummarizing, logPrompt, processAndSetModelResponse, variables, lastStateBlock, worldInfoState, worldInfoRuntime, worldInfoPinned, worldInfoPlacement, lorebooks, persona, saveSession, logWorldInfo, logSmartScan, setMessages, setWorldInfoRuntime, generate, clearAiError, scanInput, startTurn, logDiagnostic]);
+    }, [baseSections, messages, authorNote, card, preset, mergedSettings, longTermSummaries, defaultPageSize, isGenerating, isScanning, isSummarizing, logPrompt, processAndSetModelResponse, variables, lastStateBlock, worldInfoState, worldInfoRuntime, worldInfoPinned, worldInfoPlacement, lorebooks, persona, saveSession, logWorldInfo, logSmartScan, setMessages, setWorldInfoRuntime, generate, generateStream, clearAiError, scanInput, startTurn, logDiagnostic]);
     
     // --- AUTO LOOP LOGIC ---
     useEffect(() => {
@@ -558,20 +600,50 @@ export const useChatEngine = (sessionId: string | null) => {
                  lastStateBlock: restoredStateBlock
              });
              
-             const response = await generate(fullPrompt, mergedSettings);
-             
-             if (response) {
-                 const rawContent = response.text || '[Lỗi: AI đã trả về một phản hồi trống]';
-                 await processAndSetModelResponse(rawContent, historyForRegen, restoredVariables);
+             // --- REGEN STREAMING LOGIC ---
+             if (mergedSettings.stream_response) {
+                // 1. Placeholder
+                const streamMessage = createMessage('model', '...', undefined, undefined, restoredVariables);
+                setMessages(prev => [...prev, streamMessage]);
+                
+                let rawAccumulatedText = '';
+                
+                // 2. Stream
+                const stream = generateStream(fullPrompt, mergedSettings);
+                for await (const chunk of stream) {
+                    rawAccumulatedText += chunk;
+                    const display = cleanMessageContent(rawAccumulatedText);
+                    
+                    setMessages(prev => {
+                        const newMsgs = [...prev];
+                        const idx = newMsgs.findIndex(m => m.id === streamMessage.id);
+                        if (idx !== -1) {
+                            newMsgs[idx] = { ...newMsgs[idx], content: display };
+                        }
+                        return newMsgs;
+                    });
+                }
+                
+                // 3. Finalize
+                setMessages(prev => prev.filter(m => m.id !== streamMessage.id)); 
+                await processAndSetModelResponse(rawAccumulatedText, historyForRegen, restoredVariables);
+
              } else {
-                  setMessages(messages);
+                 const response = await generate(fullPrompt, mergedSettings);
+                 
+                 if (response) {
+                     const rawContent = response.text || '[Lỗi: AI đã trả về một phản hồi trống]';
+                     await processAndSetModelResponse(rawContent, historyForRegen, restoredVariables);
+                 } else {
+                      setMessages(messages); // Restore old messages if fail
+                 }
              }
 
         } catch (e) {
             console.error("Regenerate Error:", e);
             setMessages(messages); 
         }
-    }, [messages, authorNote, card, preset, mergedSettings, longTermSummaries, defaultPageSize, isGenerating, isScanning, isSummarizing, logPrompt, processAndSetModelResponse, variables, worldInfoState, worldInfoRuntime, worldInfoPinned, worldInfoPlacement, lorebooks, persona, saveSession, logWorldInfo, logSmartScan, setMessages, setWorldInfoRuntime, generate, clearAiError, scanInput, logSystemMessage, setLastStateBlock, startTurn]);
+    }, [messages, authorNote, card, preset, mergedSettings, longTermSummaries, defaultPageSize, isGenerating, isScanning, isSummarizing, logPrompt, processAndSetModelResponse, variables, worldInfoState, worldInfoRuntime, worldInfoPinned, worldInfoPlacement, lorebooks, persona, saveSession, logWorldInfo, logSmartScan, setMessages, setWorldInfoRuntime, generate, generateStream, clearAiError, scanInput, logSystemMessage, setLastStateBlock, startTurn]);
 
     const editMessage = useCallback(async (messageId: string, newContent: string) => {
         const messageIndex = messages.findIndex(msg => msg.id === messageId);
