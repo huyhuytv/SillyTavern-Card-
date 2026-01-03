@@ -84,6 +84,7 @@ export interface SillyTavernPreset {
 
   // TTS Settings (NEW)
   tts_enabled?: boolean;
+  tts_streaming?: boolean; // NEW: Real-time streaming TTS
   tts_provider?: 'gemini' | 'native'; // Provider
   tts_voice?: string; // 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'
   tts_native_voice?: string; // URI of native voice
@@ -339,6 +340,13 @@ export interface UserPersona {
     avatar?: string;
 }
 
+export interface SummaryQueueItem {
+    id: string;
+    status: 'pending' | 'processing' | 'failed';
+    timestamp: number;
+    error?: string; // New field for error reporting
+}
+
 export interface ChatSession {
     sessionId: string;
     characterFileName: string;
@@ -346,6 +354,7 @@ export interface ChatSession {
     userPersonaId: string | null;
     chatHistory: ChatMessage[];
     longTermSummaries: string[];
+    summaryQueue?: SummaryQueueItem[]; // NEW: Persistent Queue
     variables: Record<string, any>;
     extensionSettings?: Record<string, any>;
     worldInfoState?: Record<string, boolean>;

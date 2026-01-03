@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState, useLayoutEffect } from 'react';
 import type { ChatMessage, TavernHelperScript } from '../../types';
 import { InteractiveHtmlMessage } from '../InteractiveHtmlMessage';
@@ -80,6 +79,7 @@ interface MessageListProps {
     // Actions
     regenerateLastResponse: () => void;
     deleteLastTurn: () => void;
+    onDeleteMessage: (messageId: string) => void; // NEW: Specific Message Deletion
     onOpenAuthorNote: () => void;
     onOpenWorldInfo: () => void;
     
@@ -110,6 +110,7 @@ export const MessageList: React.FC<MessageListProps> = ({
     onSaveEdit,
     regenerateLastResponse,
     deleteLastTurn,
+    onDeleteMessage,
     onOpenAuthorNote,
     onOpenWorldInfo,
     scripts,
@@ -199,7 +200,8 @@ export const MessageList: React.FC<MessageListProps> = ({
                 const isLastModelMessage = originalIndex === lastModelMsgIndex;
                 
                 const canRegenerate = (isLastModelMessage || (isLastMessage && msg.role === 'user')) && !isLoading && msg.role !== 'system';
-                const canDelete = (isLastModelMessage || isLastMessage) && !isLoading && messages.length > 0;
+                // Delete is always possible now for rewind logic, unless loading
+                const canDelete = !isLoading;
 
                 const menuActions = [
                     { label: 'Chỉnh sửa', onClick: () => onStartEdit(msg) },
@@ -211,8 +213,8 @@ export const MessageList: React.FC<MessageListProps> = ({
                         disabled: !canRegenerate 
                     },
                     { 
-                        label: msg.role === 'user' ? 'Xóa tin nhắn này' : 'Xóa Lượt gần nhất', 
-                        onClick: deleteLastTurn, 
+                        label: 'Xóa từ đây (Tua lại)', 
+                        onClick: () => onDeleteMessage(msg.id), // Direct delete call 
                         disabled: !canDelete, 
                         className: 'text-red-400 hover:bg-red-800/50' 
                     },

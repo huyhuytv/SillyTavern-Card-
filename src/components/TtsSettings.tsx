@@ -154,6 +154,13 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
 
             <div className={`space-y-6 transition-opacity duration-300 ${!preset.tts_enabled ? 'opacity-50 pointer-events-none' : ''}`}>
                 
+                <ToggleInput
+                    label="Chế độ Đọc Streaming (Real-time)"
+                    checked={preset.tts_streaming ?? false}
+                    onChange={(v) => handleUpdate('tts_streaming', v)}
+                    tooltipText="Đọc từng câu ngay khi xuất hiện thay vì đợi toàn bộ câu trả lời. Yêu cầu bật 'Stream Response'."
+                />
+
                 <SelectInput 
                     label="Nguồn Giọng Đọc (TTS Provider)"
                     value={preset.tts_provider || 'gemini'}

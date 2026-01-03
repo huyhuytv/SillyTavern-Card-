@@ -16,13 +16,16 @@ interface ChatInputProps {
     
     authorNote?: string;
     onUpdateAuthorNote: (note: string) => void;
-    isSummarizing: boolean;
+    isSummarizing: boolean; // Also acts as queue lock
     isInputLocked?: boolean; 
     children?: React.ReactNode;
     
     // NEW: Auto Loop Props
     isAutoLooping?: boolean;
     onToggleAutoLoop?: () => void;
+    
+    // NEW: Queue info (optional for now, can infer from isSummarizing but explicit count is nice)
+    queueLength?: number;
 }
 
 const AVAILABLE_COMMANDS = [
@@ -53,7 +56,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     isInputLocked = false,
     children,
     isAutoLooping = false,
-    onToggleAutoLoop
+    onToggleAutoLoop,
+    queueLength
 }) => {
     const [userInput, setUserInput] = useState('');
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -95,14 +99,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     const handleSubmit = (e: FormEvent) => {
         e.preventDefault();
         // If looping is on, hitting enter might stop it? Or just send message.
-        // Usually if looping is ON, sending a message breaks the loop in some systems, but here we just let it be concurrent or user can stop it.
         if (isAutoLooping && onToggleAutoLoop) {
-             onToggleAutoLoop(); // Stop loop on manual intervention? Or just let user stop it via button. 
-             // Let's make "Send" button turn into "Stop" if looping is on.
+             onToggleAutoLoop(); 
              return;
         }
 
-        if (!userInput.trim() || isLoading || isInputLocked) return;
+        // Prevent send if summarizing queue is active
+        if (!userInput.trim() || isLoading || isInputLocked || isSummarizing) return;
         onSend(userInput);
         setUserInput('');
         setShowSuggestions(false);
@@ -136,10 +139,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
          ? "p-4 md:p-6 w-full max-w-5xl mx-auto"
          : "p-4 md:p-6";
 
+    // Determine Queue Message
+    const queueMessage = queueLength && queueLength > 0 
+        ? `Đang tóm tắt... Còn ${queueLength} phần.` 
+        : "Đang tóm tắt...";
+
     return (
         <div className={inputAreaClasses}>
             {/* Command Suggestions Popup */}
-            {showSuggestions && !isInputLocked && (
+            {showSuggestions && !isInputLocked && !isSummarizing && (
                 <div className={`absolute bottom-full left-4 md:left-6 mb-2 w-72 bg-slate-900 border border-slate-600 rounded-lg shadow-2xl overflow-hidden z-50 animate-fade-in-up flex flex-col`}>
                     <div className="bg-slate-800 px-3 py-2 text-xs font-bold text-slate-400 border-b border-slate-700 uppercase tracking-wider">
                         Gợi ý lệnh hệ thống
@@ -163,14 +171,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 </div>
             )}
 
-            {/* SCRIPT BUTTONS BAR (NEW) */}
+            {/* SCRIPT BUTTONS BAR */}
             {!isInputLocked && scriptButtons.length > 0 && onScriptButtonClick && (
                 <div className="px-4 pt-2 pb-1 flex flex-wrap gap-2 justify-center md:justify-start animate-fade-in-up border-b border-white/5">
                      {scriptButtons.map((btn) => (
                         <button
                             key={btn.id}
                             onClick={() => onScriptButtonClick(btn)}
-                            className="px-3 py-1.5 text-xs font-bold rounded bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 transition-all transform active:scale-95 border border-indigo-400/30 flex items-center gap-1"
+                            disabled={isSummarizing}
+                            className="px-3 py-1.5 text-xs font-bold rounded bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 transition-all transform active:scale-95 border border-indigo-400/30 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <span className="text-indigo-200">⚡</span> {btn.label}
                         </button>
@@ -185,11 +194,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                         <button
                             key={idx}
                             onClick={() => onQuickReplyClick(reply)}
+                            disabled={isSummarizing}
                             className={`px-3 py-1.5 text-sm rounded-full transition-colors border shadow-sm ${
                                 isImmersive 
                                 ? 'bg-slate-700/80 border-slate-500 hover:bg-sky-600/90 text-white' 
                                 : 'bg-slate-700 hover:bg-sky-600 text-slate-200 hover:text-white border-slate-600'
-                            }`}
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
                             {reply.label}
                         </button>
@@ -225,7 +235,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             <div className={inputFormClasses}>
                 {/* Status Loader */}
                 <div className="flex items-center justify-end mb-3 min-h-[20px]">
-                    {isSummarizing && <Loader message="Đang tóm tắt..." />}
+                    {isSummarizing && <Loader message={queueMessage} />}
                 </div>
 
                 {/* Input Form */}
@@ -237,17 +247,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                             value={userInput}
                             onChange={(e) => setUserInput(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            placeholder={isInputLocked ? "Đang chờ kịch bản..." : (isAutoLooping ? "Đang tự động chạy..." : (isImmersive ? "Nhập tin nhắn..." : "Nhập tin nhắn... (Gõ / để xem lệnh)"))}
+                            placeholder={isInputLocked ? "Đang chờ kịch bản..." : (isSummarizing ? "Hệ thống đang tóm tắt..." : (isAutoLooping ? "Đang tự động chạy..." : (isImmersive ? "Nhập tin nhắn..." : "Nhập tin nhắn... (Gõ / để xem lệnh)")))}
                             className={`w-full rounded-lg p-3 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition disabled:opacity-50 ${
                                 isImmersive 
                                 ? 'bg-slate-800/70 border-slate-600/50 backdrop-blur-md placeholder-slate-400' 
                                 : 'bg-slate-700 border border-slate-600'
-                            } ${isInputLocked ? 'cursor-not-allowed opacity-60' : ''}`}
-                            disabled={isLoading || isInputLocked || isAutoLooping}
+                            } ${(isInputLocked || isSummarizing) ? 'cursor-not-allowed opacity-60' : ''}`}
+                            disabled={isLoading || isInputLocked || isAutoLooping || isSummarizing}
                             aria-label="Chat input"
                             autoComplete="off"
                         />
-                        {isInputLocked && (
+                        {(isInputLocked || isSummarizing) && (
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                     <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
@@ -265,7 +275,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     {/* Send / Stop Button */}
                     <button
                         type="submit"
-                        disabled={!isAutoLooping && (isLoading || isInputLocked || !userInput.trim())}
+                        disabled={!isAutoLooping && (isLoading || isInputLocked || !userInput.trim() || isSummarizing)}
                         className={`text-white font-bold py-2 px-5 rounded-lg transition-colors duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed flex-shrink-0 flex items-center justify-center gap-2 min-w-[80px] ${
                             isImmersive 
                             ? 'bg-sky-600/80 hover:bg-sky-600 backdrop-blur-md' 
@@ -287,7 +297,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     </button>
 
                     {/* Auto Loop Toggle Button (Small) */}
-                    {onToggleAutoLoop && !isInputLocked && (
+                    {onToggleAutoLoop && !isInputLocked && !isSummarizing && (
                         <button
                             type="button"
                             onClick={onToggleAutoLoop}

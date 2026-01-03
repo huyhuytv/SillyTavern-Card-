@@ -28,6 +28,7 @@ export const useChatEngine = (sessionId: string | null) => {
         authorNote, setAuthorNote,
         lastStateBlock, setLastStateBlock,
         longTermSummaries, setLongTermSummaries,
+        summaryQueue, setSummaryQueue, // NEW: Queue State
         initialDiagnosticLog,
         card,
         preset,
@@ -54,19 +55,31 @@ export const useChatEngine = (sessionId: string | null) => {
     
     // --- 3. Services & Hooks ---
     const { logs, startTurn, logPrompt, logResponse, logSummary, logDiagnostic, logWorldInfo, logSmartScan, logSystemMessage, clearLogs, clearSystemLogs } = useChatLogger();
+    
+    // NEW: Pass explicit state setters to Memory Hook
     const { 
-        isSummarizing, 
-        checkForSummarizationAndStore,
+        isGlobalSummarizing,
+        queueLength,
+        checkAndFillQueue,
+        processQueueStep,
         resetMemory,
-        defaultPageSize
-    } = useChatMemory(card?.name || 'Character');
+        regenerateSpecificSummary, // NEW
+        retryFailedTask // NEW
+    } = useChatMemory(
+        card?.name || 'Character',
+        longTermSummaries,
+        setLongTermSummaries,
+        summaryQueue,
+        setSummaryQueue,
+        saveSession
+    );
 
     const { lorebooks } = useLorebook();
     const { showToast } = useToast();
     const { showPopup } = usePopup();
     
     // TTS INTEGRATION
-    const { autoPlayEnabled, addToQueue } = useTTS();
+    const { autoPlayEnabled, addToQueue, stopAll } = useTTS();
     
     const isLoading = isSessionLoading || isGenerating || isScanning;
     const error = sessionError || aiError;
@@ -94,6 +107,66 @@ export const useChatEngine = (sessionId: string | null) => {
         }
     }, [card, mergedSettings, lorebooks, persona, worldInfoState, worldInfoPlacement, isSessionLoading]);
 
+    // --- 5. AUTOMATIC MEMORY PROCESSING LOOP ---
+    useEffect(() => {
+        if (!mergedSettings) return;
+        
+        const runMemoryLogic = async () => {
+            // 1. Check if we need to add tasks to queue
+            const contextDepth = mergedSettings.context_depth || 20; 
+            const chunkSize = mergedSettings.summarization_chunk_size || 10;
+            
+            await checkAndFillQueue(messages, contextDepth, chunkSize);
+
+            // 2. If queue has items, process ONE step
+            if (queueLength > 0) {
+                // IMPORTANT: Check if the first item is failed. If so, stop.
+                if (summaryQueue[0]?.status === 'failed') return;
+
+                const summarizationPrompt = mergedSettings.summarization_prompt;
+                await processQueueStep(messages, summarizationPrompt, chunkSize);
+            }
+        };
+
+        // Run logic only if not already busy generating responses
+        // and data is ready
+        if (!isSessionLoading && !isGenerating && messages.length > 0) {
+            runMemoryLogic();
+        }
+    }, [messages, queueLength, summaryQueue, mergedSettings, isSessionLoading, isGenerating, checkAndFillQueue, processQueueStep]);
+
+    // --- 5b. MANUAL MEMORY TRIGGER ---
+    const triggerSmartContext = useCallback(async () => {
+        if (!mergedSettings) return;
+        const contextDepth = mergedSettings.context_depth || 20; 
+        const chunkSize = mergedSettings.summarization_chunk_size || 10;
+        
+        // Force check regardless of auto loop state, but respecting logic inside useChatMemory
+        await checkAndFillQueue(messages, contextDepth, chunkSize);
+        
+        // If items were added, the Effect above will pick it up and start processing.
+        // If not added (because threshold not met), nothing happens, which is correct for Option A.
+    }, [mergedSettings, messages, checkAndFillQueue]);
+
+    // --- 5c. REGENERATE SUMMARY WRAPPER ---
+    const handleRegenerateSummary = useCallback(async (index: number) => {
+        if (!mergedSettings) return;
+        const chunkSize = mergedSettings.summarization_chunk_size || 10;
+        const prompt = mergedSettings.summarization_prompt;
+        
+        await regenerateSpecificSummary(index, messages, prompt, chunkSize);
+    }, [mergedSettings, messages, regenerateSpecificSummary]);
+
+    // --- 5d. RETRY FAILED TASK WRAPPER ---
+    const handleRetryFailedTask = useCallback(async () => {
+        if (!mergedSettings) return;
+        const chunkSize = mergedSettings.summarization_chunk_size || 10;
+        const prompt = mergedSettings.summarization_prompt;
+        
+        await retryFailedTask(messages, prompt, chunkSize);
+    }, [mergedSettings, messages, retryFailedTask]);
+
+
     const createMessage = (
         role: 'user' | 'model' | 'system', 
         content: string, 
@@ -112,8 +185,6 @@ export const useChatEngine = (sessionId: string | null) => {
             contextState: stateSnapshot
         };
     };
-
-    // --- 5. Core Processing Logic ---
 
     const processAndSetModelResponse = useCallback(async (
         rawContent: string, 
@@ -179,9 +250,6 @@ export const useChatEngine = (sessionId: string | null) => {
         if (finalInteractiveHtml) {
             modelMessages.push(createMessage('model', '', finalInteractiveHtml, finalOriginalRaw, updatedVariables));
             
-            // FIX: Only update the persistent state block if this is REAL HTML output found by Regex.
-            // If it's just text forced into the iframe (isFallbackInteractive), we ignore it to prevent
-            // polluting the context with narrative text/thinking.
             if (!isFallbackInteractive) {
                 nextStateBlock = finalInteractiveHtml;
             }
@@ -193,18 +261,15 @@ export const useChatEngine = (sessionId: string | null) => {
         
         const finalNewMessages = [...currentMessages, ...modelMessages];
         
-        // --- TTS AUTO-PLAY TRIGGER ---
-        // If auto-play is enabled, push new model text to queue
-        if (autoPlayEnabled && mergedSettings.tts_enabled) {
+        // --- TTS AUTO-PLAY TRIGGER (Non-Streaming Fallback) ---
+        if (autoPlayEnabled && mergedSettings.tts_enabled && !mergedSettings.tts_streaming) {
             modelMessages.forEach(msg => {
                 const textToRead = msg.content || (msg.originalRawContent ? cleanMessageContent(msg.originalRawContent) : '');
                 if (textToRead.trim()) {
-                    // Extract full settings from merged preset
                     const voice = mergedSettings.tts_provider === 'native' 
                         ? (mergedSettings.tts_native_voice || '') 
                         : (mergedSettings.tts_voice || 'Kore');
                     
-                    // Strip HTML/Action tags before queuing
                     const cleanText = textToRead.replace(/<[^>]*>/g, '');
                     if (cleanText.trim()) {
                         addToQueue(cleanText, voice, msg.id, {
@@ -221,56 +286,37 @@ export const useChatEngine = (sessionId: string | null) => {
         setMessages(finalNewMessages);
         setLastStateBlock(nextStateBlock);
 
-        // --- SMART CONTEXT / MEMORY LOGIC UPDATE ---
-        const contextDepth = mergedSettings.context_depth || defaultPageSize; // Trigger Threshold
-        const chunkSize = mergedSettings.summarization_chunk_size || 10; // Sliding Window Size
-        const summarizationPrompt = mergedSettings.summarization_prompt;
-
-        const newSummaries = await checkForSummarizationAndStore(
-            finalNewMessages, 
-            logSummary, 
-            contextDepth, 
-            summarizationPrompt,
-            chunkSize // NEW PARAM
-        );
-        
-        const finalSummaries = newSummaries || longTermSummaries;
-        if (newSummaries) setLongTermSummaries(newSummaries);
-
+        // Save immediately
         await saveSession({
             messages: finalNewMessages,
             variables: updatedVariables,
             lastStateBlock: nextStateBlock,
-            longTermSummaries: finalSummaries
+            longTermSummaries: longTermSummaries, // State is managed by hook now, but we save current ref
+            summaryQueue: summaryQueue
         });
 
-    }, [card, preset, mergedSettings, logResponse, logDiagnostic, checkForSummarizationAndStore, logSummary, saveSession, longTermSummaries, variables, lastStateBlock, setVariables, setMessages, setLongTermSummaries, setLastStateBlock, processOutput, defaultPageSize, autoPlayEnabled, addToQueue]);
+    }, [card, preset, mergedSettings, logResponse, logDiagnostic, logSummary, saveSession, longTermSummaries, summaryQueue, variables, lastStateBlock, setVariables, setMessages, setLongTermSummaries, setLastStateBlock, processOutput, autoPlayEnabled, addToQueue]);
 
 
     const sendMessage = useCallback(async (messageContent: string) => {
-        if (!messageContent.trim() || !baseSections || isGenerating || isScanning || isSummarizing || !card || !preset || !mergedSettings) return;
+        // Block sending if summarizing
+        if (!messageContent.trim() || !baseSections || isGenerating || isScanning || isGlobalSummarizing || !card || !preset || !mergedSettings) return;
 
-        startTurn(); // Initialize new turn log container
+        startTurn(); 
 
-        // --- 1. INPUT REGEX PROCESSING (PLACEMENT = 1) ---
-        // Runs before anything else to transform user input
         const regexScripts = card.extensions?.regex_scripts || [];
         const { displayContent: processedInput, diagnosticLog: inputRegexLog } = processWithRegex(messageContent, regexScripts, [1]);
         
-        if (inputRegexLog && inputRegexLog.length > 50) { // Only log if it actually did something significant or started/ended
+        if (inputRegexLog && inputRegexLog.length > 50) { 
             logDiagnostic(inputRegexLog, 'regex');
         }
 
-        // Use processedInput for the message content
         const userMessage = createMessage('user', processedInput, undefined, undefined, variables);
         const currentMessages = [...messages, userMessage];
         setMessages(currentMessages);
         clearAiError();
 
-        // --- WORLD INFO SCANNING ---
-        // CLEANED INPUT FOR SCANNING
         const cleanInput = cleanMessageContent(processedInput);
-        // Note: Only history for scan context, input is passed separately now for AI mode
         const textToScan = cleanInput + '\n' + currentMessages.slice(-3).map(m => cleanMessageContent(m.content)).join('\n');
         const historyForScan = currentMessages.slice(-10).map(m => `${m.role}: ${cleanMessageContent(m.content)}`);
 
@@ -281,8 +327,8 @@ export const useChatEngine = (sessionId: string | null) => {
             worldInfoPinned,
             mergedSettings,
             historyForScan,
-            cleanInput, // Pass specific latest input
-            variables // Pass current variables
+            cleanInput,
+            variables
         );
         
         if (smartScanLog) {
@@ -295,7 +341,6 @@ export const useChatEngine = (sessionId: string | null) => {
         try {
             const promptMessages = currentMessages.filter(m => m.role !== 'system');
             
-            // Re-prepare dynamic sections with active WI
             const { baseSections: dynamicSections } = prepareChat(
                 card, 
                 mergedSettings, 
@@ -306,62 +351,79 @@ export const useChatEngine = (sessionId: string | null) => {
                 worldInfoPlacement
             );
             
-            // --- SMART CONTEXT / PROMPT LOGIC UPDATE ---
-            // Pass chunkSize as pageSize to promptManager so it calculates the history slice correctly
             const chunkSize = mergedSettings.summarization_chunk_size || 10; 
             const contextMode = mergedSettings.context_mode || 'standard';
 
-            // Construct the full prompt (returns both string and structure)
             const { fullPrompt, structuredPrompt } = await constructChatPrompt(
-                dynamicSections, // Pass array, not string
+                dynamicSections, 
                 promptMessages,
                 authorNote,
                 card,
                 longTermSummaries,
-                chunkSize, // Use chunk size to determine how many messages are "eaten" by summaries
+                chunkSize, 
                 variables,
                 lastStateBlock,
                 lorebooks, 
                 contextMode,
                 persona?.name || 'User',
-                // NEW ARGS FOR INTERNAL RENDERING
                 worldInfoState,
                 activeEntries,
                 worldInfoPlacement,
-                mergedSettings // acts as preset
+                mergedSettings
             );
             
-            logPrompt(structuredPrompt); // Pass structured array for debugging
+            logPrompt(structuredPrompt); 
             
             await saveSession({
                 messages: currentMessages,
                 worldInfoRuntime: updatedRuntimeState
             });
             
-            // --- STREAMING OR NON-STREAMING BRANCH ---
             if (mergedSettings.stream_response) {
-                // STREAMING MODE (Live Parser)
-                
-                // 1. Create temporary placeholder message
                 const streamMessage = createMessage('model', '...', undefined, undefined, variables);
                 setMessages(prev => [...prev, streamMessage]);
                 
                 let rawAccumulatedText = '';
+                let ttsBuffer = "";
+                const isTtsStreamingActive = autoPlayEnabled && mergedSettings.tts_enabled && mergedSettings.tts_streaming;
                 
-                // 2. Stream loop
                 const stream = generateStream(fullPrompt, mergedSettings);
                 for await (const chunk of stream) {
                     rawAccumulatedText += chunk;
                     
-                    // Live Filter: Apply cleanMessageContent dynamically to hide partial technical tags
-                    // Note: This regex is robust enough to hide <thinking> even if unfinished, usually.
-                    // But for strict "hiding", we rely on the fact that cleanMessageContent removes completed tags.
-                    // To hide unfinished tags, we'd need a stream parser. 
-                    // MVP: We accept short blips of <thi... but prompt manager cleaner handles it decently.
+                    if (isTtsStreamingActive) {
+                        ttsBuffer += chunk;
+                        let hasThinking = true;
+                        while(hasThinking) {
+                            const newBuff = ttsBuffer.replace(/<thinking>[\s\S]*?<\/thinking>/i, "");
+                            if (newBuff === ttsBuffer) hasThinking = false;
+                            else ttsBuffer = newBuff;
+                        }
+                        const isInsideThinking = /<thinking/i.test(ttsBuffer) && !/<\/thinking/i.test(ttsBuffer);
+
+                        if (!isInsideThinking) {
+                            const match = ttsBuffer.match(/[.!?\n]+(?=\s|$)/);
+                            if (match && match.index !== undefined) {
+                                const cutIndex = match.index + match[0].length;
+                                const sentence = ttsBuffer.slice(0, cutIndex);
+                                ttsBuffer = ttsBuffer.slice(cutIndex);
+                                const cleanSentence = cleanMessageContent(sentence).replace(/<[^>]*>/g, '').trim();
+                                
+                                if (cleanSentence) {
+                                    const voice = mergedSettings.tts_provider === 'native' 
+                                        ? (mergedSettings.tts_native_voice || '') 
+                                        : (mergedSettings.tts_voice || 'Kore');
+                                    
+                                    addToQueue(cleanSentence, voice, `stream_${Date.now()}`, {
+                                        provider: mergedSettings.tts_provider || 'gemini',
+                                        rate: mergedSettings.tts_rate,
+                                        pitch: mergedSettings.tts_pitch
+                                    });
+                                }
+                            }
+                        }
+                    }
                     
-                    // Simple hack to hide unfinished thinking tags for cleaner UI:
-                    // If text ends with <th or <Update, we hold back update? 
-                    // No, let's just use cleanMessageContent on the whole buffer.
                     const display = cleanMessageContent(rawAccumulatedText);
                     
                     setMessages(prev => {
@@ -374,14 +436,25 @@ export const useChatEngine = (sessionId: string | null) => {
                     });
                 }
                 
-                // 3. Finalize: Remove placeholder and run full post-processor on the complete raw text
-                setMessages(prev => prev.filter(m => m.id !== streamMessage.id)); // Remove streaming placeholder
-                await processAndSetModelResponse(rawAccumulatedText, currentMessages, variables); // Process properly and add final message
+                if (isTtsStreamingActive && ttsBuffer.trim()) {
+                     if (!/<thinking/i.test(ttsBuffer)) {
+                         const cleanSentence = cleanMessageContent(ttsBuffer).replace(/<[^>]*>/g, '').trim();
+                         if (cleanSentence) {
+                             const voice = mergedSettings.tts_provider === 'native' ? (mergedSettings.tts_native_voice || '') : (mergedSettings.tts_voice || 'Kore');
+                             addToQueue(cleanSentence, voice, `stream_end_${Date.now()}`, {
+                                provider: mergedSettings.tts_provider || 'gemini',
+                                rate: mergedSettings.tts_rate,
+                                pitch: mergedSettings.tts_pitch
+                             });
+                         }
+                     }
+                }
+                
+                setMessages(prev => prev.filter(m => m.id !== streamMessage.id)); 
+                await processAndSetModelResponse(rawAccumulatedText, currentMessages, variables); 
 
             } else {
-                // STANDARD MODE (Wait for full response)
                 const response = await generate(fullPrompt, mergedSettings);
-            
                 if (response) {
                     const rawContent = response.text || '[Lỗi: AI đã trả về một phản hồi trống]';
                     await processAndSetModelResponse(rawContent, currentMessages, variables);
@@ -392,23 +465,20 @@ export const useChatEngine = (sessionId: string | null) => {
 
         } catch (e) {
             console.error("SendMessage Error:", e);
-             setMessages(prev => prev.filter(m => m.id !== userMessage.id));
+            stopAll();
+            setMessages(prev => prev.filter(m => m.id !== userMessage.id));
         }
-    }, [baseSections, messages, authorNote, card, preset, mergedSettings, longTermSummaries, defaultPageSize, isGenerating, isScanning, isSummarizing, logPrompt, processAndSetModelResponse, variables, lastStateBlock, worldInfoState, worldInfoRuntime, worldInfoPinned, worldInfoPlacement, lorebooks, persona, saveSession, logWorldInfo, logSmartScan, setMessages, setWorldInfoRuntime, generate, generateStream, clearAiError, scanInput, startTurn, logDiagnostic]);
+    }, [baseSections, messages, authorNote, card, preset, mergedSettings, longTermSummaries, isGenerating, isScanning, isGlobalSummarizing, logPrompt, processAndSetModelResponse, variables, lastStateBlock, worldInfoState, worldInfoRuntime, worldInfoPinned, worldInfoPlacement, lorebooks, persona, saveSession, logWorldInfo, logSmartScan, setMessages, setWorldInfoRuntime, generate, generateStream, clearAiError, scanInput, startTurn, logDiagnostic, autoPlayEnabled, addToQueue, stopAll]);
     
     // --- AUTO LOOP LOGIC ---
     useEffect(() => {
-        // Only run if AutoLoop is enabled, not currently generating, and there are messages
-        if (!isAutoLooping || isGenerating || isScanning || isSummarizing || messages.length === 0) return;
+        if (!isAutoLooping || isGenerating || isScanning || isGlobalSummarizing || messages.length === 0) return;
 
         const lastMessage = messages[messages.length - 1];
 
-        // Trigger only if the last message was from the Model (AI)
         if (lastMessage.role === 'model') {
             const rawContent = lastMessage.originalRawContent || lastMessage.content || "";
             
-            // 1. Extract [CHOICE: "..."]
-            // Note: We use the raw content to ensure we capture choices even if they were hidden in display
             const choiceRegex = /\[CHOICE:\s*"([^"]+)"\]/gi;
             const choices: string[] = [];
             let match;
@@ -419,22 +489,17 @@ export const useChatEngine = (sessionId: string | null) => {
             let nextPrompt = "";
 
             if (choices.length > 0) {
-                // If choices exist, pick one randomly to simulate player action
                 const randomIndex = Math.floor(Math.random() * choices.length);
                 nextPrompt = choices[randomIndex];
             } else {
-                // If no choices, use the "Nudge Prompt" from preset or default
-                // This keeps the story going if AI forgets to output a choice
                 nextPrompt = preset?.continue_nudge_prompt || "[Tiếp tục...]";
             }
 
-            // Execute the next turn immediately (no delay as requested)
-            // Using setTimeout 0 to ensure stack clears and React updates flow
             setTimeout(() => {
                 sendMessage(nextPrompt);
             }, 0);
         }
-    }, [isAutoLooping, isGenerating, isScanning, isSummarizing, messages, sendMessage, preset]);
+    }, [isAutoLooping, isGenerating, isScanning, isGlobalSummarizing, messages, sendMessage, preset]);
 
     const addSystemMessage = useCallback(async (content: string) => {
         if (!content.trim()) return;
@@ -445,57 +510,84 @@ export const useChatEngine = (sessionId: string | null) => {
         await saveSession({ messages: newMessages });
     }, [messages, saveSession, setMessages, variables, startTurn]);
 
-    const deleteLastTurn = useCallback(async () => {
-        let newMessages = [...messages];
-        if (newMessages.length === 0) return;
-        const lastMessage = newMessages[newMessages.length - 1];
-        
-        if (lastMessage.role === 'model' && newMessages.length > 1) {
-             const secondLastMessage = newMessages[newMessages.length - 2];
-             if (secondLastMessage.role === 'user') {
-                newMessages = newMessages.slice(0, -2);
-             } else {
-                newMessages = newMessages.slice(0, -1);
-             }
-        } else {
-            newMessages = newMessages.slice(0, -1);
-        }
+    // --- REWIND / DELETE MESSAGE LOGIC ---
+    const deleteMessage = useCallback(async (messageId: string) => {
+        if (isGenerating || isScanning) return;
 
+        const messageIndex = messages.findIndex(msg => msg.id === messageId);
+        if (messageIndex === -1) return;
+
+        const newMessages = messages.slice(0, messageIndex);
+        
         const lastRemainingMessage = newMessages.length > 0 ? newMessages[newMessages.length - 1] : null;
-        let restoredVariables = variables; 
+        let restoredVariables = {}; 
+        let restoredStateBlock = '';
 
         if (lastRemainingMessage && lastRemainingMessage.contextState) {
-            restoredVariables = lastRemainingMessage.contextState;
-            setVariables(restoredVariables);
-            // We don't start a new turn for delete, just log to system console
-            logSystemMessage('state', 'system', 'Restored variables from history rollback.');
+            restoredVariables = JSON.parse(JSON.stringify(lastRemainingMessage.contextState));
+        } else if (newMessages.length === 0 && card?.char_book?.entries) {
+             const initVarEntry = card.char_book.entries.find(e => e.comment?.includes('[InitVar]'));
+             if (initVarEntry?.content) {
+                 try { restoredVariables = JSON.parse(initVarEntry.content); } catch (e) {}
+             }
         }
 
-        // Re-implement findPreviousStateBlock locally or import
-        const findPreviousStateBlock = (history: ChatMessage[], defaultBlock: string): string => {
+        const findPreviousStateBlock = (history: ChatMessage[]): string => {
             for (let i = history.length - 1; i >= 0; i--) {
-                const msg = history[i];
-                if (msg.interactiveHtml) return msg.interactiveHtml;
+                if (history[i].interactiveHtml) return history[i].interactiveHtml!;
             }
-            return defaultBlock;
+            return '';
         };
+        restoredStateBlock = findPreviousStateBlock(newMessages);
 
-        const restoredStateBlock = newMessages.length > 0 ? findPreviousStateBlock(newMessages, '') : '';
-        setLastStateBlock(restoredStateBlock);
-        if (restoredStateBlock) {
-             logSystemMessage('state', 'system', 'Restored HTML State Block from history rollback.');
+        if (mergedSettings) {
+            const chunkSize = mergedSettings.summarization_chunk_size || 10;
+            const validSummaryCount = Math.floor(newMessages.length / chunkSize);
+            
+            if (validSummaryCount < longTermSummaries.length) {
+                const newSummaries = longTermSummaries.slice(0, validSummaryCount);
+                setLongTermSummaries(newSummaries);
+                setSummaryQueue([]); 
+                logSystemMessage('system', 'system', `Rewind: Truncated summaries to ${validSummaryCount} and cleared queue.`);
+                
+                await saveSession({ 
+                    longTermSummaries: newSummaries, 
+                    summaryQueue: [] 
+                });
+            }
         }
 
+        setVariables(restoredVariables);
+        setLastStateBlock(restoredStateBlock);
         setMessages(newMessages);
-        await saveSession({ 
-            messages: newMessages, 
+        
+        logSystemMessage('interaction', 'system', `Rewound chat to before message index ${messageIndex}.`);
+
+        await saveSession({
+            messages: newMessages,
             variables: restoredVariables,
             lastStateBlock: restoredStateBlock
         });
-    }, [messages, saveSession, setMessages, variables, logSystemMessage]);
+
+    }, [messages, card, mergedSettings, longTermSummaries, isGenerating, isScanning, saveSession, setMessages, setVariables, setLastStateBlock, setLongTermSummaries, setSummaryQueue, logSystemMessage]);
+
+    const deleteLastTurn = useCallback(async () => {
+        if (messages.length === 0) return;
+        const lastMsg = messages[messages.length - 1];
+        let targetId = lastMsg.id;
+
+        if (lastMsg.role === 'model' && messages.length >= 2) {
+            const secondLast = messages[messages.length - 2];
+            if (secondLast.role === 'user') {
+                targetId = secondLast.id; 
+            }
+        }
+        
+        await deleteMessage(targetId);
+    }, [messages, deleteMessage]);
 
     const regenerateLastResponse = useCallback(async () => {
-        if (isGenerating || isScanning || isSummarizing || !card || !preset || !mergedSettings) return;
+        if (isGenerating || isScanning || isGlobalSummarizing || !card || !preset || !mergedSettings) return;
         
         let lastUserMessageIndex = -1;
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -507,7 +599,7 @@ export const useChatEngine = (sessionId: string | null) => {
 
         if (lastUserMessageIndex === -1) return;
         
-        startTurn(); // New turn for regen
+        startTurn();
 
         const historyForRegen = messages.slice(0, lastUserMessageIndex + 1);
         const lastUserMessage = historyForRegen[historyForRegen.length - 1];
@@ -519,7 +611,6 @@ export const useChatEngine = (sessionId: string | null) => {
             logSystemMessage('state', 'system', 'Restored variables for regeneration.');
         }
         
-        // Re-find state block
         const findPreviousStateBlock = (history: ChatMessage[], defaultBlock: string): string => {
             for (let i = history.length - 1; i >= 0; i--) {
                 const msg = history[i];
@@ -530,7 +621,6 @@ export const useChatEngine = (sessionId: string | null) => {
         const restoredStateBlock = findPreviousStateBlock(historyForRegen, '');
         setLastStateBlock(restoredStateBlock);
 
-        // CLEANED INPUT FOR SCANNING
         const cleanInput = cleanMessageContent(lastUserMessage.content);
         const textToScan = cleanInput + '\n' + historyForRegen.slice(-4, -1).map(m => cleanMessageContent(m.content)).join('\n');
         const historyForScan = historyForRegen.slice(-10).map(m => `${m.role}: ${cleanMessageContent(m.content)}`);
@@ -542,8 +632,8 @@ export const useChatEngine = (sessionId: string | null) => {
             worldInfoPinned,
             mergedSettings,
             historyForScan,
-            cleanInput, // Pass specific latest input
-            restoredVariables // Pass restored vars
+            cleanInput, 
+            restoredVariables 
         );
 
         if (smartScanLog) {
@@ -568,7 +658,6 @@ export const useChatEngine = (sessionId: string | null) => {
                 worldInfoPlacement
             );
 
-            // --- SMART CONTEXT / PROMPT LOGIC UPDATE (REGEN) ---
             const chunkSize = mergedSettings.summarization_chunk_size || 10;
             const contextMode = mergedSettings.context_mode || 'standard';
 
@@ -578,13 +667,12 @@ export const useChatEngine = (sessionId: string | null) => {
                 authorNote,
                 card,
                 longTermSummaries,
-                chunkSize, // Use chunk size here
+                chunkSize, 
                 restoredVariables,
                 restoredStateBlock,
                 lorebooks,
                 contextMode,
                 persona?.name || 'User',
-                // NEW ARGS
                 worldInfoState,
                 activeEntries,
                 worldInfoPlacement,
@@ -600,15 +688,12 @@ export const useChatEngine = (sessionId: string | null) => {
                  lastStateBlock: restoredStateBlock
              });
              
-             // --- REGEN STREAMING LOGIC ---
              if (mergedSettings.stream_response) {
-                // 1. Placeholder
                 const streamMessage = createMessage('model', '...', undefined, undefined, restoredVariables);
                 setMessages(prev => [...prev, streamMessage]);
                 
                 let rawAccumulatedText = '';
                 
-                // 2. Stream
                 const stream = generateStream(fullPrompt, mergedSettings);
                 for await (const chunk of stream) {
                     rawAccumulatedText += chunk;
@@ -624,7 +709,6 @@ export const useChatEngine = (sessionId: string | null) => {
                     });
                 }
                 
-                // 3. Finalize
                 setMessages(prev => prev.filter(m => m.id !== streamMessage.id)); 
                 await processAndSetModelResponse(rawAccumulatedText, historyForRegen, restoredVariables);
 
@@ -643,7 +727,7 @@ export const useChatEngine = (sessionId: string | null) => {
             console.error("Regenerate Error:", e);
             setMessages(messages); 
         }
-    }, [messages, authorNote, card, preset, mergedSettings, longTermSummaries, defaultPageSize, isGenerating, isScanning, isSummarizing, logPrompt, processAndSetModelResponse, variables, worldInfoState, worldInfoRuntime, worldInfoPinned, worldInfoPlacement, lorebooks, persona, saveSession, logWorldInfo, logSmartScan, setMessages, setWorldInfoRuntime, generate, generateStream, clearAiError, scanInput, logSystemMessage, setLastStateBlock, startTurn]);
+    }, [messages, authorNote, card, preset, mergedSettings, longTermSummaries, isGenerating, isScanning, isGlobalSummarizing, logPrompt, processAndSetModelResponse, variables, worldInfoState, worldInfoRuntime, worldInfoPinned, worldInfoPlacement, lorebooks, persona, saveSession, logWorldInfo, logSmartScan, setMessages, setWorldInfoRuntime, generate, generateStream, clearAiError, scanInput, logSystemMessage, setLastStateBlock, startTurn]);
 
     const editMessage = useCallback(async (messageId: string, newContent: string) => {
         const messageIndex = messages.findIndex(msg => msg.id === messageId);
@@ -707,7 +791,6 @@ export const useChatEngine = (sessionId: string | null) => {
             if (event.data.type === 'UPDATE_SCRIPT_BUTTONS') {
                 if (event.data.payload) {
                     const { scriptId, buttons } = event.data.payload;
-                    // We process the button list to ensure they have IDs
                     const processedButtons: ScriptButton[] = (buttons || []).map((btn: any, idx: number) => ({
                         id: `btn_${scriptId}_${idx}`,
                         label: btn.name || btn.label || 'Button',
@@ -725,26 +808,19 @@ export const useChatEngine = (sessionId: string | null) => {
     }, [logSystemMessage]);
 
     const handleScriptButtonClick = useCallback((button: ScriptButton) => {
-        const lastInteractiveMessage = [...messages].reverse().find(m => m.interactiveHtml);
-        // We need to find the iframe to send the message TO
-        // We can broadcast to all, but ideally we target the active one.
-        // Since we don't have the ref here, we'll use window.frames logic inside InteractiveHtmlMessage or just broadcast via window.postMessage if same origin,
-        // but iframe is same origin.
-        
-        // Broadcasting to all iframes is safer for now as only the one with the script will react
         const iframes = document.querySelectorAll('iframe');
         iframes.forEach(iframe => {
             iframe.contentWindow?.postMessage({
                 type: 'EXECUTE_BUTTON_SCRIPT',
                 payload: {
                     scriptId: button.scriptId,
-                    buttonName: button.label // Passing label as ID for now as per simple mock
+                    buttonName: button.label 
                 }
             }, '*');
         });
         
         logSystemMessage('interaction', 'system', `Clicked Script Button: ${button.label}`);
-    }, [messages, logSystemMessage]);
+    }, [logSystemMessage]);
 
 
     const executeSlashCommands = useCallback(async (script: string) => {
@@ -774,30 +850,35 @@ export const useChatEngine = (sessionId: string | null) => {
             showToast: showToast,
             showPopup: showPopup,
             setQuickReplies: setQuickReplies,
-            setIsInputLocked: setIsInputLocked // Pass Lock Setter
+            setIsInputLocked: setIsInputLocked 
         };
         await executeScript(script, context);
     }, [variables, setVariables, saveSession, sendMessage, addSystemMessage, card, persona, logSystemMessage, updateVisualState, showToast, showPopup]);
 
     return {
-        messages, isLoading, isSummarizing, error,
-        sendMessage, addSystemMessage, deleteLastTurn, regenerateLastResponse, editMessage,
+        messages, isLoading: isSessionLoading || isGenerating || isScanning || isGlobalSummarizing, isSummarizing: isGlobalSummarizing, error,
+        sendMessage, addSystemMessage, deleteLastTurn, regenerateLastResponse, editMessage, deleteMessage, 
         authorNote, updateAuthorNote,
         worldInfoState, updateWorldInfoState,
         worldInfoPinned, updateWorldInfoPinned,
         worldInfoPlacement, updateWorldInfoPlacement,
         variables, setVariables,
         extensionSettings, updateExtensionSettings,
-        logs, logSystemMessage, clearSystemLogs, clearLogs, // NEW: Export clearLogs
+        logs, logSystemMessage, clearSystemLogs, clearLogs, 
         card, longTermSummaries,
         executeSlashCommands, visualState,
         quickReplies, setQuickReplies,
-        scriptButtons, handleScriptButtonClick, // NEW EXPORTS
+        scriptButtons, handleScriptButtonClick, 
         isInputLocked,
         preset,
         changePreset,
-        updateVisualState, // EXPORT NEW FUNCTION
-        saveSession, // Added to fix ChatTester.tsx error
-        isAutoLooping, setIsAutoLooping // NEW EXPORTS for Auto Loop
+        updateVisualState, 
+        saveSession, 
+        isAutoLooping, setIsAutoLooping,
+        queueLength, 
+        triggerSmartContext,
+        handleRegenerateSummary, 
+        handleRetryFailedTask, // EXPORT RETRY
+        summaryQueue // EXPORT QUEUE
     };
 };

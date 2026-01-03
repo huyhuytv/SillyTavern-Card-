@@ -1,6 +1,6 @@
 
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import type { CharacterCard, EnhancementField, SillyTavernPreset, Lorebook, ChatMessage, OpenRouterModel } from '../types';
+import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
+import type { CharacterCard, SillyTavernPreset, Lorebook, ChatMessage, OpenRouterModel } from '../types';
 import { getActiveModel, getApiKey, getOpenRouterApiKey, getProxyUrl } from './settingsService';
 import { cleanMessageContent } from './promptManager';
 import defaultPreset from '../data/defaultPreset';
@@ -32,80 +32,6 @@ const getGeminiClient = (): GoogleGenAI => {
     }
     return new GoogleGenAI({ apiKey });
 };
-
-
-export async function analyzeCard(card: CharacterCard): Promise<string> {
-  const cardJson = JSON.stringify(card, null, 2);
-  const ai = getGeminiClient();
-
-  const prompt = `
-Bạn là một chuyên gia tạo nhân vật cho trò chơi nhập vai AI theo định dạng SillyTavern.
-Hãy phân tích tệp JSON của thẻ nhân vật SillyTavern đầy đủ dưới đây. Dữ liệu này bao gồm các trường cốt lõi, kịch bản, Sổ tay Thế giới (char_book) và các siêu dữ liệu khác.
-
-Cung cấp một bản tóm tắt ngắn gọn, điểm chất lượng từ 1 đến 10, và 3 đề xuất cụ thể, có thể thực hiện để cải thiện.
-Tập trung vào tính nhất quán, chiều sâu, sự gắn kết giữa các trường (ví dụ: mô tả so với Sổ tay Thế giới) và tiềm năng cho việc nhập vai hấp dẫn. Định dạng câu trả lời của bạn bằng markdown.
-
-JSON Thẻ Nhân vật đầy đủ:
-\`\`\`json
-${cardJson}
-\`\`\`
-`;
-
-  try {
-    const response = await ai.models.generateContent({
-        model: getActiveModel(),
-        contents: prompt,
-        config: {
-            safetySettings,
-        },
-    });
-    return response.text || '';
-  } catch (error) {
-    console.error("Gemini API error in analyzeCard:", error);
-    throw new Error("Không thể nhận phân tích từ Gemini. Vui lòng kiểm tra API key và kết nối mạng.");
-  }
-}
-
-export async function enhanceField(field: EnhancementField, currentValue: string, cardContext: CharacterCard): Promise<string> {
-  const contextJson = JSON.stringify(cardContext, null, 2);
-  const ai = getGeminiClient();
-  
-  const fieldName = field.replace('_', ' ');
-
-  const prompt = `
-Bạn là một trợ lý AI chuyên về viết sáng tạo cho các nhân vật nhập vai.
-Dựa trên bối cảnh nhân vật đầy đủ được cung cấp (bao gồm mô tả, tính cách, kịch bản, Sổ tay Thế giới, v.v.), hãy viết lại trường sau đây để trở nên gợi cảm, hấp dẫn và nhất quán hơn với toàn bộ con người nhân vật.
-CHỈ trả về văn bản mới cho trường đó, không có bất kỳ bình luận hay nhãn phụ nào.
-
-Bối cảnh nhân vật đầy đủ:
-\`\`\`json
-${contextJson}
-\`\`\`
-
-Trường cần cải thiện: "${fieldName}"
-
-Nội dung hiện tại:
-"${currentValue}"
-
-Nội dung mới, đã được cải thiện:
-`;
-  
-  try {
-    const response = await ai.models.generateContent({
-        model: getActiveModel(),
-        contents: prompt,
-        config: {
-            safetySettings,
-        },
-    });
-    // Clean up potential markdown code blocks or quotes
-    return response.text?.trim().replace(/^`+[\w]*\n|`+$/g, '').trim() || '';
-  } catch (error) {
-    console.error(`Gemini API error in enhanceField for ${field}:`, error);
-    throw new Error(`Không thể cải thiện ${fieldName} bằng Gemini. Vui lòng kiểm tra API key và kết nối mạng.`);
-  }
-}
-
 
 export async function summarizeHistory(historySlice: ChatMessage[], cardName: string, customPrompt?: string): Promise<string> {
   // FIX: Fallback to originalRawContent if content is empty (Interactive Card Support)
@@ -693,6 +619,18 @@ function extractAndParseJson(text: string): any {
     } catch (e) {
         // Continue
     }
+    
+    // 4. Robust Substring Extraction for Array (Search for outermost [])
+    try {
+        const firstOpen = text.indexOf('[');
+        const lastClose = text.lastIndexOf(']');
+        if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
+            const potentialJson = text.substring(firstOpen, lastClose + 1);
+            return JSON.parse(potentialJson);
+        }
+    } catch (e) {
+        // Continue
+    }
 
     throw new Error("Could not parse JSON from response.");
 }
@@ -758,5 +696,144 @@ export async function scanWorldInfoWithAI(
     } catch (error) {
         console.error("Gemini API error in scanWorldInfoWithAI:", error);
         return { selectedIds: [], outgoingPrompt: finalPrompt, rawResponse: String(error) };
+    }
+}
+
+/**
+ * TRANSLATE LOREBOOK BATCH
+ * Translates a batch of Lorebook Entries to Vietnamese using strict rules.
+ */
+export async function translateLorebookBatch(
+    entries: any[], // Raw entry objects
+    customPromptTemplate: string,
+    model: string = 'gemini-3-flash-preview' // Default as requested
+): Promise<{ entries: any[], rawResponse: string, finalPrompt: string }> {
+    const ai = getGeminiClient();
+    
+    // Filter relevant fields to save token usage
+    const minifiedEntries = entries.map(e => ({
+        uid: e.uid,
+        keys: e.keys,
+        comment: e.comment,
+        content: e.content
+    }));
+
+    const jsonString = JSON.stringify(minifiedEntries);
+    const finalPrompt = customPromptTemplate.replace('{{json_data}}', jsonString);
+
+    let responseText = "";
+
+    try {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: finalPrompt,
+            config: {
+                responseMimeType: 'application/json',
+                // Using Schema to force strict structure
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            uid: { type: Type.STRING },
+                            keys: { type: Type.ARRAY, items: { type: Type.STRING } },
+                            comment: { type: Type.STRING },
+                            content: { type: Type.STRING },
+                        },
+                        required: ["uid", "keys", "comment", "content"],
+                    },
+                },
+                safetySettings,
+                temperature: 0.1 // Low temp for deterministic translation
+            },
+        });
+
+        responseText = response.text || "[]";
+        let translatedEntries = extractAndParseJson(responseText);
+        
+        if (!Array.isArray(translatedEntries)) {
+            // Try to extract if wrapped in object
+            if (translatedEntries.entries) translatedEntries = translatedEntries.entries;
+            else if (translatedEntries.data) translatedEntries = translatedEntries.data;
+            else throw new Error("AI trả về định dạng JSON không phải là mảng.");
+        }
+
+        return { entries: translatedEntries, rawResponse: responseText, finalPrompt };
+
+    } catch (error: any) {
+        console.error("Gemini API error in translateLorebookBatch:", error);
+        // THROW RICH ERROR OBJECT TO PASS DATA BACK TO UI
+        // eslint-disable-next-line no-throw-literal
+        throw {
+            message: error.message || String(error),
+            rawResponse: responseText || "(Không có phản hồi hoặc lỗi mạng)",
+            finalPrompt: finalPrompt
+        };
+    }
+}
+
+/**
+ * BATCH TRANSLATE GREETINGS
+ * Combines first_mes, alternate_greetings, and group_only_greetings into a single payload for context-aware translation.
+ * UPDATED: Uses extractAndParseJson instead of raw JSON.parse and relaxes Schema.
+ */
+export async function translateGreetingsBatch(
+    data: {
+        first_mes: string;
+        alternate_greetings: string[];
+        group_only_greetings: string[];
+    },
+    context: {
+        name: string;
+        description: string;
+    },
+    model: string = 'gemini-3-flash-preview'
+) {
+    const ai = getGeminiClient();
+
+    const prompt = `
+Bạn là một dịch giả tiểu thuyết chuyên nghiệp. Nhiệm vụ của bạn là dịch các lời chào nhân vật sau sang tiếng Việt.
+
+**THÔNG TIN NHÂN VẬT (Ngữ cảnh):**
+- Tên: ${context.name}
+- Mô tả: ${context.description}
+
+**QUY TẮC DỊCH THUẬT:**
+1. **Phong cách:** Dựa vào 'Mô tả' nhân vật để chọn giọng văn phù hợp (Cổ trang, Hiện đại, Lạnh lùng, Dễ thương...).
+2. **Xưng hô:** Chọn đại từ nhân xưng (Ta/Nàng, Anh/Em, Tôi/Cậu...) nhất quán xuyên suốt tất cả các lời chào.
+3. **Kỹ thuật:**
+   - Giữ nguyên các biến trong ngoặc nhọn: {{user}}, {{char}}.
+   - Giữ nguyên các thẻ HTML hoặc script nếu có.
+   - Dịch thoát ý, tự nhiên, văn học, tránh dịch word-by-word.
+4. **Định dạng:** Trả về JSON đúng cấu trúc đầu vào. KHÔNG thay đổi tên trường (keys).
+
+**QUAN TRỌNG:** 
+- Nếu dữ liệu đầu vào là mảng rỗng [], hãy trả về mảng rỗng [].
+- Chỉ trả về chuỗi JSON thuần túy, không kèm theo markdown (block code).
+
+**DỮ LIỆU CẦN DỊCH:**
+${JSON.stringify(data, null, 2)}
+`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                // Relaxed: Removed strict schema to handle empty arrays better
+                // and avoid SDK client-side validation errors.
+                safetySettings,
+            }
+        });
+
+        const text = response.text || "{}";
+        console.log("Translation Response:", text); // Debug log
+        
+        return extractAndParseJson(text);
+
+    } catch (error: any) {
+        console.error("Greeting Translation Error:", error);
+        throw new Error(error.message || "Lỗi dịch thuật từ AI.");
     }
 }

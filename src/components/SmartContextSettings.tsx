@@ -95,7 +95,7 @@ export const SmartContextSettings: React.FC<SmartContextSettingsProps> = ({ pres
                         min={4}
                         max={100}
                         step={2}
-                        tooltipText="Khi số lượng tin nhắn chưa tóm tắt đạt đến ngưỡng này, hệ thống sẽ kích hoạt tóm tắt. (Ví dụ: 20 tin nhắn)."
+                        tooltipText="Khi số LƯỢT (Turns) chưa tóm tắt đạt đến ngưỡng này, hệ thống sẽ kích hoạt tóm tắt. (Ví dụ: 20 lượt)."
                     />
 
                     <SliderInput
@@ -105,7 +105,7 @@ export const SmartContextSettings: React.FC<SmartContextSettingsProps> = ({ pres
                         min={1}
                         max={preset.context_depth || 20}
                         step={1}
-                        tooltipText="Số lượng tin nhắn CŨ NHẤT sẽ được cắt ra để tóm tắt mỗi lần kích hoạt. (Ví dụ: Cắt 10 tin cũ nhất, giữ lại 10 tin mới nhất làm ngữ cảnh)."
+                        tooltipText="Số LƯỢT (Turns) CŨ NHẤT sẽ được cắt ra để tóm tắt mỗi lần kích hoạt. (Ví dụ: Cắt 10 lượt cũ nhất, giữ lại 10 lượt mới nhất làm ngữ cảnh)."
                     />
 
                     <SelectInput 

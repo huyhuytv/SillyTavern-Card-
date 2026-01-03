@@ -13,6 +13,7 @@ import { performWorldInfoScan } from '../services/worldInfoScanner';
 import { processVariableUpdates } from '../services/variableEngine';
 import { createSnapshot, importSnapshot } from '../services/snapshotService';
 import { ExportModal } from './ExportModal';
+import { useToast } from './ToastSystem';
 
 interface ChatLobbyProps {
     onSessionSelect: (sessionId: string) => void;
@@ -197,6 +198,7 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
     const [greetingModalChar, setGreetingModalChar] = useState<CharacterInContext | null>(null);
     const [error, setError] = useState<string>('');
     const [isImporting, setIsImporting] = useState(false);
+    const { showToast } = useToast();
     
     // Export Modal State
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -250,8 +252,8 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
             ]);
             
             // Auto-redirect to the imported session
+            showToast("Nhập bản ghi thành công!", 'success');
             onSessionSelect(sessionId);
-            alert("Nhập bản ghi thành công! Đang chuyển hướng...");
             
         } catch (err) {
             setError(`Lỗi nhập bản ghi: ${err instanceof Error ? err.message : String(err)}`);

@@ -16,6 +16,10 @@ const defaultPreset: SillyTavernPreset = {
     // Experimental Settings
     thinking_budget: 0, // Mặc định tắt (0)
 
+    // TTS Settings
+    tts_enabled: false,
+    tts_streaming: false, // Default off
+
     // Smart Scan Defaults
     smart_scan_enabled: true, // Bật mặc định vì chế độ là AI Only
     smart_scan_mode: 'ai_only', // 3. AI Toàn Quyền (AI Only)

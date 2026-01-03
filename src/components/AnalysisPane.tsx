@@ -1,10 +1,8 @@
 
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import type { CharacterCard, EnhancementField, WorldInfoEntry } from '../types';
-import { analyzeCard, enhanceField } from '../services/geminiService';
+import type { CharacterCard } from '../types';
 import { exportToPng, buildExportObject } from '../services/cardExporter';
 import { Loader } from './Loader';
-import { useLorebook } from '../contexts/LorebookContext';
 import { ExportModal } from './ExportModal';
 
 interface AnalysisPaneProps {
@@ -15,7 +13,6 @@ interface AnalysisPaneProps {
   avatarFile: File | null;
   setAvatarUrl: (url: string | null) => void;
   setAvatarFile: (file: File | null) => void;
-  onOpenArchitect: () => void; // NEW PROP
 }
 
 const estimateTokens = (text: string = ''): number => {
@@ -23,18 +20,7 @@ const estimateTokens = (text: string = ''): number => {
     return Math.ceil(text.length / 4);
 };
 
-const enhancementFieldLabels: Record<EnhancementField, string> = {
-    description: 'mô tả',
-    personality: 'tính cách',
-    first_mes: 'lời chào đầu',
-    mes_example: 'ví dụ hội thoại',
-};
-
-export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, fileName, avatarUrl, avatarFile, setAvatarUrl, setAvatarFile, onOpenArchitect }) => {
-    const { lorebooks } = useLorebook();
-    const [analysisResult, setAnalysisResult] = useState<string>('');
-    const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
-    const [isEnhancing, setIsEnhancing] = useState<EnhancementField | null>(null);
+export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, fileName, avatarUrl, avatarFile, setAvatarUrl, setAvatarFile }) => {
     const [isExporting, setIsExporting] = useState<boolean>(false);
     const [error, setError] = useState<string>('');
     const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -70,37 +56,6 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
         const total = description + personality + first_mes + mes_example;
         return { description, personality, first_mes, mes_example, total };
     }, [card]);
-
-    const handleAnalyze = async () => {
-        setIsAnalyzing(true);
-        setError('');
-        setAnalysisResult('');
-        try {
-            const completeCard = assembleCompleteCard(card);
-            const result = await analyzeCard(completeCard);
-            setAnalysisResult(result);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : 'Đã xảy ra lỗi không xác định trong quá trình phân tích.');
-        } finally {
-            setIsAnalyzing(false);
-        }
-    };
-
-    const handleEnhance = useCallback(async (field: EnhancementField) => {
-        setIsEnhancing(field);
-        setError('');
-        try {
-            const completeCardContext = assembleCompleteCard(card);
-            const currentContent = card[field];
-            const enhancedContent = await enhanceField(field, currentContent, completeCardContext);
-            onUpdate({ ...card, [field]: enhancedContent });
-        } catch(e) {
-            const fieldName = enhancementFieldLabels[field] || field;
-            setError(e instanceof Error ? `Không thể cải thiện ${fieldName}: ${e.message}` : 'Đã xảy ra một lỗi không xác định');
-        } finally {
-            setIsEnhancing(null);
-        }
-    }, [card, onUpdate, assembleCompleteCard]);
 
     // Opens the modal
     const handleExportClick = (type: 'json' | 'png') => {
@@ -148,8 +103,8 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
         <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg h-full space-y-6 flex flex-col">
             <div className="flex-grow space-y-6">
                 <div>
-                    <h3 className="text-xl font-bold text-sky-400 mb-2">Phân tích & Cải tiến</h3>
-                    <p className="text-sm text-slate-400 mb-4">Kiểm tra token, nhận phản hồi AI và xuất thẻ của bạn.</p>
+                    <h3 className="text-xl font-bold text-sky-400 mb-2">Công cụ Thẻ</h3>
+                    <p className="text-sm text-slate-400 mb-4">Quản lý tài nguyên, kiểm tra token và xuất bản.</p>
                 </div>
 
                 <div className="bg-slate-900/50 p-4 rounded-lg">
@@ -173,52 +128,6 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
                         <dd className="text-right font-mono text-amber-300 font-bold">{tokenCounts.total}</dd>
                     </dl>
                 </div>
-                
-                {/* Architect Button */}
-                <div>
-                    <button
-                        onClick={onOpenArchitect}
-                        className="w-full mb-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2 group border border-white/10"
-                    >
-                        <span className="text-xl">✨</span>
-                        <span>Mở AI Studio Architect</span>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 transform group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                        </svg>
-                    </button>
-                </div>
-
-                <div>
-                     <h4 className="font-semibold text-lg text-slate-200 mb-3">Cải tiến bằng AI</h4>
-                     <div className="grid grid-cols-2 gap-2">
-                         {(['description', 'personality', 'first_mes', 'mes_example'] as EnhancementField[]).map((field) => (
-                             <button 
-                                key={field}
-                                onClick={() => handleEnhance(field)}
-                                disabled={isEnhancing !== null || isAnalyzing}
-                                className="text-sm w-full bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold py-2 px-3 rounded-lg transition-colors duration-200 flex items-center justify-center capitalize border border-slate-600"
-                             >
-                                {isEnhancing === field ? <Loader message='' /> : `Cải thiện ${enhancementFieldLabels[field]}`}
-                             </button>
-                         ))}
-                     </div>
-                </div>
-
-                <div>
-                    <button
-                        onClick={handleAnalyze}
-                        disabled={isAnalyzing || isEnhancing !== null}
-                        className="w-full bg-sky-600 hover:bg-sky-700 disabled:bg-slate-600 text-white font-bold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
-                    >
-                        {isAnalyzing ? <Loader message="Gemini đang xử lý..." /> : 'Phân tích với Gemini'}
-                    </button>
-                </div>
-                {error && <p className="text-red-400 bg-red-900/50 p-3 rounded-lg text-sm">{error}</p>}
-                {analysisResult && (
-                    <div className="bg-slate-900/50 p-4 rounded-lg prose prose-invert prose-sm max-w-none text-slate-300 whitespace-pre-wrap font-sans">
-                       {analysisResult}
-                    </div>
-                )}
             </div>
 
             <div className="flex-shrink-0 space-y-4 pt-6 border-t border-slate-700">
@@ -239,6 +148,9 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
                         <p className="text-xs text-slate-500 mt-2">Tải lên tệp .png hoặc .jpeg để dùng làm avatar cho thẻ.</p>
                     </div>
                 </div>
+                
+                {error && <p className="text-red-400 bg-red-900/50 p-3 rounded-lg text-sm">{error}</p>}
+
                 <div className="grid grid-cols-2 gap-2">
                     <button onClick={() => handleExportClick('json')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
                         Xuất ra JSON

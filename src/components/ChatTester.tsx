@@ -15,7 +15,8 @@ import { AssistantPanel } from './Chat/AssistantPanel';
 import { GameHUD } from './Chat/GameHUD';
 import { FloatingStatusHUD } from './Chat/FloatingStatusHUD';
 import { Loader } from './Loader';
-import { applyVariableOperation } from '../services/variableEngine'; // Import Variable Engine logic
+import { applyVariableOperation } from '../services/variableEngine'; 
+import { countTotalTurns } from '../hooks/useChatMemory'; 
 
 interface ChatTesterProps {
     sessionId: string;
@@ -25,7 +26,7 @@ interface ChatTesterProps {
 export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => {
     const {
         messages, isLoading, isSummarizing, error,
-        sendMessage, deleteLastTurn, regenerateLastResponse, editMessage,
+        sendMessage, deleteLastTurn, deleteMessage, regenerateLastResponse, editMessage,
         authorNote, updateAuthorNote,
         worldInfoState, updateWorldInfoState,
         worldInfoPinned, updateWorldInfoPinned,
@@ -40,7 +41,12 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         isInputLocked,
         preset, changePreset,
         saveSession,
-        isAutoLooping, setIsAutoLooping // NEW
+        isAutoLooping, setIsAutoLooping,
+        queueLength, 
+        summaryQueue, // NEW: Full Queue State
+        triggerSmartContext,
+        handleRegenerateSummary,
+        handleRetryFailedTask // NEW: Retry Function
     } = useChatEngine(sessionId);
 
     const { characters } = useCharacter();
@@ -79,14 +85,7 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         }
     };
 
-    // --- ASSISTANT ACTION HANDLERS ---
-    
-    // Allows Assistant to update a deep variable safely using the Engine
     const handleUpdateVariable = (key: string, value: any) => {
-        // Use applyVariableOperation which handles:
-        // 1. Path normalization (removing 'stat_data.' prefix if AI added it)
-        // 2. Tuple preservation (updating [val, desc] correctly)
-        // 3. Immutability (returns a new object)
         try {
             const newVariables = applyVariableOperation(variables, 'set', key, value);
             setVariables(newVariables);
@@ -101,7 +100,6 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
     };
 
     const handleIframeLoad = (id: string) => {
-        // console.log(`Iframe ${id} loaded`);
     };
 
     const characterAvatarUrl = useMemo(() => {
@@ -110,11 +108,14 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         return charInContext?.avatarUrl || null;
     }, [card, characters]);
 
-    // Find last interactive message for Status HUD
     const lastInteractiveMsg = useMemo(() => {
         const reversed = [...messages].reverse();
         return reversed.find(m => m.interactiveHtml);
     }, [messages]);
+
+    // CALCULATE TURN COUNT FOR UI
+    // Instead of messages.length, we use the helper logic
+    const currentTurnCount = useMemo(() => countTotalTurns(messages), [messages]);
 
     if (!card || !preset) {
         return (
@@ -132,6 +133,10 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
             </div>
         );
     }
+
+    // Settings for Summaries Dashboard
+    const contextDepth = preset.context_depth || 20;
+    const chunkSize = preset.summarization_chunk_size || 10;
 
     return (
         <ChatLayout isImmersive={isImmersive} globalClass={visualState.globalClass}>
@@ -171,6 +176,7 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 onSaveEdit={handleSaveEdit}
                 regenerateLastResponse={regenerateLastResponse}
                 deleteLastTurn={deleteLastTurn}
+                onDeleteMessage={deleteMessage} 
                 onOpenAuthorNote={() => setIsAuthorNoteOpen(true)}
                 onOpenWorldInfo={() => setIsWorldInfoOpen(true)}
                 scripts={card.extensions?.TavernHelper_scripts || []}
@@ -192,8 +198,9 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 onUpdateAuthorNote={updateAuthorNote}
                 isSummarizing={isSummarizing}
                 isInputLocked={isInputLocked}
-                isAutoLooping={isAutoLooping} // Pass state
-                onToggleAutoLoop={() => setIsAutoLooping(!isAutoLooping)} // Pass handler
+                isAutoLooping={isAutoLooping} 
+                onToggleAutoLoop={() => setIsAutoLooping(!isAutoLooping)} 
+                queueLength={queueLength} 
             >
                 <DebugPanel 
                     logs={logs} 
@@ -203,6 +210,19 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                     copyStatus={false} 
                     isImmersive={isImmersive}
                     onLorebookCreatorOpen={() => setIsLorebookCreatorOpen(true)}
+                    // CHANGED: Use currentTurnCount instead of messages.length
+                    summaryStats={{
+                        messageCount: currentTurnCount,
+                        summaryCount: longTermSummaries.length,
+                        contextDepth: contextDepth,
+                        chunkSize: chunkSize,
+                        queueLength: queueLength
+                    }}
+                    longTermSummaries={longTermSummaries}
+                    summaryQueue={summaryQueue} // Pass Full Queue
+                    onForceSummarize={triggerSmartContext}
+                    onRegenerateSummary={handleRegenerateSummary} 
+                    onRetryFailedTask={handleRetryFailedTask} // Pass Retry Function
                 />
             </ChatInput>
 

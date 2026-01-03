@@ -44,6 +44,33 @@ const getActiveWorldInfoEntries = (
 };
 
 /**
+ * Helper: Tính index mảng tin nhắn tương ứng với số lượt đã bỏ qua.
+ * Dùng để xác định điểm bắt đầu của "Trang hiện tại" sau khi đã có các tóm tắt.
+ */
+const getMessageIndexFromTurns = (messages: ChatMessage[], turnsToSkip: number): number => {
+    if (turnsToSkip <= 0) return 0;
+    
+    let currentTurnIndex = 0;
+    
+    for (let i = 0; i < messages.length; i++) {
+        // Lượt 1 là tin nhắn đầu tiên (0). Các lượt sau kết thúc khi gặp role 'model'.
+        const isTurnEnd = (i === 0) || (messages[i].role === 'model');
+        
+        if (isTurnEnd) {
+            currentTurnIndex++;
+            // Nếu đã đếm đủ số lượt cần bỏ qua
+            if (currentTurnIndex === turnsToSkip) {
+                // Điểm bắt đầu của trang mới là ngay sau tin nhắn kết thúc lượt này
+                return i + 1;
+            }
+        }
+    }
+    
+    // Nếu số lượt yêu cầu lớn hơn thực tế, trả về độ dài mảng (hết)
+    return messages.length;
+};
+
+/**
  * Processes a string through the EJS engine with RECURSIVE support.
  */
 const processEjsTemplate = async (
@@ -241,7 +268,7 @@ export async function constructChatPrompt(
     authorNote: string,
     card: CharacterCard, 
     longTermSummaries: string[],
-    pageSize: number, 
+    chunkSizeTurns: number, // Renamed from pageSize for clarity
     variables: Record<string, any>,
     lastStateBlock: string, 
     lorebooks: Lorebook[] = [],
@@ -357,8 +384,13 @@ export async function constructChatPrompt(
         ? `${longTermSummaries.join('\n\n---\n\n')}`
         : "Đây là khởi đầu của cuộc trò chuyện.";
 
-    const totalMessagesInSummaries = longTermSummaries.length * pageSize;
-    let currentPageMessages = history.slice(totalMessagesInSummaries);
+    // TÍNH TOÁN LẠI ĐIỂM CẮT DỰA TRÊN SỐ LƯỢT (Turn-based slicing)
+    const totalTurnsCovered = longTermSummaries.length * chunkSizeTurns;
+    
+    // Sử dụng helper để tìm index mảng tin nhắn tương ứng với số lượt đã tóm tắt
+    const startIndexForCurrentPage = getMessageIndexFromTurns(history, totalTurnsCovered);
+    
+    let currentPageMessages = history.slice(startIndexForCurrentPage);
     
     if (contextMode === 'ai_only') {
         currentPageMessages = currentPageMessages.filter(msg => msg.role === 'model' || msg.role === 'system');

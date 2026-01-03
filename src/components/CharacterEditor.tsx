@@ -4,6 +4,10 @@ import type { CharacterCard, WorldInfoEntry, RegexScript, TavernHelperScript } f
 import { useLorebook } from '../contexts/LorebookContext';
 import { RegexScriptsEditor } from './RegexScriptsEditor';
 import { TavernScriptsEditor } from './TavernScriptsEditor';
+import { translateGreetingsBatch } from '../services/geminiService';
+import { getActiveModel } from '../services/settingsService';
+import { useToast } from './ToastSystem';
+import { Loader } from './Loader';
 
 
 const Section: React.FC<{title: string; description: string; children: React.ReactNode}> = ({title, description, children}) => (
@@ -118,6 +122,8 @@ const GreetingsEditor: React.FC<{ card: CharacterCard; onUpdate: (card: Characte
     // Combine first_mes and alternate_greetings into a single array for easier management
     const allGreetings = useMemo(() => [card.first_mes, ...(card.alternate_greetings || [])], [card.first_mes, card.alternate_greetings]);
     const firstGreetingId = useId();
+    const [isTranslating, setIsTranslating] = useState(false);
+    const { showToast } = useToast();
 
     const handleGreetingChange = (index: number, value: string) => {
         const newGreetings = [...allGreetings];
@@ -167,10 +173,60 @@ const GreetingsEditor: React.FC<{ card: CharacterCard; onUpdate: (card: Characte
         });
     };
 
+    const handleTranslate = async () => {
+        if (!confirm("Hành động này sẽ dịch toàn bộ lời chào và ghi đè nội dung hiện tại bằng kết quả từ AI. Bạn có chắc chắn không?")) return;
+
+        setIsTranslating(true);
+        try {
+            const payload = {
+                first_mes: card.first_mes,
+                alternate_greetings: card.alternate_greetings || [],
+                group_only_greetings: card.group_only_greetings || []
+            };
+
+            const context = {
+                name: card.name,
+                description: card.description
+            };
+
+            const model = getActiveModel();
+            const translatedData = await translateGreetingsBatch(payload, context, model);
+
+            onUpdate({
+                ...card,
+                first_mes: translatedData.first_mes,
+                alternate_greetings: translatedData.alternate_greetings,
+                group_only_greetings: translatedData.group_only_greetings
+            });
+
+            showToast("Đã dịch xong toàn bộ lời chào!", "success");
+
+        } catch (error) {
+            console.error(error);
+            showToast(`Lỗi dịch thuật: ${error instanceof Error ? error.message : String(error)}`, "error");
+        } finally {
+            setIsTranslating(false);
+        }
+    };
+
     return (
         <div className="space-y-4 col-span-full">
+            <div className="flex justify-end">
+                <button
+                    onClick={handleTranslate}
+                    disabled={isTranslating}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:bg-slate-600 disabled:cursor-not-allowed"
+                >
+                    {isTranslating ? <Loader message="Đang dịch..." /> : (
+                        <>
+                            <span>✨</span> Dịch toàn bộ Lời chào (AI)
+                        </>
+                    )}
+                </button>
+            </div>
+
             {allGreetings.map((greeting, index) => (
-                <div key={index} className="bg-slate-700/50 p-4 rounded-lg">
+                <div key={index} className={`bg-slate-700/50 p-4 rounded-lg ${isTranslating ? 'opacity-50 pointer-events-none' : ''}`}>
                     <div className="flex justify-between items-center mb-2">
                         <label htmlFor={`${firstGreetingId}-${index}`} className="text-sm font-bold text-slate-300">
                             {index === 0 ? 'Lời chào Chính (first_mes)' : `Lời chào Thay thế #${index}`}
@@ -202,7 +258,8 @@ const GreetingsEditor: React.FC<{ card: CharacterCard; onUpdate: (card: Characte
                             value={greeting}
                             onChange={(e) => handleGreetingChange(index, e.target.value)}
                             rows={8}
-                            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 pr-10 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition"
+                            disabled={isTranslating}
+                            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 pr-10 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition disabled:bg-slate-800 disabled:text-slate-500"
                         />
                         <CopyButton textToCopy={greeting} />
                     </div>
@@ -210,7 +267,8 @@ const GreetingsEditor: React.FC<{ card: CharacterCard; onUpdate: (card: Characte
             ))}
             <button
                 onClick={addGreeting}
-                className="w-full bg-slate-700 hover:bg-slate-600 text-sky-400 font-semibold py-2 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 border border-slate-600"
+                disabled={isTranslating}
+                className="w-full bg-slate-700 hover:bg-slate-600 text-sky-400 font-semibold py-2 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 border border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" /></svg>
                 Thêm Lời chào
