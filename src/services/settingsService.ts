@@ -18,20 +18,30 @@ export const MODEL_OPTIONS = [
     { id: 'gemini-flash-latest', name: 'Gemini Flash Latest' },
 ];
 
+// Danh sách mở rộng dành riêng cho Proxy (Bao gồm Gemini + Claude + GPT...)
+export const PROXY_MODEL_OPTIONS = [
+    ...MODEL_OPTIONS,
+    { id: 'claude-opus-4.5', name: 'Claude Opus 4.5' },
+    { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
+    { id: 'gpt-4o', name: 'GPT-4o' }
+];
+
 export type CompletionSource = 'gemini' | 'openrouter' | 'proxy';
 
 export interface GlobalConnectionSettings {
     source: CompletionSource;
     gemini_model: string;
     openrouter_model: string;
-    proxy_model: string;
+    proxy_model: string;      // Dùng cho Chat chính
+    proxy_tool_model: string; // Dùng cho Tác vụ phụ (Scan, Tóm tắt, Dịch)
 }
 
 const DEFAULT_CONNECTION_SETTINGS: GlobalConnectionSettings = {
     source: 'gemini',
     gemini_model: 'gemini-3-pro-preview',
     openrouter_model: '',
-    proxy_model: 'gemini-3-pro-preview'
+    proxy_model: 'gemini-3-pro-preview',
+    proxy_tool_model: 'gemini-3-flash-preview' // Mặc định theo yêu cầu
 };
 
 const DEFAULT_PROXY_URL = 'http://127.0.0.1:8889';

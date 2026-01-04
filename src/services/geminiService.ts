@@ -38,7 +38,7 @@ const getGeminiClient = (): GoogleGenAI => {
  * Generic function to call an OpenAI-compatible Proxy.
  * Used for auxiliary tasks (summary, scan, translate) when Proxy Mode is enforced.
  */
-async function callOpenAIProxy(prompt: string, model: string = 'gpt-3.5-turbo'): Promise<string> {
+async function callOpenAIProxy(prompt: string, model: string): Promise<string> {
     const proxyUrl = getProxyUrl();
     const proxyPassword = getProxyPassword();
     const isLegacyMode = getProxyLegacyMode();
@@ -48,8 +48,11 @@ async function callOpenAIProxy(prompt: string, model: string = 'gpt-3.5-turbo'):
     const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
     const endpoint = `${cleanUrl}/v1/chat/completions`;
 
+    // Ensure we have a model string, even if empty passed
+    const targetModel = model || 'gemini-3-flash-preview';
+
     const payload = {
-        model: model,
+        model: targetModel,
         messages: [{ role: 'user', content: prompt }],
         stream: false,
         temperature: 0.1 // Low temp for tasks
@@ -127,16 +130,17 @@ Bản Ghi Chép (Tóm tắt):
   try {
     // --- DUAL DRIVER LOGIC ---
     if (getProxyForTools()) {
-        // PROXY PATH (Get active model for proxy from new settings)
+        // PROXY PATH (Get active tool model for proxy)
         const conn = getConnectionSettings();
-        const model = conn.proxy_model || 'gemini-3-pro-preview';
+        // Priority: Proxy Tool Model -> Proxy Model -> Default
+        const model = conn.proxy_tool_model || conn.proxy_model || 'gemini-3-flash-preview';
         return await callOpenAIProxy(prompt, model);
     } else {
         // GOOGLE DIRECT PATH
         const ai = getGeminiClient();
         // Use gemini model from settings
         const conn = getConnectionSettings();
-        const model = conn.gemini_model || 'gemini-3-pro-preview';
+        const model = conn.gemini_model || 'gemini-3-flash-preview';
         
         const response = await ai.models.generateContent({
             model: model,
@@ -579,7 +583,9 @@ ${lorebookReferenceString || "Chưa có sổ tay nào để tham khảo."}
     // --- DUAL DRIVER LOGIC ---
     if (getProxyForTools()) {
         const conn = getConnectionSettings();
-        return await callOpenAIProxy(prompt, conn.proxy_model || 'gemini-2.5-flash');
+        // Priority: Tool Model -> Chat Model -> Default
+        const model = conn.proxy_tool_model || conn.proxy_model || 'gemini-2.5-flash';
+        return await callOpenAIProxy(prompt, model);
     } else {
         const ai = getGeminiClient();
         const response = await ai.models.generateContent({
@@ -732,7 +738,11 @@ export async function scanWorldInfoWithAI(
         if (getProxyForTools()) {
             // PROXY MODE
             const conn = getConnectionSettings();
-            text = await callOpenAIProxy(finalPrompt, conn.proxy_model || modelName);
+            // Allow override via modelName param if passed, but default to tool model setting
+            // Note: SmartScan calls pass 'gemini-2.5-flash' as fallback modelName usually.
+            // We should prefer the setting `proxy_tool_model` if set.
+            const targetModel = conn.proxy_tool_model || conn.proxy_model || modelName;
+            text = await callOpenAIProxy(finalPrompt, targetModel);
         } else {
             // GOOGLE DIRECT MODE (Try to use modelName if provided, else fallback to active gemini model)
             // SmartScan usually requests specific models (like Flash).
@@ -801,7 +811,9 @@ export async function translateLorebookBatch(
         if (getProxyForTools()) {
             // PROXY MODE
             const conn = getConnectionSettings();
-            responseText = await callOpenAIProxy(finalPrompt, conn.proxy_model || model);
+            // Allow override via 'model' param (passed from UI), or fallback to settings
+            const targetModel = conn.proxy_tool_model || conn.proxy_model || model;
+            responseText = await callOpenAIProxy(finalPrompt, targetModel);
         } else {
             // GOOGLE DIRECT MODE
             const ai = getGeminiClient();
@@ -895,7 +907,9 @@ ${JSON.stringify(data, null, 2)}
         // --- DUAL DRIVER LOGIC ---
         if (getProxyForTools()) {
             const conn = getConnectionSettings();
-            text = await callOpenAIProxy(prompt, conn.proxy_model || model);
+            // Priority: Tool Model -> Chat Model -> Default
+            const targetModel = conn.proxy_tool_model || conn.proxy_model || model;
+            text = await callOpenAIProxy(prompt, targetModel);
         } else {
             const ai = getGeminiClient();
             const response = await ai.models.generateContent({

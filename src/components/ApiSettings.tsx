@@ -4,6 +4,7 @@ import {
     getConnectionSettings, 
     saveConnectionSettings, 
     MODEL_OPTIONS, 
+    PROXY_MODEL_OPTIONS,
     getApiSettings, 
     saveApiSettings, 
     getOpenRouterApiKey, 
@@ -56,7 +57,6 @@ const SearchableSelect: React.FC<{
     placeholder?: string;
     disabled?: boolean;
 }> = ({ options, value, onChange, placeholder = "Chọn...", disabled = false }) => {
-    // Basic select implementation for now
     return (
         <select
             value={value}
@@ -69,6 +69,59 @@ const SearchableSelect: React.FC<{
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
         </select>
+    );
+};
+
+// New Reusable Component for Model Selection with "Other" option
+const ModelSelectorWithCustom: React.FC<{
+    label: string;
+    description?: string;
+    value: string;
+    onChange: (val: string) => void;
+    options?: { id: string; name: string }[];
+}> = ({ label, description, value, onChange, options = MODEL_OPTIONS }) => {
+    // Determine if the current value is in the predefined list
+    const isCustom = useMemo(() => {
+        return value !== '' && !options.some(opt => opt.id === value);
+    }, [value, options]);
+
+    const selectValue = isCustom ? 'custom_option' : value;
+
+    return (
+        <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+            <label className="block text-sm font-bold text-indigo-300 mb-1">{label}</label>
+            {description && <p className="text-xs text-slate-500 mb-2">{description}</p>}
+            
+            <select
+                value={selectValue}
+                onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'custom_option') {
+                        // Don't clear value immediately, just switch mode to show input
+                        // (Value stays as is until user types in input)
+                    } else {
+                        onChange(val);
+                    }
+                }}
+                className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white mb-2"
+            >
+                {options.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                <option value="custom_option">Khác (Tự nhập Model ID)</option>
+            </select>
+
+            {/* Show Text Input if "Other" is selected or value is not in list */}
+            {(selectValue === 'custom_option' || isCustom) && (
+                <div className="animate-fade-in-up">
+                    <input
+                        type="text"
+                        value={value}
+                        onChange={e => onChange(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-500 rounded p-2 text-white font-mono text-sm focus:ring-1 focus:ring-indigo-500"
+                        placeholder="Nhập Model ID (ví dụ: gemini-exp-1121, gpt-4o)..."
+                    />
+                </div>
+            )}
+        </div>
     );
 };
 
@@ -268,6 +321,7 @@ export const ApiSettings: React.FC = () => {
                     <div className="space-y-6 animate-fade-in-up">
                         <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
                             <label className="block text-sm font-bold text-indigo-300 mb-2">Mô hình Chính (Chat)</label>
+                            {/* Uses Default MODEL_OPTIONS */}
                             <select
                                 value={connection.gemini_model}
                                 onChange={(e) => updateConnection('gemini_model', e.target.value)}
@@ -345,19 +399,27 @@ export const ApiSettings: React.FC = () => {
                 {/* PROXY CONFIG */}
                 {connection.source === 'proxy' && (
                     <div className="space-y-6 animate-fade-in-up">
-                        <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
-                            <label className="block text-sm font-bold text-indigo-300 mb-2">Model ID (Gửi tới Proxy)</label>
-                            <input
-                                type="text"
+                        <div className="grid grid-cols-1 gap-4">
+                            {/* Chat Model Selector - Uses PROXY_MODEL_OPTIONS */}
+                            <ModelSelectorWithCustom
+                                label="Chat Model ID (Mô hình Trò chuyện)"
+                                description="Model dùng cho tương tác chính. Nên dùng model thông minh (Pro)."
                                 value={connection.proxy_model}
-                                onChange={e => updateConnection('proxy_model', e.target.value)}
-                                className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white font-mono"
-                                placeholder="gemini-3-pro-preview"
+                                onChange={(val) => updateConnection('proxy_model', val)}
+                                options={PROXY_MODEL_OPTIONS}
                             />
-                            <p className="text-xs text-slate-500 mt-1">Nhập ID mô hình mà server proxy của bạn hỗ trợ.</p>
+
+                            {/* Tool Model Selector - Uses PROXY_MODEL_OPTIONS */}
+                            <ModelSelectorWithCustom
+                                label="Tool Model ID (Tác vụ phụ)"
+                                description="Model dùng cho Smart Scan, Tóm tắt, Dịch. Nên dùng model nhanh (Flash/Flash-Lite)."
+                                value={connection.proxy_tool_model}
+                                onChange={(val) => updateConnection('proxy_tool_model', val)}
+                                options={PROXY_MODEL_OPTIONS}
+                            />
                         </div>
 
-                        <div className="space-y-4">
+                        <div className="space-y-4 border-t border-slate-700 pt-4">
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-1">Proxy URL</label>
                                 <div className="flex gap-2">
