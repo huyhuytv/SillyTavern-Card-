@@ -80,12 +80,14 @@ const ModelSelectorWithCustom: React.FC<{
     onChange: (val: string) => void;
     options?: { id: string; name: string }[];
 }> = ({ label, description, value, onChange, options = MODEL_OPTIONS }) => {
-    // Determine if the current value is in the predefined list
-    const isCustom = useMemo(() => {
-        return value !== '' && !options.some(opt => opt.id === value);
+    // Kiểm tra xem giá trị hiện tại có nằm trong danh sách định sẵn không
+    const isKnownOption = useMemo(() => {
+        return options.some(opt => opt.id === value);
     }, [value, options]);
 
-    const selectValue = isCustom ? 'custom_option' : value;
+    // Nếu không nằm trong danh sách (hoặc là chuỗi rỗng do người dùng chọn "Khác"),
+    // thì hiển thị ô nhập liệu.
+    const showInput = !isKnownOption;
 
     return (
         <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
@@ -93,12 +95,12 @@ const ModelSelectorWithCustom: React.FC<{
             {description && <p className="text-xs text-slate-500 mb-2">{description}</p>}
             
             <select
-                value={selectValue}
+                value={isKnownOption ? value : 'custom_option'}
                 onChange={(e) => {
                     const val = e.target.value;
                     if (val === 'custom_option') {
-                        // Don't clear value immediately, just switch mode to show input
-                        // (Value stays as is until user types in input)
+                        // Khi chọn "Khác", xóa giá trị để kích hoạt chế độ input
+                        onChange(''); 
                     } else {
                         onChange(val);
                     }
@@ -110,7 +112,7 @@ const ModelSelectorWithCustom: React.FC<{
             </select>
 
             {/* Show Text Input if "Other" is selected or value is not in list */}
-            {(selectValue === 'custom_option' || isCustom) && (
+            {showInput && (
                 <div className="animate-fade-in-up">
                     <input
                         type="text"
@@ -118,6 +120,7 @@ const ModelSelectorWithCustom: React.FC<{
                         onChange={e => onChange(e.target.value)}
                         className="w-full bg-slate-800 border border-slate-500 rounded p-2 text-white font-mono text-sm focus:ring-1 focus:ring-indigo-500"
                         placeholder="Nhập Model ID (ví dụ: gemini-exp-1121, gpt-4o)..."
+                        autoFocus
                     />
                 </div>
             )}
