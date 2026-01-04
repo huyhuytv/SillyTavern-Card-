@@ -1,11 +1,13 @@
 
-const ACTIVE_MODEL_KEY = 'sillyTavernStudio_activeModel';
+const ACTIVE_MODEL_KEY = 'sillyTavernStudio_activeModel'; // Legacy, kept for fallback
 const API_SETTINGS_KEY = 'sillyTavernStudio_apiSettings';
 const API_KEY_INDEX_KEY = 'sillyTavernStudio_apiKeyIndex';
 const OPENROUTER_API_KEY_KEY = 'sillyTavernStudio_openRouterApiKey';
 const PROXY_URL_KEY = 'sillyTavernStudio_proxyUrl';
 const PROXY_PASSWORD_KEY = 'sillyTavernStudio_proxyPassword';
 const PROXY_LEGACY_MODE_KEY = 'sillyTavernStudio_proxyLegacyMode';
+const PROXY_FOR_TOOLS_KEY = 'sillyTavernStudio_proxyForTools';
+const GLOBAL_CONNECTION_KEY = 'sillyTavernStudio_globalConnection';
 
 export const MODEL_OPTIONS = [
     { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro Preview' },
@@ -16,7 +18,22 @@ export const MODEL_OPTIONS = [
     { id: 'gemini-flash-latest', name: 'Gemini Flash Latest' },
 ];
 
-const DEFAULT_MODEL_ID = 'gemini-3-pro-preview';
+export type CompletionSource = 'gemini' | 'openrouter' | 'proxy';
+
+export interface GlobalConnectionSettings {
+    source: CompletionSource;
+    gemini_model: string;
+    openrouter_model: string;
+    proxy_model: string;
+}
+
+const DEFAULT_CONNECTION_SETTINGS: GlobalConnectionSettings = {
+    source: 'gemini',
+    gemini_model: 'gemini-3-pro-preview',
+    openrouter_model: '',
+    proxy_model: 'gemini-3-pro-preview'
+};
+
 const DEFAULT_PROXY_URL = 'http://127.0.0.1:8889';
 
 interface ApiSettings {
@@ -25,31 +42,68 @@ interface ApiSettings {
 }
 
 /**
- * Lấy mô hình Gemini đang hoạt động từ localStorage.
- * @returns {string} ID của mô hình đã chọn hoặc mô hình mặc định.
+ * Get the global connection settings (Source + Models for each source).
+ */
+export const getConnectionSettings = (): GlobalConnectionSettings => {
+    try {
+        const stored = localStorage.getItem(GLOBAL_CONNECTION_KEY);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            return { ...DEFAULT_CONNECTION_SETTINGS, ...parsed };
+        }
+    } catch (e) {
+        console.error("Failed to load connection settings", e);
+    }
+    return DEFAULT_CONNECTION_SETTINGS;
+};
+
+/**
+ * Save global connection settings.
+ */
+export const saveConnectionSettings = (settings: GlobalConnectionSettings): void => {
+    localStorage.setItem(GLOBAL_CONNECTION_KEY, JSON.stringify(settings));
+};
+
+/**
+ * Lấy mô hình đang hoạt động dựa trên Nguồn (Source) hiện tại.
+ * Used by Tools/Analysis to know which model ID to target.
  */
 export const getActiveModel = (): string => {
-    return localStorage.getItem(ACTIVE_MODEL_KEY) || DEFAULT_MODEL_ID;
+    const conn = getConnectionSettings();
+    switch (conn.source) {
+        case 'openrouter':
+            return conn.openrouter_model || 'google/gemini-pro-1.5'; // Fallback
+        case 'proxy':
+            return conn.proxy_model || 'gemini-3-pro-preview';
+        case 'gemini':
+        default:
+            return conn.gemini_model || 'gemini-3-pro-preview';
+    }
 };
 
 /**
- * Đặt mô hình Gemini đang hoạt động trong localStorage.
- * @param {string} modelId ID của mô hình để lưu.
+ * @deprecated Legacy setter. Use saveConnectionSettings instead.
+ * Kept for compatibility if other components call it directly.
  */
 export const setActiveModel = (modelId: string): void => {
-    localStorage.setItem(ACTIVE_MODEL_KEY, modelId);
+    const conn = getConnectionSettings();
+    // Assuming if this is called, we update the model for the current source
+    const newConn = { ...conn };
+    if (newConn.source === 'gemini') newConn.gemini_model = modelId;
+    else if (newConn.source === 'proxy') newConn.proxy_model = modelId;
+    else if (newConn.source === 'openrouter') newConn.openrouter_model = modelId;
+    
+    saveConnectionSettings(newConn);
 };
 
 /**
- * Lấy cài đặt API từ localStorage.
- * @returns {ApiSettings} Cài đặt API đã lưu hoặc mặc định.
+ * Lấy cài đặt API Keys Gemini từ localStorage.
  */
 export const getApiSettings = (): ApiSettings => {
     try {
         const storedSettings = localStorage.getItem(API_SETTINGS_KEY);
         if (storedSettings) {
             const parsed = JSON.parse(storedSettings);
-            // Ensure keys is an array
             if (Array.isArray(parsed.keys)) {
                 return { useDefault: parsed.useDefault ?? true, keys: parsed.keys };
             }
@@ -60,109 +114,68 @@ export const getApiSettings = (): ApiSettings => {
     return { useDefault: true, keys: [] };
 };
 
-/**
- * Lưu cài đặt API vào localStorage.
- * @param {ApiSettings} settings Cài đặt để lưu.
- */
 export const saveApiSettings = (settings: ApiSettings): void => {
     localStorage.setItem(API_SETTINGS_KEY, JSON.stringify(settings));
 };
 
-
-/**
- * Lấy API key tiếp theo để sử dụng, xử lý việc xoay vòng.
- * @returns {string | undefined} API key để sử dụng hoặc undefined nếu không có key nào được cấu hình.
- */
 export const getApiKey = (): string | undefined => {
     const settings = getApiSettings();
-
     if (settings.useDefault) {
         return process.env.API_KEY;
     }
-
     const validKeys = settings.keys.filter(k => k.trim() !== '');
     if (validKeys.length === 0) {
-        // Không có key cá nhân nào được cung cấp, nhưng key mặc định đã bị tắt.
-        // Dự phòng bằng biến môi trường nếu có.
         return process.env.API_KEY;
     }
-
     try {
         const lastIndexStr = localStorage.getItem(API_KEY_INDEX_KEY);
         const lastIndex = lastIndexStr ? parseInt(lastIndexStr, 10) : -1;
-        
         const nextIndex = (lastIndex + 1) % validKeys.length;
-        
         localStorage.setItem(API_KEY_INDEX_KEY, String(nextIndex));
-        
         return validKeys[nextIndex];
-
     } catch (e) {
-        console.error("Lỗi trong quá trình xoay vòng API key, sử dụng key đầu tiên.", e);
         return validKeys[0];
     }
 };
 
-/**
- * Lấy API key của OpenRouter từ localStorage.
- * @returns {string} API key đã lưu hoặc một chuỗi rỗng.
- */
 export const getOpenRouterApiKey = (): string => {
     return localStorage.getItem(OPENROUTER_API_KEY_KEY) || '';
 };
 
-/**
- * Lưu API key của OpenRouter vào localStorage.
- * @param {string} key API key để lưu.
- */
 export const saveOpenRouterApiKey = (key: string): void => {
     localStorage.setItem(OPENROUTER_API_KEY_KEY, key.trim());
 };
 
-/**
- * Lấy URL Reverse Proxy từ localStorage.
- * @returns {string} URL của proxy.
- */
 export const getProxyUrl = (): string => {
     return localStorage.getItem(PROXY_URL_KEY) || DEFAULT_PROXY_URL;
 };
 
-/**
- * Lưu URL Reverse Proxy vào localStorage.
- * @param {string} url URL để lưu.
- */
 export const saveProxyUrl = (url: string): void => {
-    // Đảm bảo không có dấu / ở cuối để chuẩn hóa
     const cleanUrl = url.trim().replace(/\/$/, '');
     localStorage.setItem(PROXY_URL_KEY, cleanUrl);
 };
 
-/**
- * Lấy Password/Key cho Proxy.
- */
 export const getProxyPassword = (): string => {
     return localStorage.getItem(PROXY_PASSWORD_KEY) || '';
 };
 
-/**
- * Lưu Password/Key cho Proxy.
- */
 export const saveProxyPassword = (password: string): void => {
     localStorage.setItem(PROXY_PASSWORD_KEY, password.trim());
 };
 
-/**
- * Lấy trạng thái chế độ Legacy (Tương thích) cho Proxy.
- * Default là true (để tương thích ngược với người dùng cũ).
- */
 export const getProxyLegacyMode = (): boolean => {
     const val = localStorage.getItem(PROXY_LEGACY_MODE_KEY);
-    return val !== 'false'; // Default to true if not set
+    return val !== 'false';
 };
 
-/**
- * Lưu trạng thái chế độ Legacy cho Proxy.
- */
 export const saveProxyLegacyMode = (isLegacy: boolean): void => {
     localStorage.setItem(PROXY_LEGACY_MODE_KEY, String(isLegacy));
+};
+
+export const getProxyForTools = (): boolean => {
+    return localStorage.getItem(PROXY_FOR_TOOLS_KEY) === 'true';
+};
+
+export const saveProxyForTools = (enabled: boolean): void => {
+    localStorage.setItem(PROXY_FOR_TOOLS_KEY, String(enabled));
 };

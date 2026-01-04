@@ -1,9 +1,29 @@
 
-import React, { useState, useEffect } from 'react';
-import { getActiveModel, setActiveModel, MODEL_OPTIONS, getApiSettings, saveApiSettings, getOpenRouterApiKey, saveOpenRouterApiKey, getProxyUrl, saveProxyUrl, getProxyPassword, saveProxyPassword, getProxyLegacyMode, saveProxyLegacyMode } from '../services/settingsService';
-import { validateOpenRouterKey } from '../services/geminiService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+    getConnectionSettings, 
+    saveConnectionSettings, 
+    MODEL_OPTIONS, 
+    getApiSettings, 
+    saveApiSettings, 
+    getOpenRouterApiKey, 
+    saveOpenRouterApiKey, 
+    getProxyUrl, 
+    saveProxyUrl, 
+    getProxyPassword, 
+    saveProxyPassword, 
+    getProxyLegacyMode, 
+    saveProxyLegacyMode, 
+    getProxyForTools, 
+    saveProxyForTools,
+    GlobalConnectionSettings,
+    CompletionSource
+} from '../services/settingsService';
+import { validateOpenRouterKey, getOpenRouterModels } from '../services/geminiService';
+import type { OpenRouterModel } from '../types';
 import { Loader } from './Loader';
 
+// Components
 const ToggleInput: React.FC<{ label: string; checked: boolean; onChange: (checked: boolean) => void; description?: string }> = ({ label, checked, onChange, description }) => (
     <div>
         <div className="flex items-center justify-between bg-slate-700/50 p-3 rounded-lg">
@@ -29,53 +49,98 @@ const ToggleInput: React.FC<{ label: string; checked: boolean; onChange: (checke
     </div>
 );
 
+const SearchableSelect: React.FC<{
+    options: { value: string; label: string }[];
+    value: string;
+    onChange: (value: string) => void;
+    placeholder?: string;
+    disabled?: boolean;
+}> = ({ options, value, onChange, placeholder = "Chọn...", disabled = false }) => {
+    // Basic select implementation for now
+    return (
+        <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            disabled={disabled}
+            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition disabled:opacity-50"
+        >
+            <option value="">{placeholder}</option>
+            {options.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+        </select>
+    );
+};
+
 export const ApiSettings: React.FC = () => {
-    const [selectedModel, setSelectedModel] = useState<string>('');
+    // Global Connection State
+    const [connection, setConnection] = useState<GlobalConnectionSettings>(getConnectionSettings());
+    
+    // Gemini Settings
     const [useDefaultKey, setUseDefaultKey] = useState(true);
     const [geminiApiKeys, setGeminiApiKeys] = useState('');
-    const [openRouterApiKey, setOpenRouterApiKey] = useState('');
     
-    // Proxy State
+    // OpenRouter Settings
+    const [openRouterApiKey, setOpenRouterApiKey] = useState('');
+    const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
+    const [isFetchingORModels, setIsFetchingORModels] = useState(false);
+    const [orModelError, setOrModelError] = useState<string | null>(null);
+    const [showFreeOR, setShowFreeOR] = useState(false);
+
+    // Proxy Settings
     const [proxyUrl, setProxyUrl] = useState('');
     const [proxyPassword, setProxyPassword] = useState('');
     const [proxyLegacyMode, setProxyLegacyMode] = useState(true);
-
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
-
-    const [isValidating, setIsValidating] = useState(false);
-    const [validationStatus, setValidationStatus] = useState<'idle' | 'success' | 'error'>('idle');
-    const [validationError, setValidationError] = useState('');
-    
-    // Proxy Ping State
+    const [proxyForTools, setProxyForTools] = useState(false);
     const [isPingingProxy, setIsPingingProxy] = useState(false);
     const [proxyPingStatus, setProxyPingStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [proxyErrorMessage, setProxyErrorMessage] = useState('');
 
+    // UI State
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+    const [isValidatingOR, setIsValidatingOR] = useState(false);
+    const [orValidationStatus, setOrValidationStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
+    // Load Initial Data
     useEffect(() => {
-        const settings = getApiSettings();
-        setSelectedModel(getActiveModel());
-        setUseDefaultKey(settings.useDefault);
-        setGeminiApiKeys(settings.keys.join('\n'));
+        const apiSettings = getApiSettings();
+        setUseDefaultKey(apiSettings.useDefault);
+        setGeminiApiKeys(apiSettings.keys.join('\n'));
+        
         setOpenRouterApiKey(getOpenRouterApiKey());
+        
         setProxyUrl(getProxyUrl());
         setProxyPassword(getProxyPassword());
         setProxyLegacyMode(getProxyLegacyMode());
+        setProxyForTools(getProxyForTools());
+        
+        setConnection(getConnectionSettings());
     }, []);
 
-    const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newModel = e.target.value;
-        setActiveModel(newModel);
-        setSelectedModel(newModel);
+    // Helper to update connection state
+    const updateConnection = (key: keyof GlobalConnectionSettings, value: any) => {
+        setConnection(prev => ({ ...prev, [key]: value }));
     };
 
+    // Save All Logic
     const handleSave = () => {
         try {
+            // 1. Save Global Connection
+            saveConnectionSettings(connection);
+
+            // 2. Save Gemini Keys
             const keys = geminiApiKeys.split('\n').map(k => k.trim()).filter(Boolean);
             saveApiSettings({ useDefault: useDefaultKey, keys });
+
+            // 3. Save OpenRouter
             saveOpenRouterApiKey(openRouterApiKey);
+
+            // 4. Save Proxy
             saveProxyUrl(proxyUrl);
             saveProxyPassword(proxyPassword);
             saveProxyLegacyMode(proxyLegacyMode);
+            saveProxyForTools(proxyForTools);
+
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus('idle'), 2000);
         } catch (e) {
@@ -83,23 +148,43 @@ export const ApiSettings: React.FC = () => {
             setTimeout(() => setSaveStatus('idle'), 3000);
         }
     };
-    
-    const handleValidateKey = async () => {
+
+    // OpenRouter Logic
+    const handleValidateORKey = async () => {
         if (!openRouterApiKey) return;
-        setIsValidating(true);
-        setValidationStatus('idle');
-        setValidationError('');
+        setIsValidatingOR(true);
+        setOrValidationStatus('idle');
         try {
             await validateOpenRouterKey(openRouterApiKey);
-            setValidationStatus('success');
+            setOrValidationStatus('success');
+            // Auto fetch models on success
+            if (openRouterModels.length === 0) fetchOpenRouterModels();
         } catch (error) {
-            setValidationStatus('error');
-            setValidationError(error instanceof Error ? error.message : 'Lỗi không xác định');
+            setOrValidationStatus('error');
         } finally {
-            setIsValidating(false);
+            setIsValidatingOR(false);
         }
     };
 
+    const fetchOpenRouterModels = async () => {
+        setIsFetchingORModels(true);
+        setOrModelError(null);
+        try {
+            const models = await getOpenRouterModels();
+            setOpenRouterModels(models);
+        } catch (e) {
+            setOrModelError(e instanceof Error ? e.message : 'Error loading models');
+        } finally {
+            setIsFetchingORModels(false);
+        }
+    };
+
+    const filteredORModels = useMemo(() => {
+        if (!showFreeOR) return openRouterModels;
+        return openRouterModels.filter(m => m.pricing.prompt === '0' && m.pricing.completion === '0');
+    }, [openRouterModels, showFreeOR]);
+
+    // Proxy Ping Logic
     const handlePingProxy = async () => {
         if (!proxyUrl) return;
         setIsPingingProxy(true);
@@ -110,9 +195,6 @@ export const ApiSettings: React.FC = () => {
             const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000); 
-
-            // CHIẾN THUẬT MỚI: Dùng 'no-cors' nếu Legacy Mode bật.
-            // Nếu Legacy Mode tắt, ta thử gửi GET header chuẩn.
             
             const reqOptions: RequestInit = {
                 method: 'GET',
@@ -129,22 +211,15 @@ export const ApiSettings: React.FC = () => {
             }
 
             await fetch(`${cleanUrl}/v1/models`, reqOptions);
-            
             clearTimeout(timeoutId);
-
-            // Nếu code chạy đến đây mà không bị nhảy vào catch -> Kết nối thành công!
             setProxyPingStatus('success');
-
         } catch (error: any) {
-            console.error("Ping Error:", error);
-            clearTimeout(0); 
-            
             if (error.name === 'AbortError') {
-                setProxyErrorMessage("Timeout: Server phản hồi quá chậm.");
+                setProxyErrorMessage("Timeout.");
             } else if (error.message.includes('Failed to fetch')) {
-                setProxyErrorMessage("Không thể kết nối. Server chưa chạy, sai Port hoặc bị chặn CORS.");
+                setProxyErrorMessage("Lỗi kết nối / CORS.");
             } else {
-                setProxyErrorMessage(error.message || "Lỗi không xác định");
+                setProxyErrorMessage(error.message);
             }
             setProxyPingStatus('error');
         } finally {
@@ -152,203 +227,183 @@ export const ApiSettings: React.FC = () => {
         }
     };
 
+    // --- RENDER ---
+
+    const renderSourceTab = (source: CompletionSource, label: string) => (
+        <button
+            onClick={() => updateConnection('source', source)}
+            className={`flex-1 py-3 px-4 text-sm font-bold rounded-lg transition-all border-2 ${
+                connection.source === source
+                    ? 'bg-sky-600/20 border-sky-500 text-sky-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'
+            }`}
+        >
+            {label}
+        </button>
+    );
 
     return (
-        <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-2xl mx-auto space-y-8">
+        <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-3xl mx-auto space-y-8">
+            {/* 1. SOURCE SELECTOR */}
             <div>
-                <h3 className="text-xl font-bold text-sky-400 mb-6">Cài đặt Gemini API</h3>
-                <div className="space-y-6">
-                    <div>
-                        <ToggleInput 
-                            label="Sử dụng API Key Mặc định"
-                            checked={useDefaultKey}
-                            onChange={setUseDefaultKey}
-                            description={useDefaultKey ? "Sử dụng API key do môi trường ứng dụng cung cấp." : "Sử dụng API key cá nhân của bạn bên dưới."}
-                        />
-                    </div>
-
-                    {!useDefaultKey && (
-                         <div>
-                            <label htmlFor="api-keys-textarea" className="block text-sm font-medium text-slate-300 mb-1">
-                                API Key Cá nhân (Một key mỗi dòng)
-                            </label>
-                            <textarea
-                                id="api-keys-textarea"
-                                value={geminiApiKeys}
-                                onChange={e => setGeminiApiKeys(e.target.value)}
-                                rows={5}
-                                className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 font-mono text-sm"
-                                placeholder="Nhập một hoặc nhiều API key tại đây..."
-                            />
-                            <p className="text-xs text-slate-500 mt-2">
-                               Nếu bạn cung cấp nhiều key, ứng dụng sẽ tự động xoay vòng chúng để phân phối yêu cầu.
-                            </p>
-                        </div>
-                    )}
-
-                    <div>
-                        <label htmlFor="model-select" className="block text-sm font-medium text-slate-300 mb-1">
-                            Chọn Mô hình Gemini
-                        </label>
-                        <select
-                            id="model-select"
-                            value={selectedModel}
-                            onChange={handleModelChange}
-                            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500"
-                        >
-                            {MODEL_OPTIONS.map(model => (
-                                <option key={model.id} value={model.id}>
-                                    {model.name}
-                                </option>
-                            ))}
-                        </select>
-                         <p className="text-xs text-slate-500 mt-2">
-                            Mô hình được chọn sẽ được sử dụng cho các tính năng phân tích và khi preset được đặt thành Custom/Gemini.
-                        </p>
-                    </div>
+                <h3 className="text-xl font-bold text-sky-400 mb-4">1. Chọn Nguồn Kết Nối (API Source)</h3>
+                <div className="flex gap-4 flex-col sm:flex-row">
+                    {renderSourceTab('gemini', 'Google Gemini')}
+                    {renderSourceTab('openrouter', 'OpenRouter')}
+                    {renderSourceTab('proxy', 'Reverse Proxy')}
                 </div>
+                <p className="text-xs text-slate-400 mt-2 italic">
+                    Nguồn được chọn sẽ được sử dụng cho tất cả các cuộc trò chuyện.
+                </p>
             </div>
 
             <div className="border-t border-slate-700"></div>
-            
-            {/* Reverse Proxy Section */}
+
+            {/* 2. CONFIGURATION AREA */}
             <div>
-                 <h3 className="text-xl font-bold text-sky-400 mb-6">Reverse Proxy (OpenAI Compatible)</h3>
-                 <div className="space-y-6">
-                    <div>
-                        <label htmlFor="proxy-url" className="block text-sm font-medium text-slate-300 mb-1">
-                            API Endpoint URL
-                        </label>
-                        <div className="flex items-center gap-2">
+                <h3 className="text-xl font-bold text-sky-400 mb-4">2. Cấu hình Chi tiết & Model</h3>
+                
+                {/* GEMINI CONFIG */}
+                {connection.source === 'gemini' && (
+                    <div className="space-y-6 animate-fade-in-up">
+                        <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                            <label className="block text-sm font-bold text-indigo-300 mb-2">Mô hình Chính (Chat)</label>
+                            <select
+                                value={connection.gemini_model}
+                                onChange={(e) => updateConnection('gemini_model', e.target.value)}
+                                className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white"
+                            >
+                                {MODEL_OPTIONS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                            </select>
+                        </div>
+
+                        <div>
+                            <h4 className="font-bold text-slate-300 mb-3">API Key (Gemini)</h4>
+                            <div className="space-y-4 pl-2 border-l-2 border-slate-700">
+                                <ToggleInput 
+                                    label="Sử dụng API Key Mặc định (Environment)"
+                                    checked={useDefaultKey}
+                                    onChange={setUseDefaultKey}
+                                />
+                                {!useDefaultKey && (
+                                    <textarea
+                                        value={geminiApiKeys}
+                                        onChange={e => setGeminiApiKeys(e.target.value)}
+                                        rows={3}
+                                        className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 font-mono text-xs"
+                                        placeholder="Nhập API Key cá nhân (Mỗi dòng 1 key)..."
+                                    />
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* OPENROUTER CONFIG */}
+                {connection.source === 'openrouter' && (
+                    <div className="space-y-6 animate-fade-in-up">
+                        <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                            <label className="block text-sm font-bold text-indigo-300 mb-2">Mô hình OpenRouter</label>
+                            {isFetchingORModels ? <Loader message="Đang tải danh sách..." /> : (
+                                <div className="flex gap-2">
+                                    <div className="flex-grow">
+                                        <SearchableSelect 
+                                            options={filteredORModels.map(m => ({ value: m.id, label: `${m.name} (${m.pricing.prompt === '0' ? 'Free' : '$'})` }))}
+                                            value={connection.openrouter_model}
+                                            onChange={(v) => updateConnection('openrouter_model', v)}
+                                            placeholder="Chọn mô hình..."
+                                        />
+                                    </div>
+                                    <button onClick={fetchOpenRouterModels} className="px-3 bg-slate-700 rounded hover:bg-slate-600 text-slate-300" title="Tải lại danh sách">↻</button>
+                                </div>
+                            )}
+                            <div className="mt-2">
+                                <ToggleInput label="Chỉ hiện model miễn phí" checked={showFreeOR} onChange={setShowFreeOR} />
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 className="font-bold text-slate-300 mb-3">API Key (OpenRouter)</h4>
+                            <div className="flex gap-2">
+                                <input
+                                    type="password"
+                                    value={openRouterApiKey}
+                                    onChange={e => setOpenRouterApiKey(e.target.value)}
+                                    className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-2 text-white"
+                                    placeholder="sk-or-..."
+                                />
+                                <button onClick={handleValidateORKey} disabled={isValidatingOR} className="px-4 bg-indigo-600 text-white rounded hover:bg-indigo-500 disabled:bg-slate-600">
+                                    {isValidatingOR ? '...' : 'Check'}
+                                </button>
+                            </div>
+                            {orValidationStatus === 'success' && <p className="text-xs text-green-400 mt-1">Key hợp lệ.</p>}
+                            {orValidationStatus === 'error' && <p className="text-xs text-red-400 mt-1">Key không hợp lệ.</p>}
+                        </div>
+                    </div>
+                )}
+
+                {/* PROXY CONFIG */}
+                {connection.source === 'proxy' && (
+                    <div className="space-y-6 animate-fade-in-up">
+                        <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                            <label className="block text-sm font-bold text-indigo-300 mb-2">Model ID (Gửi tới Proxy)</label>
                             <input
-                                id="proxy-url"
                                 type="text"
-                                value={proxyUrl}
-                                onChange={e => {
-                                    setProxyUrl(e.target.value);
-                                    setProxyPingStatus('idle');
-                                    setProxyErrorMessage('');
-                                }}
-                                className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 font-mono text-sm"
-                                placeholder="http://127.0.0.1:8889 hoặc https://api.openai.com"
+                                value={connection.proxy_model}
+                                onChange={e => updateConnection('proxy_model', e.target.value)}
+                                className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white font-mono"
+                                placeholder="gemini-3-pro-preview"
                             />
-                            <button
-                                onClick={handlePingProxy}
-                                disabled={isPingingProxy || !proxyUrl}
-                                className="flex-shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
-                            >
-                                {isPingingProxy ? <Loader message="" /> : 'Ping'}
-                            </button>
-                             {proxyPingStatus === 'success' && (
-                                <div className="flex items-center gap-1 text-green-400">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                    <span className="text-sm font-medium">OK</span>
-                                </div>
-                            )}
-                            {proxyPingStatus === 'error' && (
-                                <div className="flex items-center gap-1 text-red-400">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                    <span className="text-sm font-medium">Lỗi</span>
-                                </div>
-                            )}
+                            <p className="text-xs text-slate-500 mt-1">Nhập ID mô hình mà server proxy của bạn hỗ trợ.</p>
                         </div>
-                        {proxyErrorMessage && (
-                            <p className="text-xs text-red-400 mt-2">{proxyErrorMessage}</p>
-                        )}
-                         <p className="text-xs text-slate-500 mt-2">
-                           Nhập địa chỉ của server trung gian (ví dụ: Kingfall, Oobabooga, hoặc dịch vụ thương mại).
-                        </p>
-                    </div>
 
-                    <div>
-                        <label htmlFor="proxy-password" className="block text-sm font-medium text-slate-300 mb-1">
-                            Proxy Password / API Key (Tùy chọn)
-                        </label>
-                        <input
-                            id="proxy-password"
-                            type="password"
-                            value={proxyPassword}
-                            onChange={e => setProxyPassword(e.target.value)}
-                            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 font-mono text-sm"
-                            placeholder="Nhập password hoặc để trống..."
-                        />
-                        <p className="text-xs text-slate-500 mt-2">
-                            Mật khẩu này sẽ được gửi trong Header `Authorization: Bearer` nếu "Chế độ Legacy" bị tắt.
-                        </p>
-                    </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300 mb-1">Proxy URL</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={proxyUrl}
+                                        onChange={e => setProxyUrl(e.target.value)}
+                                        className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-2 text-white font-mono text-sm"
+                                        placeholder="http://127.0.0.1:8889"
+                                    />
+                                    <button onClick={handlePingProxy} disabled={isPingingProxy} className="px-4 bg-indigo-600 text-white rounded hover:bg-indigo-500 disabled:bg-slate-600">
+                                        Ping
+                                    </button>
+                                </div>
+                                {proxyPingStatus === 'success' && <p className="text-xs text-green-400 mt-1">Kết nối OK.</p>}
+                                {proxyPingStatus === 'error' && <p className="text-xs text-red-400 mt-1">Lỗi: {proxyErrorMessage}</p>}
+                            </div>
 
-                    <div>
-                        <ToggleInput 
-                            label="Chế độ Tương thích (Legacy Mode)"
-                            checked={proxyLegacyMode}
-                            onChange={setProxyLegacyMode}
-                            description={proxyLegacyMode 
-                                ? "BẬT: Dùng cho Localhost/Kingfall cũ. Sử dụng 'text/plain' để tránh lỗi CORS. Không gửi Auth Header." 
-                                : "TẮT: Dùng cho Proxy thương mại chuẩn (OpenAI/Chimera...). Sử dụng 'application/json' và gửi Auth Header."}
-                        />
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300 mb-1">Password / Key (Optional)</label>
+                                <input
+                                    type="password"
+                                    value={proxyPassword}
+                                    onChange={e => setProxyPassword(e.target.value)}
+                                    className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-white"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                                <ToggleInput label="Legacy Mode (Kingfall)" checked={proxyLegacyMode} onChange={setProxyLegacyMode} description="Dùng text/plain để tránh CORS trên localhost cũ." />
+                                <ToggleInput label="Dùng Proxy cho Tools" checked={proxyForTools} onChange={setProxyForTools} description="Bắt buộc Quét/Dịch chạy qua Proxy này." />
+                            </div>
+                        </div>
                     </div>
-                 </div>
+                )}
             </div>
 
-            <div className="border-t border-slate-700"></div>
-            
-            <div>
-                 <h3 className="text-xl font-bold text-sky-400 mb-6">Cài đặt OpenRouter API</h3>
-                 <div className="space-y-6">
-                    <div>
-                        <label htmlFor="openrouter-api-key" className="block text-sm font-medium text-slate-300 mb-1">
-                            API Key của OpenRouter
-                        </label>
-                        <div className="flex items-center gap-2">
-                            <input
-                                id="openrouter-api-key"
-                                type="password"
-                                value={openRouterApiKey}
-                                onChange={e => {
-                                    setOpenRouterApiKey(e.target.value);
-                                    setValidationStatus('idle'); // Reset validation status on change
-                                }}
-                                className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 font-mono text-sm"
-                                placeholder="sk-or-..."
-                            />
-                            <button
-                                onClick={handleValidateKey}
-                                disabled={isValidating || !openRouterApiKey}
-                                className="flex-shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
-                            >
-                                {isValidating ? <Loader message="" /> : 'Kiểm tra'}
-                            </button>
-                             {validationStatus === 'success' && (
-                                <div className="flex items-center gap-1 text-green-400">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                    <span className="text-sm font-medium">Hợp lệ</span>
-                                </div>
-                            )}
-                            {validationStatus === 'error' && (
-                                <div className="flex items-center gap-1 text-red-400">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                    <span className="text-sm font-medium">Không hợp lệ</span>
-                                </div>
-                            )}
-                        </div>
-                        {validationError && (
-                            <p className="text-xs text-red-400 mt-2">{validationError}</p>
-                        )}
-                         <p className="text-xs text-slate-500 mt-2">
-                           API key của bạn để sử dụng các mô hình từ OpenRouter.ai.
-                        </p>
-                    </div>
-                 </div>
-            </div>
-            
-            <div className="flex justify-end items-center gap-4 pt-4 border-t border-slate-700">
-                {saveStatus === 'saved' && <span className="text-sm text-green-400">Đã lưu!</span>}
-                {saveStatus === 'error' && <span className="text-sm text-red-400">Lỗi khi lưu.</span>}
+            {/* SAVE BUTTON */}
+            <div className="flex justify-end items-center gap-4 pt-4 border-t border-slate-700 sticky bottom-0 bg-slate-800/90 p-2 backdrop-blur-sm rounded-b-xl">
+                {saveStatus === 'saved' && <span className="text-sm text-green-400 font-bold animate-pulse">Đã lưu thành công!</span>}
+                {saveStatus === 'error' && <span className="text-sm text-red-400 font-bold">Lỗi khi lưu!</span>}
                 <button
                     onClick={handleSave}
-                    className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 px-6 rounded-lg transition-colors"
+                    className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-8 rounded-lg transition-transform active:scale-95 shadow-lg shadow-sky-900/30"
                 >
-                    Lưu Tất cả Cài đặt
+                    Áp Dụng Cài Đặt
                 </button>
             </div>
         </div>

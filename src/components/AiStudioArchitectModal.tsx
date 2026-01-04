@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { CharacterCard, WorldInfoEntry } from '../types';
 import { Tooltip } from './Tooltip';
 import { GoogleGenAI } from "@google/genai";
-import { getApiKey, getActiveModel } from '../services/settingsService';
+import { getApiKey, getActiveModel, getProxyForTools, getProxyUrl, getProxyPassword, getProxyLegacyMode } from '../services/settingsService';
 import { CONTEXT_FILES, DEFAULT_ARCHITECT_PROMPT } from '../services/architectContext';
 import { Loader } from './Loader';
 
@@ -91,6 +91,67 @@ export const AiStudioArchitectModal: React.FC<AiStudioArchitectModalProps> = ({ 
         return finalPrompt;
     };
 
+    // Helper to generate response using Dual Driver (Direct vs Proxy)
+    const generateResponse = async (fullPrompt: string): Promise<string> => {
+        if (getProxyForTools()) {
+            // PROXY MODE
+            const proxyUrl = getProxyUrl();
+            const proxyPassword = getProxyPassword();
+            const isLegacyMode = getProxyLegacyMode();
+            const model = getActiveModel(); 
+
+            if (!proxyUrl) throw new Error("Proxy URL chưa được cấu hình.");
+
+            const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
+            const endpoint = `${cleanUrl}/v1/chat/completions`;
+
+            const payload = {
+                model: model,
+                messages: [{ role: 'user', content: fullPrompt }],
+                stream: false
+            };
+
+            const headers: Record<string, string> = {};
+            if (isLegacyMode) {
+                headers['Content-Type'] = 'text/plain';
+            } else {
+                headers['Content-Type'] = 'application/json';
+                if (proxyPassword) {
+                    headers['Authorization'] = `Bearer ${proxyPassword}`;
+                }
+            }
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Proxy Error: ${errorText}`);
+            }
+
+            const data = await response.json();
+            return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
+
+        } else {
+            // DIRECT MODE
+            const apiKey = getApiKey();
+            if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
+
+            const ai = new GoogleGenAI({ apiKey });
+            const model = getActiveModel(); 
+            
+            const response = await ai.models.generateContent({
+                model: model,
+                contents: fullPrompt,
+            });
+
+            return response.text || "";
+        }
+    };
+
     const handleSendMessage = async () => {
         if (!input.trim() || isSending) return;
 
@@ -105,32 +166,15 @@ export const AiStudioArchitectModal: React.FC<AiStudioArchitectModalProps> = ({ 
         setIsSending(true);
 
         try {
-            const apiKey = getApiKey();
-            if (!apiKey) throw new Error("Chưa cấu hình API Key trong phần Cài đặt.");
-
-            const ai = new GoogleGenAI({ apiKey });
-            const model = getActiveModel(); 
-            
             // Construct the prompt with all context injected
             const fullPrompt = buildFullPrompt(userMsg.content);
             
-            // Note: For a true chat experience, we should maintain history. 
-            // However, Architect context is HUGE. Sending it every turn is expensive.
-            // Strategy: Send full context in the FIRST prompt of a session or treat each request as a "Solver" run.
-            // Given the requirement "Consultant", let's treat it as a fresh analysis with history appended if needed.
-            // For now, we simplify: Send full context + user instruction.
-            
-            const response = await ai.models.generateContent({
-                model: model,
-                contents: fullPrompt, // Sending everything as one big prompt ensures optimal attention
-            });
-
-            const text = response.text || "Xin lỗi, tôi không thể tạo phản hồi.";
+            const text = await generateResponse(fullPrompt);
 
             const aiMsg: ChatMessage = {
                 id: (Date.now() + 1).toString(),
                 role: 'ai',
-                content: text,
+                content: text || "Xin lỗi, tôi không thể tạo phản hồi.",
                 timestamp: Date.now()
             };
             setChatHistory(prev => [...prev, aiMsg]);

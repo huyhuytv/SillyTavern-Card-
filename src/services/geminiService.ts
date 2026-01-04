@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import type { CharacterCard, SillyTavernPreset, Lorebook, ChatMessage, OpenRouterModel } from '../types';
-import { getActiveModel, getApiKey, getOpenRouterApiKey, getProxyUrl, getProxyPassword, getProxyLegacyMode } from './settingsService';
+import { getActiveModel, getApiKey, getOpenRouterApiKey, getProxyUrl, getProxyPassword, getProxyLegacyMode, getProxyForTools, getConnectionSettings } from './settingsService';
 import { cleanMessageContent } from './promptManager';
 import defaultPreset from '../data/defaultPreset';
 
@@ -33,6 +33,54 @@ const getGeminiClient = (): GoogleGenAI => {
     return new GoogleGenAI({ apiKey });
 };
 
+// --- PROXY HELPER FUNCTION ---
+/**
+ * Generic function to call an OpenAI-compatible Proxy.
+ * Used for auxiliary tasks (summary, scan, translate) when Proxy Mode is enforced.
+ */
+async function callOpenAIProxy(prompt: string, model: string = 'gpt-3.5-turbo'): Promise<string> {
+    const proxyUrl = getProxyUrl();
+    const proxyPassword = getProxyPassword();
+    const isLegacyMode = getProxyLegacyMode();
+
+    if (!proxyUrl) throw new Error("Proxy URL chưa được cấu hình.");
+
+    const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
+    const endpoint = `${cleanUrl}/v1/chat/completions`;
+
+    const payload = {
+        model: model,
+        messages: [{ role: 'user', content: prompt }],
+        stream: false,
+        temperature: 0.1 // Low temp for tasks
+    };
+
+    const headers: Record<string, string> = {};
+    if (isLegacyMode) {
+        headers['Content-Type'] = 'text/plain';
+    } else {
+        headers['Content-Type'] = 'application/json';
+        if (proxyPassword) {
+            headers['Authorization'] = `Bearer ${proxyPassword}`;
+        }
+    }
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Proxy Error (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
+}
+
+
 export async function summarizeHistory(historySlice: ChatMessage[], cardName: string, customPrompt?: string): Promise<string> {
   // FIX: Fallback to originalRawContent if content is empty (Interactive Card Support)
   // NEW: Use cleanMessageContent to strip thoughts/technical blocks
@@ -46,8 +94,6 @@ export async function summarizeHistory(historySlice: ChatMessage[], cardName: st
     return `${cardName}: ${cleanContent}`;
   }).filter(Boolean).join('\n');
   
-  const ai = getGeminiClient();
-
   let prompt = "";
   
   if (customPrompt) {
@@ -79,39 +125,54 @@ Bản Ghi Chép (Tóm tắt):
   }
 
   try {
-    const response = await ai.models.generateContent({
-        model: getActiveModel(),
-        contents: prompt,
-        config: {
-            safetySettings,
-        },
-    });
-    return response.text?.trim() || "";
+    // --- DUAL DRIVER LOGIC ---
+    if (getProxyForTools()) {
+        // PROXY PATH (Get active model for proxy from new settings)
+        const conn = getConnectionSettings();
+        const model = conn.proxy_model || 'gemini-3-pro-preview';
+        return await callOpenAIProxy(prompt, model);
+    } else {
+        // GOOGLE DIRECT PATH
+        const ai = getGeminiClient();
+        // Use gemini model from settings
+        const conn = getConnectionSettings();
+        const model = conn.gemini_model || 'gemini-3-pro-preview';
+        
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: prompt,
+            config: { safetySettings },
+        });
+        return response.text?.trim() || "";
+    }
   } catch (error) {
-    console.error("Gemini API error in summarizeHistory:", error);
+    console.error("Gemini/Proxy API error in summarizeHistory:", error);
     return ""; // Return empty string on failure to not break the chat flow
   }
 }
 
 /**
  * Sends the constructed prompt to the selected API (Gemini or OpenRouter).
+ * UPDATED: Uses Global Connection Settings instead of Preset Source.
  */
 export async function sendChatRequest(
     fullPrompt: string,
     settings: SillyTavernPreset
 ): Promise<{ response: GenerateContentResponse }> {
     
-    // --- API Dispatch ---
-    
+    // --- GLOBAL CONNECTION SETTINGS ---
+    const connection = getConnectionSettings();
+    const source = connection.source;
+
     // 1. REVERSE PROXY (OpenAI Compatible)
-    if (settings.chat_completion_source === 'proxy') {
+    if (source === 'proxy') {
         const proxyUrl = getProxyUrl();
         const proxyPassword = getProxyPassword();
         const isLegacyMode = getProxyLegacyMode();
 
         const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
-        const endpoint = `${cleanUrl}/v1/chat/completions`; // Standard OpenAI format
-        const model = settings.proxy_model || 'gemini-3-pro-preview'; // Default fallback
+        const endpoint = `${cleanUrl}/v1/chat/completions`; 
+        const model = connection.proxy_model || 'gemini-3-pro-preview';
 
         try {
             const payload = {
@@ -130,11 +191,8 @@ export async function sendChatRequest(
             const headers: Record<string, string> = {};
 
             if (isLegacyMode) {
-                // LEGACY MODE (Localhost/Kingfall)
-                // Use text/plain to avoid CORS preflight (OPTIONS)
                 headers['Content-Type'] = 'text/plain';
             } else {
-                // STANDARD MODE (Commercial Proxy)
                 headers['Content-Type'] = 'application/json';
                 if (proxyPassword) {
                     headers['Authorization'] = `Bearer ${proxyPassword}`;
@@ -171,25 +229,29 @@ export async function sendChatRequest(
     }
 
     // 2. OPEN ROUTER
-    if (settings.chat_completion_source === 'openrouter' && settings.openrouter_model) {
-        // --- OpenRouter Logic ---
+    if (source === 'openrouter') {
         const openRouterKey = getOpenRouterApiKey();
         if (!openRouterKey) {
             throw new Error("API Key của OpenRouter chưa được đặt. Vui lòng đặt nó trong Cài đặt API.");
         }
         
+        const model = connection.openrouter_model;
+        if (!model) {
+             throw new Error("Chưa chọn Model cho OpenRouter. Vui lòng chọn trong Cài đặt API.");
+        }
+
         try {
             const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${openRouterKey}`,
                     'Content-Type': 'application/json',
-                    'HTTP-Referer': window.location.origin, // Recommended by OpenRouter
-                    'X-Title': 'SillyTavern Card Studio' // Recommended by OpenRouter
+                    'HTTP-Referer': window.location.origin,
+                    'X-Title': 'SillyTavern Card Studio'
                 },
                 body: JSON.stringify({
-                    model: settings.openrouter_model,
-                    messages: [{ role: 'user', content: fullPrompt }], // Send the entire constructed prompt as a user message
+                    model: model,
+                    messages: [{ role: 'user', content: fullPrompt }],
                     temperature: settings.temp,
                     top_p: settings.top_p,
                     top_k: settings.top_k,
@@ -206,7 +268,6 @@ export async function sendChatRequest(
 
             const data = await response.json();
             const text = data.choices[0]?.message?.content || '';
-            // Adapt the response to look like a Gemini response for compatibility
             const apiResponse = { text } as GenerateContentResponse;
             return { response: apiResponse };
 
@@ -221,6 +282,8 @@ export async function sendChatRequest(
     else {
         // --- Default Gemini Logic ---
         const ai = getGeminiClient();
+        const model = connection.gemini_model || 'gemini-3-pro-preview';
+
         try {
             // Xây dựng config với thinkingConfig (nếu có)
             const config: any = {
@@ -238,36 +301,27 @@ export async function sendChatRequest(
             }
 
             const response = await ai.models.generateContent({
-                model: getActiveModel(),
+                model: model,
                 contents: fullPrompt,
                 config: config,
             });
 
             // --- NATIVE THINKING EXTRACTION ---
-            // Nếu có suy nghĩ native, nó sẽ nằm trong 'parts' nhưng thường bị ẩn khỏi '.text' mặc định.
-            // Ta cần lấy nó ra và bọc vào <thinking> để UI hiển thị.
             if (settings.thinking_budget && Number(settings.thinking_budget) > 0) {
                 const parts = response.candidates?.[0]?.content?.parts || [];
                 let thoughtContent = '';
                 let finalContent = '';
 
                 for (const part of parts) {
-                    // Kiểm tra thuộc tính 'thought' (casting as any vì type SDK có thể chưa cập nhật kịp)
                     if ((part as any).thought) {
                         thoughtContent += part.text;
                     } else {
-                        // Nội dung chính
                         finalContent += part.text;
                     }
                 }
 
-                // Nếu tìm thấy suy nghĩ native
                 if (thoughtContent) {
-                    // Ghép lại: Suy nghĩ (trong thẻ) + Nội dung chính
-                    // Việc bọc trong <thinking> sẽ kích hoạt UI "Xem quy trình suy nghĩ" ở MessageBubble.tsx
                     const combinedText = `<thinking>${thoughtContent}</thinking>\n${finalContent}`;
-                    
-                    // Ghi đè getter .text của response object để trả về chuỗi đã ghép
                     Object.defineProperty(response, 'text', {
                         get: () => combinedText,
                         configurable: true
@@ -290,21 +344,22 @@ export async function sendChatRequest(
  */
 async function* streamOpenAICompatible(
     fullPrompt: string, 
-    settings: SillyTavernPreset
+    settings: SillyTavernPreset,
+    connectionSource: 'proxy' | 'openrouter',
+    connectionModel: string
 ): AsyncGenerator<string, void, unknown> {
     let url = '';
     let headers: Record<string, string> = {};
-    let model = '';
+    let model = connectionModel;
 
     // 1. Configuration
-    if (settings.chat_completion_source === 'proxy') {
+    if (connectionSource === 'proxy') {
         const proxyUrl = getProxyUrl();
         const proxyPassword = getProxyPassword();
         const isLegacyMode = getProxyLegacyMode();
         
         const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
         url = `${cleanUrl}/v1/chat/completions`;
-        model = settings.proxy_model || 'gemini-3-pro-preview';
         
         if (isLegacyMode) {
             headers = { 'Content-Type': 'text/plain' }; 
@@ -319,7 +374,6 @@ async function* streamOpenAICompatible(
         const openRouterKey = getOpenRouterApiKey();
         if (!openRouterKey) throw new Error("API Key OpenRouter bị thiếu.");
         url = "https://openrouter.ai/api/v1/chat/completions";
-        model = settings.openrouter_model || '';
         headers = {
             'Authorization': `Bearer ${openRouterKey}`,
             'Content-Type': 'application/json',
@@ -361,8 +415,6 @@ async function* streamOpenAICompatible(
 
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
-            
-            // Keep the last partial line in the buffer
             buffer = lines.pop() || ''; 
 
             for (const line of lines) {
@@ -370,7 +422,7 @@ async function* streamOpenAICompatible(
                 if (!trimmed) continue;
                 if (trimmed.startsWith('data: ')) {
                     const dataStr = trimmed.slice(6);
-                    if (dataStr === '[DONE]') return; // End of stream
+                    if (dataStr === '[DONE]') return; 
 
                     try {
                         const json = JSON.parse(dataStr);
@@ -379,7 +431,7 @@ async function* streamOpenAICompatible(
                             yield content;
                         }
                     } catch (e) {
-                        // Ignore parse errors for keep-alive chunks or invalid JSON lines
+                        // Ignore
                     }
                 }
             }
@@ -395,20 +447,31 @@ async function* streamOpenAICompatible(
 /**
  * Sends a STREAMING chat request.
  * Returns an Async Generator that yields chunks of text.
+ * UPDATED: Uses Global Connection Settings.
  */
 export async function* sendChatRequestStream(
     fullPrompt: string,
     settings: SillyTavernPreset
 ): AsyncGenerator<string, void, unknown> {
     
+    const connection = getConnectionSettings();
+    const source = connection.source;
+
     // --- 1. PROXY / OPENROUTER STREAMING ---
-    if (settings.chat_completion_source === 'proxy' || settings.chat_completion_source === 'openrouter') {
-        yield* streamOpenAICompatible(fullPrompt, settings);
+    if (source === 'proxy') {
+        yield* streamOpenAICompatible(fullPrompt, settings, 'proxy', connection.proxy_model || 'gemini-3-pro-preview');
+        return;
+    }
+    
+    if (source === 'openrouter') {
+        if (!connection.openrouter_model) throw new Error("Chưa chọn model OpenRouter.");
+        yield* streamOpenAICompatible(fullPrompt, settings, 'openrouter', connection.openrouter_model);
         return;
     }
 
     // --- 2. GEMINI DIRECT STREAMING ---
     const ai = getGeminiClient();
+    const model = connection.gemini_model || 'gemini-3-pro-preview';
     
     const config: any = {
         safetySettings,
@@ -425,31 +488,24 @@ export async function* sendChatRequestStream(
 
     try {
         const streamResponse = await ai.models.generateContentStream({
-            model: getActiveModel(),
+            model: model,
             contents: fullPrompt,
             config: config,
         });
 
         for await (const chunk of streamResponse) {
-            // Native Thinking extraction for stream
-            // Chunk might contain parts with 'thought' or 'text'
-            // We reconstruct it to XML style for consistency with MessageBubble parser
-            
             const parts = chunk.candidates?.[0]?.content?.parts || [];
             let chunkText = '';
             
-            // Check if parts exist (Native Thinking structure)
             if (parts.length > 0) {
                 for (const part of parts) {
                     if ((part as any).thought) {
-                        // Wrap thought chunks in tags so MessageBubble can strip/hide them
                         chunkText += `<thinking>${part.text}</thinking>`; 
                     } else {
                         chunkText += part.text;
                     }
                 }
             } else {
-                // Standard text response
                 chunkText = chunk.text || '';
             }
             
@@ -520,17 +576,22 @@ ${lorebookReferenceString || "Chưa có sổ tay nào để tham khảo."}
 `;
 
   try {
-    const response = await ai.models.generateContent({
-        model: getActiveModel(),
-        contents: prompt,
-        config: {
-            safetySettings,
-        },
-    });
-    return response.text?.trim() || '';
+    // --- DUAL DRIVER LOGIC ---
+    if (getProxyForTools()) {
+        const conn = getConnectionSettings();
+        return await callOpenAIProxy(prompt, conn.proxy_model || 'gemini-2.5-flash');
+    } else {
+        const ai = getGeminiClient();
+        const response = await ai.models.generateContent({
+            model: getActiveModel(), // Helper now returns correct model ID based on source
+            contents: prompt,
+            config: { safetySettings },
+        });
+        return response.text?.trim() || '';
+    }
   } catch (error) {
     console.error("Gemini API error in generateLorebookEntry:", error);
-    throw new Error("Không thể tạo mục sổ tay từ Gemini. Vui lòng kiểm tra API key và kết nối mạng.");
+    throw new Error("Không thể tạo mục sổ tay. Vui lòng kiểm tra API key/Proxy và kết nối mạng.");
   }
 }
 
@@ -549,14 +610,12 @@ export async function getOpenRouterModels(): Promise<OpenRouterModel[]> {
             throw new Error("Phản hồi API từ OpenRouter có định dạng không hợp lệ.");
         }
 
-        // Sắp xếp các mô hình theo thứ tự bảng chữ cái theo tên để có UX tốt hơn
         data.data.sort((a: OpenRouterModel, b: OpenRouterModel) => a.name.localeCompare(b.name));
 
         return data.data;
 
     } catch (error) {
         if (error instanceof Error) {
-            // Ném lại với một thông báo thân thiện hơn nếu đó là lỗi mạng
             if (error.message.includes('Failed to fetch')) {
                  throw new Error("Lỗi mạng khi cố gắng kết nối với OpenRouter. Vui lòng kiểm tra kết nối internet của bạn.");
             }
@@ -609,14 +668,12 @@ export async function validateOpenRouterKey(apiKey: string): Promise<boolean> {
 
 // Helper to extract JSON from potential messy text
 function extractAndParseJson(text: string): any {
-    // 1. Try direct parse (Best case)
     try {
         return JSON.parse(text);
     } catch (e) {
         // Continue
     }
 
-    // 2. Remove markdown fences
     try {
         const cleanMarkdown = text.replace(/```(?:json)?|```/g, '').trim();
         return JSON.parse(cleanMarkdown);
@@ -624,7 +681,6 @@ function extractAndParseJson(text: string): any {
         // Continue
     }
 
-    // 3. Robust Substring Extraction (Search for outermost {})
     try {
         const firstOpen = text.indexOf('{');
         const lastClose = text.lastIndexOf('}');
@@ -636,7 +692,6 @@ function extractAndParseJson(text: string): any {
         // Continue
     }
     
-    // 4. Robust Substring Extraction for Array (Search for outermost [])
     try {
         const firstOpen = text.indexOf('[');
         const lastClose = text.lastIndexOf(']');
@@ -652,47 +707,53 @@ function extractAndParseJson(text: string): any {
 }
 
 export async function scanWorldInfoWithAI(
-    combinedContext: string, // Not used in new logic, kept for signature compat temporarily if needed
-    contextList: string, // Constants / Background info
-    candidateList: string, // The items AI should choose from
-    latestInput: string, // NEW: User's latest input
-    stateString: string, // NEW: Formatted Variable State
+    combinedContext: string, 
+    contextList: string, 
+    candidateList: string, 
+    latestInput: string, 
+    stateString: string, 
     modelName: string = 'gemini-2.5-flash',
-    customSystemPrompt?: string // NEW: Customizable System Prompt
+    customSystemPrompt?: string
 ): Promise<{selectedIds: string[], outgoingPrompt: string, rawResponse: string}> {
     
-    const ai = getGeminiClient();
-    
-    // Use Custom Prompt or Fallback to Default
     const baseSystemPrompt = customSystemPrompt || defaultPreset.smart_scan_system_prompt || '';
     
-    // Replace macros safely (using global replace regex)
     const finalPrompt = baseSystemPrompt
         .replace(/{{context}}/g, contextList || '(Không có)')
         .replace(/{{state}}/g, stateString || '(Không có)')
-        .replace(/{{history}}/g, combinedContext || '(Không có)') // combinedContext is passed as history
+        .replace(/{{history}}/g, combinedContext || '(Không có)') 
         .replace(/{{input}}/g, latestInput || '(Không có)')
         .replace(/{{candidates}}/g, candidateList || '(Không có)');
 
-    try {
-        const response = await ai.models.generateContent({
-            model: modelName, // Use scanning specific model
-            contents: finalPrompt,
-            config: {
-                temperature: 0, // Deterministic for logic
-                responseMimeType: 'application/json',
-                safetySettings,
-            },
-        });
+    let text = '{}';
 
-        const text = response.text || '{}';
+    try {
+        // --- DUAL DRIVER LOGIC ---
+        if (getProxyForTools()) {
+            // PROXY MODE
+            const conn = getConnectionSettings();
+            text = await callOpenAIProxy(finalPrompt, conn.proxy_model || modelName);
+        } else {
+            // GOOGLE DIRECT MODE (Try to use modelName if provided, else fallback to active gemini model)
+            // SmartScan usually requests specific models (like Flash).
+            
+            const ai = getGeminiClient();
+            const response = await ai.models.generateContent({
+                model: modelName, 
+                contents: finalPrompt,
+                config: {
+                    temperature: 0, 
+                    responseMimeType: 'application/json',
+                    safetySettings,
+                },
+            });
+            text = response.text || '{}';
+        }
+
         let selectedIds: string[] = [];
         
         try {
-            // Use the robust parser to handle messy LLM output
             const parsed = extractAndParseJson(text);
-            
-            // Handle both array format (legacy) and object format (new)
             if (Array.isArray(parsed)) {
                 selectedIds = parsed;
             } else if (parsed.selected_ids && Array.isArray(parsed.selected_ids)) {
@@ -700,7 +761,6 @@ export async function scanWorldInfoWithAI(
             }
         } catch (e) {
             console.error("Failed to parse JSON from Smart Scan:", text);
-            // Fallback to empty list on error to prevent crash
         }
         
         return { 
@@ -710,23 +770,20 @@ export async function scanWorldInfoWithAI(
         };
 
     } catch (error) {
-        console.error("Gemini API error in scanWorldInfoWithAI:", error);
+        console.error("Gemini/Proxy API error in scanWorldInfoWithAI:", error);
         return { selectedIds: [], outgoingPrompt: finalPrompt, rawResponse: String(error) };
     }
 }
 
 /**
  * TRANSLATE LOREBOOK BATCH
- * Translates a batch of Lorebook Entries to Vietnamese using strict rules.
  */
 export async function translateLorebookBatch(
-    entries: any[], // Raw entry objects
+    entries: any[], 
     customPromptTemplate: string,
-    model: string = 'gemini-3-flash-preview' // Default as requested
+    model: string = 'gemini-3-flash-preview' 
 ): Promise<{ entries: any[], rawResponse: string, finalPrompt: string }> {
-    const ai = getGeminiClient();
     
-    // Filter relevant fields to save token usage
     const minifiedEntries = entries.map(e => ({
         uid: e.uid,
         keys: e.keys,
@@ -740,35 +797,42 @@ export async function translateLorebookBatch(
     let responseText = "";
 
     try {
-        const response = await ai.models.generateContent({
-            model: model,
-            contents: finalPrompt,
-            config: {
-                responseMimeType: 'application/json',
-                // Using Schema to force strict structure
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            uid: { type: Type.STRING },
-                            keys: { type: Type.ARRAY, items: { type: Type.STRING } },
-                            comment: { type: Type.STRING },
-                            content: { type: Type.STRING },
+        // --- DUAL DRIVER LOGIC ---
+        if (getProxyForTools()) {
+            // PROXY MODE
+            const conn = getConnectionSettings();
+            responseText = await callOpenAIProxy(finalPrompt, conn.proxy_model || model);
+        } else {
+            // GOOGLE DIRECT MODE
+            const ai = getGeminiClient();
+            const response = await ai.models.generateContent({
+                model: model,
+                contents: finalPrompt,
+                config: {
+                    responseMimeType: 'application/json',
+                    responseSchema: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                uid: { type: Type.STRING },
+                                keys: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                comment: { type: Type.STRING },
+                                content: { type: Type.STRING },
+                            },
+                            required: ["uid", "keys", "comment", "content"],
                         },
-                        required: ["uid", "keys", "comment", "content"],
                     },
+                    safetySettings,
+                    temperature: 0.1 
                 },
-                safetySettings,
-                temperature: 0.1 // Low temp for deterministic translation
-            },
-        });
+            });
+            responseText = response.text || "[]";
+        }
 
-        responseText = response.text || "[]";
         let translatedEntries = extractAndParseJson(responseText);
         
         if (!Array.isArray(translatedEntries)) {
-            // Try to extract if wrapped in object
             if (translatedEntries.entries) translatedEntries = translatedEntries.entries;
             else if (translatedEntries.data) translatedEntries = translatedEntries.data;
             else throw new Error("AI trả về định dạng JSON không phải là mảng.");
@@ -777,9 +841,7 @@ export async function translateLorebookBatch(
         return { entries: translatedEntries, rawResponse: responseText, finalPrompt };
 
     } catch (error: any) {
-        console.error("Gemini API error in translateLorebookBatch:", error);
-        // THROW RICH ERROR OBJECT TO PASS DATA BACK TO UI
-        // eslint-disable-next-line no-throw-literal
+        console.error("Gemini/Proxy API error in translateLorebookBatch:", error);
         throw {
             message: error.message || String(error),
             rawResponse: responseText || "(Không có phản hồi hoặc lỗi mạng)",
@@ -790,8 +852,6 @@ export async function translateLorebookBatch(
 
 /**
  * BATCH TRANSLATE GREETINGS
- * Combines first_mes, alternate_greetings, and group_only_greetings into a single payload for context-aware translation.
- * UPDATED: Uses extractAndParseJson instead of raw JSON.parse and relaxes Schema.
  */
 export async function translateGreetingsBatch(
     data: {
@@ -805,8 +865,6 @@ export async function translateGreetingsBatch(
     },
     model: string = 'gemini-3-flash-preview'
 ) {
-    const ai = getGeminiClient();
-
     const prompt = `
 Bạn là một dịch giả tiểu thuyết chuyên nghiệp. Nhiệm vụ của bạn là dịch các lời chào nhân vật sau sang tiếng Việt.
 
@@ -831,20 +889,25 @@ Bạn là một dịch giả tiểu thuyết chuyên nghiệp. Nhiệm vụ củ
 ${JSON.stringify(data, null, 2)}
 `;
 
-    try {
-        const response = await ai.models.generateContent({
-            model: model,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                // Relaxed: Removed strict schema to handle empty arrays better
-                // and avoid SDK client-side validation errors.
-                safetySettings,
-            }
-        });
+    let text = "{}";
 
-        const text = response.text || "{}";
-        console.log("Translation Response:", text); // Debug log
+    try {
+        // --- DUAL DRIVER LOGIC ---
+        if (getProxyForTools()) {
+            const conn = getConnectionSettings();
+            text = await callOpenAIProxy(prompt, conn.proxy_model || model);
+        } else {
+            const ai = getGeminiClient();
+            const response = await ai.models.generateContent({
+                model: model,
+                contents: prompt,
+                config: {
+                    responseMimeType: "application/json",
+                    safetySettings,
+                }
+            });
+            text = response.text || "{}";
+        }
         
         return extractAndParseJson(text);
 

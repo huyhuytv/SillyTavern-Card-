@@ -1,10 +1,7 @@
 
-import React, { useCallback, useState, useEffect, useMemo, useRef, useId } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import type { SillyTavernPreset } from '../types';
 import { Tooltip } from './Tooltip';
-import { getOpenRouterModels } from '../services/geminiService';
-import type { OpenRouterModel } from '../types';
-import { Loader } from './Loader';
 
 // Section component for consistent styling
 const Section: React.FC<{title: string; description: string; children: React.ReactNode}> = ({title, description, children}) => (
@@ -132,11 +129,8 @@ const SliderInput: React.FC<{
         onChange(parseFloat(e.target.value));
     };
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        // Allow string input (for macros) or numbers
         const val = e.target.value;
         const num = parseFloat(val);
-        // If it's a valid number and not ending in a dot (user typing float), use number. 
-        // Otherwise treat as string to support macros or partial typing.
         if (!isNaN(num) && !val.endsWith('.') && !val.endsWith('e')) {
              onChange(num);
         } else {
@@ -144,7 +138,6 @@ const SliderInput: React.FC<{
         }
     };
     
-    // For the slider, value must be a number. Fallback to min if it's a string (macro).
     const sliderValue = typeof value === 'number' ? value : (parseFloat(String(value)) || min);
 
     return (
@@ -252,173 +245,6 @@ const StringArrayInput: React.FC<{ label: string, values: string[], onChange: (v
     );
 }
 
-const SearchableSelect: React.FC<{
-    options: { value: string; label: string }[];
-    value: string;
-    onChange: (value: string) => void;
-    placeholder?: string;
-    disabled?: boolean;
-}> = ({ options, value, onChange, placeholder = "Chọn một tùy chọn...", disabled = false }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [highlightedIndex, setHighlightedIndex] = useState(-1);
-    
-    const wrapperRef = useRef<HTMLDivElement>(null);
-    const searchInputRef = useRef<HTMLInputElement>(null);
-    const listboxRef = useRef<HTMLUListElement>(null);
-    const triggerButtonRef = useRef<HTMLButtonElement>(null);
-
-    const comboboxId = useId();
-    const listboxId = useId();
-
-    const selectedOption = useMemo(() => options.find(option => option.value === value), [options, value]);
-
-    const filteredOptions = useMemo(() => searchTerm
-        ? options.filter(option =>
-            option.label.toLowerCase().includes(searchTerm.toLowerCase())
-          )
-        : options, [options, searchTerm]);
-
-    // Reset highlight when search term or options change
-    useEffect(() => {
-        setHighlightedIndex(0);
-    }, [searchTerm, filteredOptions.length]);
-
-    // Scroll highlighted item into view
-    useEffect(() => {
-        if (isOpen && highlightedIndex >= 0 && listboxRef.current) {
-            const optionElement = listboxRef.current.querySelector(`#option-${listboxId}-${highlightedIndex}`);
-            optionElement?.scrollIntoView({ block: 'nearest' });
-        }
-    }, [highlightedIndex, isOpen, listboxId]);
-
-    const handleSelect = useCallback((optionValue: string) => {
-        onChange(optionValue);
-        setIsOpen(false);
-        triggerButtonRef.current?.focus();
-    }, [onChange]);
-
-    // Close on click outside
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    // Focus search input when opened
-    useEffect(() => {
-        if (isOpen) {
-            setSearchTerm(''); // Clear search on open
-            setHighlightedIndex(0);
-            setTimeout(() => searchInputRef.current?.focus(), 100);
-        }
-    }, [isOpen]);
-
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (!isOpen) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                setIsOpen(true);
-            }
-            return;
-        }
-
-        switch (e.key) {
-            case 'ArrowDown':
-                e.preventDefault();
-                setHighlightedIndex(prev => (prev + 1) % filteredOptions.length);
-                break;
-            case 'ArrowUp':
-                e.preventDefault();
-                setHighlightedIndex(prev => (prev - 1 + filteredOptions.length) % filteredOptions.length);
-                break;
-            case 'Enter':
-                e.preventDefault();
-                if (highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
-                    handleSelect(filteredOptions[highlightedIndex].value);
-                }
-                break;
-            case 'Escape':
-                e.preventDefault();
-                setIsOpen(false);
-                triggerButtonRef.current?.focus();
-                break;
-            case 'Tab':
-                setIsOpen(false);
-                break;
-            default:
-                break;
-        }
-    };
-    
-    return (
-        <div className="relative w-full" ref={wrapperRef} onKeyDown={handleKeyDown}>
-            <button
-                ref={triggerButtonRef}
-                type="button"
-                id={comboboxId}
-                role="combobox"
-                aria-haspopup="listbox"
-                aria-controls={listboxId}
-                aria-expanded={isOpen}
-                onClick={() => !disabled && setIsOpen(!isOpen)}
-                disabled={disabled}
-                className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-left text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition flex justify-between items-center disabled:bg-slate-800 disabled:cursor-not-allowed"
-            >
-                <span className={`truncate ${selectedOption ? 'text-slate-200' : 'text-slate-400'}`}>
-                    {selectedOption ? selectedOption.label : placeholder}
-                </span>
-                <svg className="w-5 h-5 text-slate-400 transform transition-transform flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-            </button>
-            {isOpen && (
-                <div className="absolute z-20 mt-1 w-full bg-slate-800 border border-slate-700 rounded-md shadow-lg max-h-60 flex flex-col">
-                    <div className="p-2 border-b border-slate-700">
-                        <input
-                            ref={searchInputRef}
-                            type="text"
-                            aria-label="Tìm kiếm mô hình"
-                            aria-controls={listboxId}
-                            aria-activedescendant={highlightedIndex >= 0 ? `option-${listboxId}-${highlightedIndex}` : undefined}
-                            placeholder="Tìm kiếm mô hình..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-1 focus:ring-sky-500"
-                        />
-                    </div>
-                    <ul
-                        id={listboxId}
-                        ref={listboxRef}
-                        role="listbox"
-                        aria-labelledby={comboboxId}
-                        className="overflow-y-auto custom-scrollbar flex-grow"
-                    >
-                        {filteredOptions.length > 0 ? (
-                            filteredOptions.map((option, index) => (
-                                <li
-                                    key={option.value}
-                                    id={`option-${listboxId}-${index}`}
-                                    role="option"
-                                    aria-selected={value === option.value}
-                                    onClick={() => handleSelect(option.value)}
-                                    className={`p-2 cursor-pointer hover:bg-sky-600 truncate ${highlightedIndex === index ? 'bg-sky-700' : ''}`}
-                                >
-                                    {option.label}
-                                </li>
-                            ))
-                        ) : (
-                            <li className="p-2 text-slate-500 text-center" role="option" aria-selected="false">Không tìm thấy mô hình.</li>
-                        )}
-                    </ul>
-                </div>
-            )}
-        </div>
-    );
-};
-
 interface PresetEditorProps {
     preset: SillyTavernPreset;
     onUpdate: (preset: SillyTavernPreset) => void;
@@ -427,11 +253,6 @@ interface PresetEditorProps {
 export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) => {
     const [extensionsJson, setExtensionsJson] = useState(JSON.stringify(preset.extensions, null, 2) || '{}');
     const [isExtensionsJsonValid, setIsExtensionsJsonValid] = useState(true);
-    
-    const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
-    const [isFetchingModels, setIsFetchingModels] = useState(false);
-    const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
-    const [showFreeModelsOnly, setShowFreeModelsOnly] = useState(false);
 
     const handleChange = useCallback((field: keyof SillyTavernPreset, value: any) => {
         onUpdate({ ...preset, [field]: value });
@@ -442,25 +263,6 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) 
         setExtensionsJson(jsonString === undefined ? '{}' : jsonString);
         setIsExtensionsJsonValid(true);
     }, [preset.extensions]);
-    
-    useEffect(() => {
-        // Tìm nạp các mô hình chỉ khi OpenRouter được chọn và các mô hình chưa được tìm nạp.
-        if (preset.chat_completion_source === 'openrouter' && openRouterModels.length === 0 && !isFetchingModels) {
-            const fetchModels = async () => {
-                setIsFetchingModels(true);
-                setFetchModelsError(null);
-                try {
-                    const models = await getOpenRouterModels();
-                    setOpenRouterModels(models);
-                } catch (error) {
-                    setFetchModelsError(error instanceof Error ? error.message : 'Đã xảy ra lỗi không xác định.');
-                } finally {
-                    setIsFetchingModels(false);
-                }
-            };
-            fetchModels();
-        }
-    }, [preset.chat_completion_source, openRouterModels.length, isFetchingModels]);
 
     const handleExtensionsChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newValue = e.target.value;
@@ -474,153 +276,19 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) 
       }
     }, [preset, onUpdate]);
 
-    const filteredOpenRouterModels = useMemo(() => {
-        if (!showFreeModelsOnly) {
-            return openRouterModels;
-        }
-        return openRouterModels.filter(model =>
-            model.pricing.prompt === '0' && model.pricing.completion === '0'
-        );
-    }, [openRouterModels, showFreeModelsOnly]);
-
-    useEffect(() => {
-        if (showFreeModelsOnly && preset.openrouter_model) {
-            const isSelectedModelVisible = filteredOpenRouterModels.some(m => m.id === preset.openrouter_model);
-            if (!isSelectedModelVisible) {
-                // The currently selected model is not free, so deselect it.
-                handleChange('openrouter_model', '');
-            }
-        }
-    }, [showFreeModelsOnly, filteredOpenRouterModels, preset.openrouter_model, handleChange]);
-    
-    const selectedModelDetails = useMemo(() => {
-        if (!preset.openrouter_model || openRouterModels.length === 0) {
-            return null;
-        }
-        return openRouterModels.find(m => m.id === preset.openrouter_model);
-    }, [preset.openrouter_model, openRouterModels]);
-    
-    const formatPrice = (price: string) => {
-        const priceNum = parseFloat(price);
-        if (isNaN(priceNum) || priceNum === 0) return '$0.00';
-        // Price is per token, so multiply by 1 million for the standard display rate.
-        const pricePerMillion = priceNum * 1_000_000;
-        return `$${pricePerMillion.toFixed(4)}`;
-    };
-
-
     return (
         <div>
             <Section title="Thông tin cơ bản" description="Tên, nhận xét và lời nhắc hệ thống chung cho preset này.">
                 <LabeledInput label="Tên Preset" value={preset.name || ''} onChange={(e) => handleChange('name', e.target.value)} />
                 <LabeledInput label="Nhận xét" value={preset.comment || ''} onChange={(e) => handleChange('comment', e.target.value)} />
                 <LabeledTextarea label="Lời nhắc Hệ thống" value={preset.system_prompt || ''} onChange={(e) => handleChange('system_prompt', e.target.value)} rows={6} containerClassName="md:col-span-2" />
+                <div className="md:col-span-2 bg-blue-900/20 border border-blue-500/30 p-4 rounded-lg">
+                    <p className="text-sm text-blue-200">
+                        <span className="font-bold">Lưu ý:</span> Việc chọn nguồn API (Gemini/OpenRouter/Proxy) và Model hiện đã được chuyển sang tab <strong>Cài đặt &gt; Thiết lập API</strong>. Preset này chỉ lưu trữ các tham số tạo văn bản (Sampling, Prompt).
+                    </p>
+                </div>
             </Section>
             
-            <Section title="API & Lựa chọn Mô hình" description="Cấu hình nguồn API và chọn các mô hình cụ thể cho các nhà cung cấp khác nhau.">
-                <LabeledSelect 
-                    label="Nguồn Hoàn thành Trò chuyện" 
-                    value={preset.chat_completion_source || 'custom'} 
-                    onChange={(e) => handleChange('chat_completion_source', e.target.value)}
-                    options={[
-                        { value: 'custom', label: 'Custom / Gemini' },
-                        { value: 'openrouter', label: 'OpenRouter' },
-                        { value: 'proxy', label: 'Reverse Proxy (Kingfall)' }
-                    ]}
-                    tooltipText="Chọn dịch vụ AI sẽ xử lý các yêu cầu trò chuyện. 'Custom/Gemini' sử dụng cài đặt Gemini. 'OpenRouter' cho phép bạn sử dụng bất kỳ mô hình nào được OpenRouter hỗ trợ. 'Reverse Proxy' cho phép kết nối với Server trung gian không cần API Key."
-                />
-
-                {preset.chat_completion_source === 'openrouter' && (
-                    <>
-                        <div className="md:col-span-2">
-                             {isFetchingModels ? (
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Mô hình OpenRouter</label>
-                                    <div className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-400">
-                                        <Loader message="Đang tải các mô hình..." />
-                                    </div>
-                                </div>
-                             ) : fetchModelsError ? (
-                                 <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Mô hình OpenRouter</label>
-                                    <div className="w-full bg-red-900/30 border border-red-500/50 rounded-md p-3 text-red-400 text-sm">
-                                        <p className="font-bold">Không thể tải mô hình:</p>
-                                        <p>{fetchModelsError}</p>
-                                    </div>
-                                 </div>
-                             ) : (
-                                 <div className="space-y-4">
-                                    <div>
-                                        <Tooltip text="Chọn một mô hình từ danh sách được cung cấp bởi OpenRouter.">
-                                            <label className="block text-sm font-medium text-slate-300 mb-1 cursor-help">Mô hình OpenRouter</label>
-                                        </Tooltip>
-                                        <SearchableSelect
-                                            value={preset.openrouter_model || ''}
-                                            onChange={value => handleChange('openrouter_model', value)}
-                                            options={filteredOpenRouterModels.map(m => ({ value: m.id, label: `${m.name} (${m.id})`}))}
-                                            placeholder="Chọn hoặc tìm kiếm một mô hình..."
-                                        />
-                                    </div>
-                                    <div className="bg-slate-700/50 p-2 rounded-lg">
-                                        <ToggleInput
-                                            label="Chỉ hiển thị các mô hình miễn phí"
-                                            checked={showFreeModelsOnly}
-                                            onChange={setShowFreeModelsOnly}
-                                            tooltipText="Lọc danh sách để chỉ hiển thị các mô hình không có chi phí sử dụng."
-                                        />
-                                    </div>
-                                 </div>
-                             )}
-                        </div>
-                        {selectedModelDetails && (
-                             <div className="md:col-span-2 bg-slate-900/50 p-4 rounded-lg text-sm space-y-2">
-                                 <h4 className="font-bold text-slate-300">Chi tiết Mô hình đã chọn</h4>
-                                 <div className="flex justify-between">
-                                     <span className="text-slate-400">Độ dài Ngữ cảnh:</span>
-                                     <span className="font-mono text-amber-400">{selectedModelDetails.context_length.toLocaleString()} tokens</span>
-                                 </div>
-                                  <div className="flex justify-between">
-                                     <span className="text-slate-400">Giá Prompt / 1M token:</span>
-                                     <span className="font-mono text-green-400">{formatPrice(selectedModelDetails.pricing.prompt)}</span>
-                                 </div>
-                                  <div className="flex justify-between">
-                                     <span className="text-slate-400">Giá Completion / 1M token:</span>
-                                     <span className="font-mono text-green-400">{formatPrice(selectedModelDetails.pricing.completion)}</span>
-                                 </div>
-                             </div>
-                        )}
-                    </>
-                )}
-                
-                {preset.chat_completion_source === 'proxy' && (
-                    <div className="md:col-span-2 space-y-4">
-                        <LabeledInput 
-                            label="Model ID (Tên mã model)" 
-                            value={preset.proxy_model || ''} 
-                            onChange={(e) => handleChange('proxy_model', e.target.value)} 
-                            placeholder="ví dụ: gemini-3-pro-preview"
-                            tooltipText="Nhập chính xác ID của Model mà bạn muốn sử dụng trên Google. Ví dụ: 'gemini-3-pro-preview', 'gemini-2.5-pro'. Hệ thống Proxy sẽ chuyển tiếp tên này."
-                        />
-                        <div className="bg-blue-900/20 border border-blue-500/30 p-3 rounded-lg text-xs text-blue-200">
-                            <strong>Lưu ý:</strong> Khi dùng Proxy, các tham số Nhiệt độ (Temp), Top P, Top K bên dưới sẽ được gửi kèm đến Proxy để 'cook' mô hình theo ý bạn.
-                        </div>
-                    </div>
-                )}
-            </Section>
-
-            {preset.chat_completion_source === 'openrouter' && (
-                <Section title="Cài đặt OpenRouter" description="Cài đặt dành riêng cho API OpenRouter.">
-                    <LabeledSelect label="Sắp xếp Mô hình" value={preset.openrouter_sort_models || 'alphabetically'} onChange={e => handleChange('openrouter_sort_models', e.target.value)} options={[{value: 'alphabetically', label: 'Theo Bảng chữ cái'}, {value: 'popularity', label: 'Theo Mức độ phổ biến'}]} />
-                    <LabeledSelect label="Middle-Out" value={preset.openrouter_middleout || 'off'} onChange={e => handleChange('openrouter_middleout', e.target.value)} options={[{value: 'off', label: 'Tắt'}, {value: 'on', label: 'Bật'}]} />
-                    <div className="md:col-span-2 space-y-4">
-                        <ToggleInput label="Sử dụng Dự phòng" checked={preset.openrouter_use_fallback ?? false} onChange={v => handleChange('openrouter_use_fallback', v)} />
-                        <ToggleInput label="Nhóm Mô hình" checked={preset.openrouter_group_models ?? true} onChange={v => handleChange('openrouter_group_models', v)} />
-                        <ToggleInput label="Cho phép Dự phòng" checked={preset.openrouter_allow_fallbacks ?? false} onChange={v => handleChange('openrouter_allow_fallbacks', v)} />
-                    </div>
-                    <StringArrayInput label="Nhà cung cấp" values={preset.openrouter_providers ?? []} onChange={v => handleChange('openrouter_providers', v)} />
-                </Section>
-            )}
-
             <Section title="Sampling Cốt lõi" description="Các tham số chính kiểm soát sự sáng tạo và tính mạch lạc của AI.">
                 <SliderInput label="Nhiệt độ (Temperature)" value={preset.temp ?? 1} onChange={v => handleChange('temp', v)} min={0} max={2} step={0.01} tooltipText="Kiểm soát sự ngẫu nhiên của đầu ra. Giá trị cao hơn (ví dụ: 1.2) làm cho phản hồi sáng tạo và đa dạng hơn. Giá trị thấp hơn (ví dụ: 0.7) làm cho phản hồi an toàn và dễ đoán hơn." />
                 <SliderInput label="Top P" value={preset.top_p ?? 0.9} onChange={v => handleChange('top_p', v)} min={0} max={1} step={0.01} tooltipText="Còn gọi là 'Nucleus Sampling'. AI chỉ xem xét một nhóm các từ có xác suất cao nhất cộng lại bằng giá trị này (ví dụ: 0.9 = 90%). Giúp cân bằng giữa sáng tạo và mạch lạc." />
@@ -636,7 +304,7 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) 
                     min={0}
                     max={32768}
                     step={1024}
-                    tooltipText="TÍNH NĂNG THỬ NGHIỆM: Đặt ngân sách token cho quá trình suy luận nội tại của mô hình. Đặt về 0 để tắt. Lưu ý: Không phải mọi mô hình đều hỗ trợ tính năng này (có thể gây lỗi API). Gemini 2.5 Pro hỗ trợ tối đa 32768."
+                    tooltipText="TÍNH NĂNG THỬ NGHIỆM: Đặt ngân sách token cho quá trình suy luận nội tại của mô hình. Đặt về 0 để tắt. Lưu ý: Không phải mọi mô hình đều hỗ trợ tính năng này (có thể gây lỗi API)."
                 />
             </Section>
 
@@ -730,14 +398,10 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({ preset, onUpdate }) 
                     <ToggleInput label="Wrap in Quotes" checked={preset.wrap_in_quotes ?? false} onChange={v => handleChange('wrap_in_quotes', v)} tooltipText="Tự động bao bọc phản hồi của AI trong dấu ngoặc kép." />
                     <ToggleInput label="Max Context Unlocked" checked={preset.max_context_unlocked ?? false} onChange={v => handleChange('max_context_unlocked', v)} tooltipText="Bỏ qua các giới hạn ngữ cảnh được đề xuất của mô hình và cố gắng gửi càng nhiều càng tốt." />
                     
-                    {preset.chat_completion_source !== 'openrouter' && preset.chat_completion_source !== 'proxy' && (
-                        <>
-                            <ToggleInput label="Stream OpenAI" checked={preset.stream_openai ?? true} onChange={v => handleChange('stream_openai', v)} tooltipText="Bật chế độ streaming cho các phản hồi từ API OpenAI." />
-                            <ToggleInput label="Claude Use SysPrompt" checked={preset.claude_use_sysprompt ?? true} onChange={v => handleChange('claude_use_sysprompt', v)} tooltipText="Sử dụng trường lời nhắc hệ thống gốc khi tương tác với các mô hình Claude." />
-                            <ToggleInput label="Use Makersuite SysPrompt" checked={preset.use_makersuite_sysprompt ?? true} onChange={v => handleChange('use_makersuite_sysprompt', v)} tooltipText="Sử dụng trường lời nhắc hệ thống gốc khi tương tác với các mô hình Google/Makersuite." />
-                            <LabeledSelect label="VertexAI Auth Mode" value={preset.vertexai_auth_mode || 'full'} onChange={e => handleChange('vertexai_auth_mode', e.target.value)} options={[{value: 'full', label: 'Full'}, {value: 'token', label: 'Token only'}]} />
-                        </>
-                    )}
+                    <ToggleInput label="Stream OpenAI" checked={preset.stream_openai ?? true} onChange={v => handleChange('stream_openai', v)} tooltipText="Bật chế độ streaming cho các phản hồi từ API OpenAI." />
+                    <ToggleInput label="Claude Use SysPrompt" checked={preset.claude_use_sysprompt ?? true} onChange={v => handleChange('claude_use_sysprompt', v)} tooltipText="Sử dụng trường lời nhắc hệ thống gốc khi tương tác với các mô hình Claude." />
+                    <ToggleInput label="Use Makersuite SysPrompt" checked={preset.use_makersuite_sysprompt ?? true} onChange={v => handleChange('use_makersuite_sysprompt', v)} tooltipText="Sử dụng trường lời nhắc hệ thống gốc khi tương tác với các mô hình Google/Makersuite." />
+                    <LabeledSelect label="VertexAI Auth Mode" value={preset.vertexai_auth_mode || 'full'} onChange={e => handleChange('vertexai_auth_mode', e.target.value)} options={[{value: 'full', label: 'Full'}, {value: 'token', label: 'Token only'}]} />
 
                     <ToggleInput label="Show External Models" checked={preset.show_external_models ?? false} onChange={v => handleChange('show_external_models', v)} />
                     <ToggleInput label="Squash System Messages" checked={preset.squash_system_messages ?? true} onChange={v => handleChange('squash_system_messages', v)} tooltipText="Nén nhiều lời nhắc hệ thống liên tiếp thành một trước khi gửi đến API." />

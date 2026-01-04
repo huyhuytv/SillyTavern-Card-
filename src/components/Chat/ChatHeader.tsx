@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { VisualState } from '../../types';
 import { usePreset } from '../../contexts/PresetContext';
 import { useTTS } from '../../contexts/TTSContext';
+import { getConnectionSettings, getActiveModel } from '../../services/settingsService';
 
 interface ChatHeaderProps {
     characterName: string;
@@ -11,15 +12,14 @@ interface ChatHeaderProps {
     setIsImmersive: (value: boolean) => void;
     visualState: VisualState;
     onVisualUpdate: (type: 'bg' | 'music' | 'sound' | 'class', value: string) => void;
-    onToggleHUD?: () => void; // NEW
-    isHUDOpen?: boolean; // NEW
-    onToggleStatusHUD?: () => void; // NEW: Floating Status HUD
-    isStatusHUDOpen?: boolean; // NEW: Floating Status HUD
-    // NEW: Live Tuning Props
+    onToggleHUD?: () => void;
+    isHUDOpen?: boolean;
+    onToggleStatusHUD?: () => void;
+    isStatusHUDOpen?: boolean;
     activePresetName?: string;
     onPresetChange?: (presetName: string) => void;
-    onToggleAssistant?: () => void; // NEW: Assistant Toggle
-    isAssistantOpen?: boolean; // NEW: Assistant State
+    onToggleAssistant?: () => void;
+    isAssistantOpen?: boolean;
 }
 
 const VisualSettingsModal: React.FC<{
@@ -223,6 +223,31 @@ const TTSControls: React.FC = () => {
     );
 };
 
+// --- Model Badge Component ---
+const ModelBadge: React.FC = () => {
+    const conn = getConnectionSettings();
+    const activeModel = getActiveModel();
+    
+    const getBadgeStyle = () => {
+        if (conn.source === 'openrouter') return 'bg-purple-900/30 text-purple-300 border-purple-500/30';
+        if (conn.source === 'proxy') return 'bg-cyan-900/30 text-cyan-300 border-cyan-500/30';
+        return 'bg-sky-900/30 text-sky-300 border-sky-500/30'; // Gemini
+    };
+
+    const getSourceName = () => {
+        if (conn.source === 'openrouter') return 'OR';
+        if (conn.source === 'proxy') return 'Proxy';
+        return 'Google';
+    };
+
+    return (
+        <div className={`px-2 py-0.5 rounded border text-[10px] font-mono flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity cursor-help ${getBadgeStyle()}`} title={`Nguồn: ${conn.source}, Model: ${activeModel}`}>
+            <span className="font-bold">{getSourceName()}:</span>
+            <span className="truncate max-w-[100px]">{activeModel}</span>
+        </div>
+    );
+};
+
 export const ChatHeader: React.FC<ChatHeaderProps> = ({ 
     characterName, onBack, isImmersive, setIsImmersive, visualState, onVisualUpdate, 
     onToggleHUD, isHUDOpen, onToggleStatusHUD, isStatusHUDOpen,
@@ -251,8 +276,12 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                     }
                 </svg>
             </button>
-            <div className="flex-grow min-w-0">
-                <h2 className="text-lg font-bold text-slate-200 truncate">Trò chuyện với {characterName}</h2>
+            <div className="flex-grow min-w-0 flex flex-col justify-center">
+                <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-slate-200 truncate">{characterName}</h2>
+                    {/* Model Badge added here */}
+                    {!isImmersive && <ModelBadge />}
+                </div>
                 <div className="flex items-center gap-2">
                     {isImmersive && <p className="text-xs text-slate-400 hidden sm:block">{visualState.musicUrl ? '♫ Đang phát nhạc' : 'Chế độ Nhà hát'}</p>}
                     {!isImmersive && activePresetName && <span className="text-xs text-indigo-400 truncate hidden sm:block">Preset: {activePresetName}</span>}
