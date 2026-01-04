@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import type { CharacterCard, SillyTavernPreset, Lorebook, ChatMessage, OpenRouterModel } from '../types';
-import { getActiveModel, getApiKey, getOpenRouterApiKey, getProxyUrl } from './settingsService';
+import { getActiveModel, getApiKey, getOpenRouterApiKey, getProxyUrl, getProxyPassword, getProxyLegacyMode } from './settingsService';
 import { cleanMessageContent } from './promptManager';
 import defaultPreset from '../data/defaultPreset';
 
@@ -103,21 +103,20 @@ export async function sendChatRequest(
     
     // --- API Dispatch ---
     
-    // 1. REVERSE PROXY (Kingfall Mode)
+    // 1. REVERSE PROXY (OpenAI Compatible)
     if (settings.chat_completion_source === 'proxy') {
         const proxyUrl = getProxyUrl();
+        const proxyPassword = getProxyPassword();
+        const isLegacyMode = getProxyLegacyMode();
+
         const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
         const endpoint = `${cleanUrl}/v1/chat/completions`; // Standard OpenAI format
-        const model = settings.proxy_model || 'gemini-3-pro-preview'; // Default fallback to Gemini 3.0 Pro Preview
+        const model = settings.proxy_model || 'gemini-3-pro-preview'; // Default fallback
 
         try {
-            // Construct OpenAI-compatible body
             const payload = {
                 model: model,
                 messages: [
-                    // SillyTavern usually packs everything into a single prompt for completion models,
-                    // or a series of messages for Chat models.
-                    // Given our `fullPrompt` is already a constructed string, we treat it as a single User message.
                     { role: 'user', content: fullPrompt }
                 ],
                 temperature: Number(settings.temp) || 1,
@@ -128,24 +127,33 @@ export async function sendChatRequest(
                 stream: false
             };
 
+            const headers: Record<string, string> = {};
+
+            if (isLegacyMode) {
+                // LEGACY MODE (Localhost/Kingfall)
+                // Use text/plain to avoid CORS preflight (OPTIONS)
+                headers['Content-Type'] = 'text/plain';
+            } else {
+                // STANDARD MODE (Commercial Proxy)
+                headers['Content-Type'] = 'application/json';
+                if (proxyPassword) {
+                    headers['Authorization'] = `Bearer ${proxyPassword}`;
+                }
+            }
+
             const response = await fetch(endpoint, {
                 method: 'POST',
-                headers: {
-                    // MẸO QUAN TRỌNG: Sử dụng 'text/plain' thay vì 'application/json'
-                    // Điều này ngăn trình duyệt gửi yêu cầu OPTIONS (Preflight) trước khi gửi POST.
-                    // Các server proxy local (như Kingfall/Dark-Server) thường không xử lý tốt CORS OPTIONS và trả về 404, gây lỗi "Failed to fetch".
-                    // Tuy nhiên, body vẫn là chuỗi JSON, và server thường vẫn parse được nó.
-                    'Content-Type': 'text/plain',
-                },
+                headers: headers,
                 body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
-                // Thử đọc lỗi dưới dạng text
                 const errorText = await response.text();
-                // Nếu server trả về 404 cho POST, có nghĩa là endpoint sai
                 if (response.status === 404) {
                      throw new Error(`Server không tìm thấy endpoint (${endpoint}). Vui lòng kiểm tra lại URL.`);
+                }
+                if (response.status === 401 || response.status === 403) {
+                     throw new Error(`Lỗi xác thực (${response.status}). Vui lòng kiểm tra Password/API Key trong phần Cài đặt.`);
                 }
                 throw new Error(`Proxy Error (${response.status}): ${errorText}`);
             }
@@ -157,7 +165,6 @@ export async function sendChatRequest(
 
         } catch (error) {
             console.error("Proxy API error:", error);
-            // Cung cấp thông báo lỗi chi tiết hơn cho người dùng
             const msg = error instanceof Error ? error.message : String(error);
             throw new Error(`Lỗi kết nối Proxy: ${msg}`);
         }
@@ -292,12 +299,21 @@ async function* streamOpenAICompatible(
     // 1. Configuration
     if (settings.chat_completion_source === 'proxy') {
         const proxyUrl = getProxyUrl();
+        const proxyPassword = getProxyPassword();
+        const isLegacyMode = getProxyLegacyMode();
+        
         const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
         url = `${cleanUrl}/v1/chat/completions`;
         model = settings.proxy_model || 'gemini-3-pro-preview';
         
-        // Proxy optimization: use text/plain to avoid CORS preflight (OPTIONS) issues on some local proxies
-        headers = { 'Content-Type': 'text/plain' }; 
+        if (isLegacyMode) {
+            headers = { 'Content-Type': 'text/plain' }; 
+        } else {
+            headers = { 'Content-Type': 'application/json' };
+            if (proxyPassword) {
+                headers['Authorization'] = `Bearer ${proxyPassword}`;
+            }
+        }
     } else {
         // OpenRouter
         const openRouterKey = getOpenRouterApiKey();

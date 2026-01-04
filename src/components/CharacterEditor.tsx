@@ -174,8 +174,7 @@ const GreetingsEditor: React.FC<{ card: CharacterCard; onUpdate: (card: Characte
     };
 
     const handleTranslate = async () => {
-        if (!confirm("Hành động này sẽ dịch toàn bộ lời chào và ghi đè nội dung hiện tại bằng kết quả từ AI. Bạn có chắc chắn không?")) return;
-
+        // REMOVED confirm() dialogue to support restricted environments.
         setIsTranslating(true);
         try {
             const payload = {

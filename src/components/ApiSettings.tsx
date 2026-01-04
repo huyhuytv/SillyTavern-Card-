@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { getActiveModel, setActiveModel, MODEL_OPTIONS, getApiSettings, saveApiSettings, getOpenRouterApiKey, saveOpenRouterApiKey, getProxyUrl, saveProxyUrl } from '../services/settingsService';
+import { getActiveModel, setActiveModel, MODEL_OPTIONS, getApiSettings, saveApiSettings, getOpenRouterApiKey, saveOpenRouterApiKey, getProxyUrl, saveProxyUrl, getProxyPassword, saveProxyPassword, getProxyLegacyMode, saveProxyLegacyMode } from '../services/settingsService';
 import { validateOpenRouterKey } from '../services/geminiService';
 import { Loader } from './Loader';
 
@@ -34,7 +34,12 @@ export const ApiSettings: React.FC = () => {
     const [useDefaultKey, setUseDefaultKey] = useState(true);
     const [geminiApiKeys, setGeminiApiKeys] = useState('');
     const [openRouterApiKey, setOpenRouterApiKey] = useState('');
+    
+    // Proxy State
     const [proxyUrl, setProxyUrl] = useState('');
+    const [proxyPassword, setProxyPassword] = useState('');
+    const [proxyLegacyMode, setProxyLegacyMode] = useState(true);
+
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
 
     const [isValidating, setIsValidating] = useState(false);
@@ -53,6 +58,8 @@ export const ApiSettings: React.FC = () => {
         setGeminiApiKeys(settings.keys.join('\n'));
         setOpenRouterApiKey(getOpenRouterApiKey());
         setProxyUrl(getProxyUrl());
+        setProxyPassword(getProxyPassword());
+        setProxyLegacyMode(getProxyLegacyMode());
     }, []);
 
     const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -67,6 +74,8 @@ export const ApiSettings: React.FC = () => {
             saveApiSettings({ useDefault: useDefaultKey, keys });
             saveOpenRouterApiKey(openRouterApiKey);
             saveProxyUrl(proxyUrl);
+            saveProxyPassword(proxyPassword);
+            saveProxyLegacyMode(proxyLegacyMode);
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus('idle'), 2000);
         } catch (e) {
@@ -102,15 +111,24 @@ export const ApiSettings: React.FC = () => {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000); 
 
-            // CHIẾN THUẬT MỚI: Dùng 'no-cors'.
-            // Điều này cho phép gửi request đi ngay cả khi server không có header CORS chuẩn.
-            // Nếu server đang chạy, promise sẽ được resolve (dù status là 0/opaque).
-            // Nếu server tắt hoặc sai port, promise sẽ reject (Failed to fetch).
-            await fetch(`${cleanUrl}/v1/models`, { 
+            // CHIẾN THUẬT MỚI: Dùng 'no-cors' nếu Legacy Mode bật.
+            // Nếu Legacy Mode tắt, ta thử gửi GET header chuẩn.
+            
+            const reqOptions: RequestInit = {
                 method: 'GET',
-                mode: 'no-cors', // Bỏ qua kiểm tra bảo mật trình duyệt để Ping
                 signal: controller.signal,
-            });
+            };
+
+            if (proxyLegacyMode) {
+                reqOptions.mode = 'no-cors';
+            } else {
+                reqOptions.headers = {
+                    'Content-Type': 'application/json',
+                    ...(proxyPassword ? { 'Authorization': `Bearer ${proxyPassword}` } : {})
+                };
+            }
+
+            await fetch(`${cleanUrl}/v1/models`, reqOptions);
             
             clearTimeout(timeoutId);
 
@@ -124,7 +142,7 @@ export const ApiSettings: React.FC = () => {
             if (error.name === 'AbortError') {
                 setProxyErrorMessage("Timeout: Server phản hồi quá chậm.");
             } else if (error.message.includes('Failed to fetch')) {
-                setProxyErrorMessage("Không thể kết nối. Server chưa chạy hoặc sai Port.");
+                setProxyErrorMessage("Không thể kết nối. Server chưa chạy, sai Port hoặc bị chặn CORS.");
             } else {
                 setProxyErrorMessage(error.message || "Lỗi không xác định");
             }
@@ -195,11 +213,11 @@ export const ApiSettings: React.FC = () => {
             
             {/* Reverse Proxy Section */}
             <div>
-                 <h3 className="text-xl font-bold text-sky-400 mb-6">Reverse Proxy (Kingfall Mode)</h3>
+                 <h3 className="text-xl font-bold text-sky-400 mb-6">Reverse Proxy (OpenAI Compatible)</h3>
                  <div className="space-y-6">
                     <div>
                         <label htmlFor="proxy-url" className="block text-sm font-medium text-slate-300 mb-1">
-                            Địa chỉ Proxy Server (Localhost)
+                            API Endpoint URL
                         </label>
                         <div className="flex items-center gap-2">
                             <input
@@ -212,7 +230,7 @@ export const ApiSettings: React.FC = () => {
                                     setProxyErrorMessage('');
                                 }}
                                 className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 font-mono text-sm"
-                                placeholder="http://127.0.0.1:8889"
+                                placeholder="http://127.0.0.1:8889 hoặc https://api.openai.com"
                             />
                             <button
                                 onClick={handlePingProxy}
@@ -224,7 +242,7 @@ export const ApiSettings: React.FC = () => {
                              {proxyPingStatus === 'success' && (
                                 <div className="flex items-center gap-1 text-green-400">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                    <span className="text-sm font-medium">Kết nối tốt</span>
+                                    <span className="text-sm font-medium">OK</span>
                                 </div>
                             )}
                             {proxyPingStatus === 'error' && (
@@ -238,9 +256,36 @@ export const ApiSettings: React.FC = () => {
                             <p className="text-xs text-red-400 mt-2">{proxyErrorMessage}</p>
                         )}
                          <p className="text-xs text-slate-500 mt-2">
-                           Nhập địa chỉ của server trung gian (ví dụ: dark-server.js). Chế độ này KHÔNG yêu cầu API Key. <br/>
-                           Để sử dụng, hãy chọn "Reverse Proxy" trong phần Preset.
+                           Nhập địa chỉ của server trung gian (ví dụ: Kingfall, Oobabooga, hoặc dịch vụ thương mại).
                         </p>
+                    </div>
+
+                    <div>
+                        <label htmlFor="proxy-password" className="block text-sm font-medium text-slate-300 mb-1">
+                            Proxy Password / API Key (Tùy chọn)
+                        </label>
+                        <input
+                            id="proxy-password"
+                            type="password"
+                            value={proxyPassword}
+                            onChange={e => setProxyPassword(e.target.value)}
+                            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 font-mono text-sm"
+                            placeholder="Nhập password hoặc để trống..."
+                        />
+                        <p className="text-xs text-slate-500 mt-2">
+                            Mật khẩu này sẽ được gửi trong Header `Authorization: Bearer` nếu "Chế độ Legacy" bị tắt.
+                        </p>
+                    </div>
+
+                    <div>
+                        <ToggleInput 
+                            label="Chế độ Tương thích (Legacy Mode)"
+                            checked={proxyLegacyMode}
+                            onChange={setProxyLegacyMode}
+                            description={proxyLegacyMode 
+                                ? "BẬT: Dùng cho Localhost/Kingfall cũ. Sử dụng 'text/plain' để tránh lỗi CORS. Không gửi Auth Header." 
+                                : "TẮT: Dùng cho Proxy thương mại chuẩn (OpenAI/Chimera...). Sử dụng 'application/json' và gửi Auth Header."}
+                        />
                     </div>
                  </div>
             </div>

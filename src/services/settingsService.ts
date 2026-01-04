@@ -4,6 +4,8 @@ const API_SETTINGS_KEY = 'sillyTavernStudio_apiSettings';
 const API_KEY_INDEX_KEY = 'sillyTavernStudio_apiKeyIndex';
 const OPENROUTER_API_KEY_KEY = 'sillyTavernStudio_openRouterApiKey';
 const PROXY_URL_KEY = 'sillyTavernStudio_proxyUrl';
+const PROXY_PASSWORD_KEY = 'sillyTavernStudio_proxyPassword';
+const PROXY_LEGACY_MODE_KEY = 'sillyTavernStudio_proxyLegacyMode';
 
 export const MODEL_OPTIONS = [
     { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro Preview' },
@@ -133,4 +135,34 @@ export const saveProxyUrl = (url: string): void => {
     // Đảm bảo không có dấu / ở cuối để chuẩn hóa
     const cleanUrl = url.trim().replace(/\/$/, '');
     localStorage.setItem(PROXY_URL_KEY, cleanUrl);
+};
+
+/**
+ * Lấy Password/Key cho Proxy.
+ */
+export const getProxyPassword = (): string => {
+    return localStorage.getItem(PROXY_PASSWORD_KEY) || '';
+};
+
+/**
+ * Lưu Password/Key cho Proxy.
+ */
+export const saveProxyPassword = (password: string): void => {
+    localStorage.setItem(PROXY_PASSWORD_KEY, password.trim());
+};
+
+/**
+ * Lấy trạng thái chế độ Legacy (Tương thích) cho Proxy.
+ * Default là true (để tương thích ngược với người dùng cũ).
+ */
+export const getProxyLegacyMode = (): boolean => {
+    const val = localStorage.getItem(PROXY_LEGACY_MODE_KEY);
+    return val !== 'false'; // Default to true if not set
+};
+
+/**
+ * Lưu trạng thái chế độ Legacy cho Proxy.
+ */
+export const saveProxyLegacyMode = (isLegacy: boolean): void => {
+    localStorage.setItem(PROXY_LEGACY_MODE_KEY, String(isLegacy));
 };
