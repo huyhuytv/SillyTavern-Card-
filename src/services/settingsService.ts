@@ -9,6 +9,7 @@ const PROXY_LEGACY_MODE_KEY = 'sillyTavernStudio_proxyLegacyMode';
 const PROXY_FOR_TOOLS_KEY = 'sillyTavernStudio_proxyForTools';
 const GLOBAL_CONNECTION_KEY = 'sillyTavernStudio_globalConnection';
 
+// ... (Existing options and interfaces remain same) ...
 export const MODEL_OPTIONS = [
     { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro Preview' },
     { id: 'gemini-3-flash-preview', name: 'Gemini 3.0 Flash Preview' },
@@ -18,7 +19,6 @@ export const MODEL_OPTIONS = [
     { id: 'gemini-flash-latest', name: 'Gemini Flash Latest' },
 ];
 
-// Danh sách mở rộng dành riêng cho Proxy (Bao gồm Gemini + Claude + GPT...)
 export const PROXY_MODEL_OPTIONS = [
     ...MODEL_OPTIONS,
     { id: 'claude-opus-4.5', name: 'Claude Opus 4.5' },
@@ -54,9 +54,6 @@ interface ApiSettings {
     keys: string[];
 }
 
-/**
- * Get the global connection settings (Source + Models for each source).
- */
 export const getConnectionSettings = (): GlobalConnectionSettings => {
     try {
         const stored = localStorage.getItem(GLOBAL_CONNECTION_KEY);
@@ -70,22 +67,15 @@ export const getConnectionSettings = (): GlobalConnectionSettings => {
     return DEFAULT_CONNECTION_SETTINGS;
 };
 
-/**
- * Save global connection settings.
- */
 export const saveConnectionSettings = (settings: GlobalConnectionSettings): void => {
     localStorage.setItem(GLOBAL_CONNECTION_KEY, JSON.stringify(settings));
 };
 
-/**
- * Lấy mô hình đang hoạt động dựa trên Nguồn (Source) hiện tại.
- * Used by Tools/Analysis to know which model ID to target.
- */
 export const getActiveModel = (): string => {
     const conn = getConnectionSettings();
     switch (conn.source) {
         case 'openrouter':
-            return conn.openrouter_model || 'google/gemini-pro-1.5'; // Fallback
+            return conn.openrouter_model || 'google/gemini-pro-1.5';
         case 'proxy':
             return conn.proxy_model || 'gemini-3-pro-preview';
         case 'gemini':
@@ -94,13 +84,8 @@ export const getActiveModel = (): string => {
     }
 };
 
-/**
- * @deprecated Legacy setter. Use saveConnectionSettings instead.
- * Kept for compatibility if other components call it directly.
- */
 export const setActiveModel = (modelId: string): void => {
     const conn = getConnectionSettings();
-    // Assuming if this is called, we update the model for the current source
     const newConn = { ...conn };
     if (newConn.source === 'gemini') newConn.gemini_model = modelId;
     else if (newConn.source === 'proxy') newConn.proxy_model = modelId;
@@ -109,9 +94,6 @@ export const setActiveModel = (modelId: string): void => {
     saveConnectionSettings(newConn);
 };
 
-/**
- * Lấy cài đặt API Keys Gemini từ localStorage.
- */
 export const getApiSettings = (): ApiSettings => {
     try {
         const storedSettings = localStorage.getItem(API_SETTINGS_KEY);
@@ -191,4 +173,34 @@ export const getProxyForTools = (): boolean => {
 
 export const saveProxyForTools = (enabled: boolean): void => {
     localStorage.setItem(PROXY_FOR_TOOLS_KEY, String(enabled));
+};
+
+/**
+ * EXPORT: Get all persistent settings from LocalStorage for backup.
+ */
+export const getAllLocalStorageData = (): Record<string, any> => {
+    const data: Record<string, any> = {};
+    const keys = [
+        ACTIVE_MODEL_KEY, API_SETTINGS_KEY, API_KEY_INDEX_KEY, 
+        OPENROUTER_API_KEY_KEY, PROXY_URL_KEY, PROXY_PASSWORD_KEY, 
+        PROXY_LEGACY_MODE_KEY, PROXY_FOR_TOOLS_KEY, GLOBAL_CONNECTION_KEY
+    ];
+    
+    keys.forEach(key => {
+        const val = localStorage.getItem(key);
+        if (val !== null) data[key] = val;
+    });
+    
+    return data;
+};
+
+/**
+ * RESTORE: Apply settings back to LocalStorage.
+ */
+export const restoreLocalStorageData = (data: Record<string, any>): void => {
+    Object.entries(data).forEach(([key, val]) => {
+        if (typeof val === 'string') {
+            localStorage.setItem(key, val);
+        }
+    });
 };

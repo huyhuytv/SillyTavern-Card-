@@ -4,10 +4,11 @@ import { UserPersonaManager } from './UserPersonaManager';
 import { ApiSettings } from './ApiSettings';
 import { SmartScanSettings } from './SmartScanSettings';
 import { SmartContextSettings } from './SmartContextSettings'; 
-import { TtsSettings } from './TtsSettings'; // New Import
+import { TtsSettings } from './TtsSettings'; 
+import { BackupRestoreSettings } from './BackupRestoreSettings'; // New Import
 import { usePreset } from '../contexts/PresetContext';
 
-type ActiveSubTab = 'persona' | 'api' | 'smartscan' | 'context' | 'tts';
+type ActiveSubTab = 'persona' | 'api' | 'smartscan' | 'context' | 'tts' | 'backup'; // Added 'backup'
 
 const SubTabButton: React.FC<{
   tabId: ActiveSubTab;
@@ -44,6 +45,7 @@ export const SettingsTab: React.FC = () => {
                  <div className="p-1 bg-slate-800 rounded-lg flex space-x-1 border border-slate-700 flex-wrap justify-center gap-y-2">
                     <SubTabButton tabId="persona" currentTab={activeSubTab} onClick={setActiveSubTab}>Hồ sơ Người dùng</SubTabButton>
                     <SubTabButton tabId="api" currentTab={activeSubTab} onClick={setActiveSubTab}>Thiết lập API</SubTabButton>
+                    <SubTabButton tabId="backup" currentTab={activeSubTab} onClick={setActiveSubTab}>Sao lưu & Khôi phục</SubTabButton>
                     <SubTabButton tabId="tts" currentTab={activeSubTab} onClick={setActiveSubTab}>Giọng nói (TTS)</SubTabButton>
                     <SubTabButton tabId="context" currentTab={activeSubTab} onClick={setActiveSubTab}>Ngữ cảnh & Bộ nhớ</SubTabButton>
                     <SubTabButton tabId="smartscan" currentTab={activeSubTab} onClick={setActiveSubTab}>Quét Thông Minh</SubTabButton>
@@ -59,6 +61,7 @@ export const SettingsTab: React.FC = () => {
             >
                 {activeSubTab === 'persona' && <UserPersonaManager />}
                 {activeSubTab === 'api' && <ApiSettings />}
+                {activeSubTab === 'backup' && <BackupRestoreSettings />}
                 {activeSubTab === 'tts' && (
                     activePreset ? (
                         <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-2xl mx-auto">

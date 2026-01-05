@@ -7,7 +7,7 @@ import { usePreset } from '../contexts/PresetContext';
 import { useUserPersona } from '../contexts/UserPersonaContext';
 import { Loader } from './Loader';
 import { GreetingSelectorModal } from './GreetingSelectorModal';
-import { useTimeAgo, truncateText } from '../utils';
+import { useTimeAgo, truncateText, parseLooseJson } from '../utils'; // IMPORTED parseLooseJson
 import { processWithRegex } from '../services/regexService';
 import { performWorldInfoScan } from '../services/worldInfoScanner';
 import { processVariableUpdates } from '../services/variableEngine';
@@ -378,7 +378,7 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
         }
         // -------------------------------------------
 
-        // 2. Pre-parse initial variables from the card
+        // 2. Pre-parse initial variables from the card using LOOSE JSON PARSER
         let initialVariables = {};
         if (character.card.char_book?.entries) {
             const initVarEntry = character.card.char_book.entries.find(
@@ -386,7 +386,8 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
             );
             if (initVarEntry?.content) {
                 try {
-                    initialVariables = JSON.parse(initVarEntry.content);
+                    // Use parseLooseJson instead of JSON.parse
+                    initialVariables = parseLooseJson(initVarEntry.content);
                 } catch (e) {
                     console.error("Lỗi phân tích JSON [InitVar] khi tạo cuộc trò chuyện mới:", e);
                     setError("Không thể phân tích dữ liệu biến khởi tạo từ thẻ nhân vật.");

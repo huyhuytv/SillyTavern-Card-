@@ -384,3 +384,30 @@ export interface AdventureSnapshot {
         userPersona: UserPersona | null;
     };
 }
+
+// === NEW: FULL SYSTEM BACKUP TYPES ===
+
+export interface BackupCharacter {
+    card: CharacterCard;
+    fileName: string;
+    avatarBase64?: string; // Encoded image data
+    avatarType?: string; // e.g., 'image/png'
+}
+
+export interface FullSystemBackup {
+    version: number;
+    timestamp: number;
+    dataType: 'full_system_backup';
+    meta: {
+        exportedBy: string;
+        description: string;
+    };
+    data: {
+        characters: BackupCharacter[];
+        presets: SillyTavernPreset[];
+        lorebooks: Lorebook[];
+        personas: UserPersona[];
+        chatSessions: ChatSession[];
+        appSettings: Record<string, any>; // Stores localStorage keys
+    };
+}

@@ -1,4 +1,19 @@
 import { useState, useEffect } from 'react';
+// @ts-ignore
+import JSON5 from 'json5';
+
+/**
+ * Parses JSON with support for comments, trailing commas, and unquoted keys.
+ * Falls back to standard JSON.parse if JSON5 fails.
+ */
+export function parseLooseJson(text: string): any {
+    try {
+        return JSON5.parse(text);
+    } catch (e) {
+        console.warn("JSON5 parse failed, falling back to JSON.parse", e);
+        return JSON.parse(text);
+    }
+}
 
 export function truncateText(text: string, maxLength: number): string {
     if (!text || text.length <= maxLength) {

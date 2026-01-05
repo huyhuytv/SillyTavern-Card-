@@ -175,51 +175,83 @@ const createHybridLodash = (scopeVariables: any, logger: (msg: string) => void) 
         mul: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'mul'); logger(`MUL ${path} *= ${val}`); },
         div: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'div'); logger(`DIV ${path} /= ${val}`); },
         
-        // --- Array/Object Polymorphic Ops ---
+        // --- Smart MVU Operations (Array/Object Polymorphic) ---
         
-        // _.assign trong ST Scripts thường dùng đa năng:
-        // 1. _.assign(arrayPath, value) -> Push vào mảng
-        // 2. _.assign(objPath, key, value) -> Gán thuộc tính object
-        assign: (path: string, ...args: any[]) => {
-            // Lấy raw value (không unwrap) để kiểm tra xem nó là mảng hay tuple chứa mảng
-            let target = get(scopeVariables, path, undefined, false); // Get raw
-
-            // Nếu là Tuple [Array, Desc], lấy Array ra
-            if (isTuple(target) && Array.isArray(target[0])) {
-                target = target[0];
-            } else if (isTuple(target)) {
-                // Tuple nhưng không chứa mảng? Unwrap để xem có phải object không
-                target = target[0];
-            }
-
-            // Case 1: Object Set (path, key, value)
-            if (args.length >= 2) {
-                const key = args[0];
-                const value = args[1];
-                const fullPath = `${path}.${key}`; // Nối chuỗi đơn giản, hàm set sẽ normalize sau
-                set(scopeVariables, fullPath, value);
-                logger(`ASSIGN (KEY) ${fullPath} = ${JSON.stringify(value)}`);
-            } 
-            // Case 2: Array Push (path, value)
-            else if (args.length === 1) {
-                const value = args[0];
-                // Lấy lại target chính xác dưới dạng mảng (unwrap nếu cần)
-                const arr = get(scopeVariables, path, undefined, true); 
-                
-                if (Array.isArray(arr)) {
-                    // Xóa placeholder meta của ST nếu có (để mảng sạch)
-                    if (arr.length === 1 && arr[0] === '$__META_EXTENSIBLE__$') {
-                        arr.pop();
-                    }
-                    arr.push(value);
-                    logger(`ASSIGN (PUSH) ${path} << ${JSON.stringify(value)}`);
+        // Insert: 
+        // 1. Array Push: _.insert('arr', value)
+        // 2. Array Splice: _.insert('arr', index, value)
+        // 3. Object Key: _.insert('obj', key, value)
+        insert: (path: string, arg1: any, arg2?: any) => {
+            const target = get(scopeVariables, path, undefined, true); // Unwrap tuple to get raw container
+            
+            if (Array.isArray(target)) {
+                if (arg2 !== undefined && typeof arg1 === 'number') {
+                    // _.insert(path, index, value)
+                    target.splice(arg1, 0, arg2);
+                    logger(`INSERT (SPLICE) ${path} at [${arg1}] << ${JSON.stringify(arg2)}`);
                 } else {
-                    logger(`WARN: ASSIGN failed. Target at '${path}' is not an array.`);
+                    // _.insert(path, value) -> Default to push
+                    // Handle case where AI sends (path, value) but meant push
+                    const val = arg2 !== undefined ? arg2 : arg1;
+                    target.push(val);
+                    logger(`INSERT (PUSH) ${path} << ${JSON.stringify(val)}`);
                 }
+            } else if (typeof target === 'object' && target !== null) {
+                 // _.insert(path, key, value)
+                 if (arg2 !== undefined) {
+                     target[arg1] = arg2;
+                     logger(`INSERT (KEY) ${path} [${arg1}] = ${JSON.stringify(arg2)}`);
+                 } else {
+                     logger(`WARN: INSERT failed. Missing value for object key at '${path}'.`);
+                 }
+            } else {
+                logger(`WARN: INSERT failed. Target at '${path}' is not an array or object.`);
+            }
+        },
+        
+        // Remove:
+        // 1. Array by Value: _.remove('arr', value) (First match)
+        // 2. Array by Index: _.remove('arr', index)
+        // 3. Object Key: _.remove('obj', key)
+        remove: (path: string, arg1: any) => {
+            const target = get(scopeVariables, path, undefined, true);
+            
+            if (Array.isArray(target)) {
+                let removed = false;
+                
+                // Priority 1: Remove by Value (MVU standard implies removal by value first)
+                // We check if arg1 exists as a value in the array
+                const valIdx = target.findIndex(item => _.isEqual(item, arg1) || item === arg1);
+                
+                if (valIdx > -1) {
+                    target.splice(valIdx, 1);
+                    logger(`REMOVE (VALUE) ${path} >> ${JSON.stringify(arg1)}`);
+                    removed = true;
+                } 
+                // Priority 2: Remove by Index (Fallback if value not found, but arg1 is a valid index)
+                else if (typeof arg1 === 'number' && arg1 >= 0 && arg1 < target.length) {
+                    const deleted = target.splice(arg1, 1);
+                    logger(`REMOVE (INDEX) ${path} [${arg1}] >> ${JSON.stringify(deleted[0])}`);
+                    removed = true;
+                }
+                
+                if (!removed) {
+                    logger(`WARN: REMOVE failed. Value/Index '${arg1}' not found in array '${path}'.`);
+                }
+
+            } else if (typeof target === 'object' && target !== null) {
+                if (arg1 in target) {
+                    delete target[arg1];
+                    logger(`REMOVE (KEY) ${path} [${arg1}]`);
+                } else {
+                    logger(`WARN: REMOVE failed. Key '${arg1}' not found in object '${path}'.`);
+                }
+            } else {
+                logger(`WARN: REMOVE failed. Target at '${path}' is not an array or object.`);
             }
         },
 
-        // Array Specific
+        // Push Alias (Strictly Array)
         push: (path: string, val: any) => {
             const arr = get(scopeVariables, path, undefined, true);
             if (Array.isArray(arr)) {
@@ -228,24 +260,25 @@ const createHybridLodash = (scopeVariables: any, logger: (msg: string) => void) 
             }
         },
         
-        // ST script thường dùng 'insert' thay vì push
-        insert: (path: string, val: any) => {
-             const arr = get(scopeVariables, path, undefined, true);
-             if (Array.isArray(arr)) {
-                 arr.push(val);
-                 logger(`INSERT ${path} << ${JSON.stringify(val)}`);
-             }
-        },
-        
-        remove: (path: string, val: any) => {
-            const arr = get(scopeVariables, path, undefined, true);
-            if (Array.isArray(arr)) {
-                // Xóa phần tử khớp giá trị (Deep equality check)
-                // Hỗ trợ xóa object trong mảng hoặc xóa string/number
-                const idx = arr.findIndex(item => _.isEqual(item, val) || item === val);
-                if (idx > -1) {
-                    arr.splice(idx, 1);
-                    logger(`REMOVE ${path} >> ${JSON.stringify(val)}`);
+        // Assign (Legacy Polymorphic)
+        assign: (path: string, ...args: any[]) => {
+            let target = get(scopeVariables, path, undefined, false); // Get raw
+            if (isTuple(target)) target = target[0];
+
+            if (args.length >= 2) {
+                // Object Set (path, key, value)
+                const key = args[0];
+                const value = args[1];
+                set(scopeVariables, `${path}.${key}`, value);
+                logger(`ASSIGN (KEY) ${path}.${key} = ${JSON.stringify(value)}`);
+            } else if (args.length === 1) {
+                // Array Push (path, value)
+                const value = args[0];
+                const arr = get(scopeVariables, path, undefined, true);
+                if (Array.isArray(arr)) {
+                    if (arr.length === 1 && arr[0] === '$__META_EXTENSIBLE__$') arr.pop();
+                    arr.push(value);
+                    logger(`ASSIGN (PUSH) ${path} << ${JSON.stringify(value)}`);
                 }
             }
         },
@@ -255,8 +288,6 @@ const createHybridLodash = (scopeVariables: any, logger: (msg: string) => void) 
     };
 
     // Tạo object mới kế thừa lodash gốc, sau đó ghi đè bằng customOverrides
-    // Sử dụng Object.assign lên một object mới để đảm bảo 'this' context của lodash không bị gãy
-    // (Lodash thường hoạt động như một functional library, nên copy properties là an toàn nhất)
     const hybrid = Object.assign({}, _, customOverrides);
     return hybrid;
 };

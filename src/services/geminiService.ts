@@ -35,8 +35,7 @@ const getGeminiClient = (): GoogleGenAI => {
 
 // --- HELPER: Construct Gemini Payload (Shared) ---
 const buildGeminiPayload = (fullPrompt: string, settings: SillyTavernPreset) => {
-    const config: any = {
-        safetySettings,
+    const generationConfig: any = {
         temperature: settings.temp,
         topP: settings.top_p,
         topK: settings.top_k,
@@ -45,15 +44,17 @@ const buildGeminiPayload = (fullPrompt: string, settings: SillyTavernPreset) => 
     };
 
     if (settings.thinking_budget && Number(settings.thinking_budget) > 0) {
-        config.thinkingConfig = { thinkingBudget: Number(settings.thinking_budget) };
+        generationConfig.thinkingConfig = { thinkingBudget: Number(settings.thinking_budget) };
     }
 
+    // FIX: contents must be an array for REST API
     return {
-        contents: {
+        contents: [{
             role: "user",
             parts: [{ text: fullPrompt }]
-        },
-        generationConfig: config
+        }],
+        safetySettings: safetySettings, 
+        generationConfig: generationConfig
     };
 };
 
@@ -77,11 +78,12 @@ async function callOpenAIProxy(prompt: string, model: string): Promise<string> {
         const apiKey = getApiKey() || 'placeholder'; // Browser proxy might need key
         const endpoint = `${cleanUrl}/v1beta/models/${model}:generateContent?key=${apiKey}`;
         
+        // FIX: Correct JSON structure for REST API (contents must be an array)
         const payload = {
-            contents: { role: 'user', parts: [{ text: prompt }] },
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            safetySettings: safetySettings,
             generationConfig: {
                 temperature: 0.1, // Task temp
-                safetySettings
             }
         };
 

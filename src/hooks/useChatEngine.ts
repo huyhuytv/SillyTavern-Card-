@@ -12,7 +12,8 @@ import { useChatSession } from './useChatSession';
 import { useAICompletion } from './useAICompletion';
 import { useWorldSystem } from './useWorldSystem';
 import { processWithRegex } from '../services/regexService';
-import { useTTS } from '../contexts/TTSContext'; // NEW Import
+import { useTTS } from '../contexts/TTSContext'; 
+import { parseLooseJson } from '../utils'; // IMPORTED parseLooseJson
 
 export const useChatEngine = (sessionId: string | null) => {
     // --- 1. State & Data Layer (Managed by useChatSession) ---
@@ -528,7 +529,10 @@ export const useChatEngine = (sessionId: string | null) => {
         } else if (newMessages.length === 0 && card?.char_book?.entries) {
              const initVarEntry = card.char_book.entries.find(e => e.comment?.includes('[InitVar]'));
              if (initVarEntry?.content) {
-                 try { restoredVariables = JSON.parse(initVarEntry.content); } catch (e) {}
+                 try { 
+                     // Use parseLooseJson for robust parsing of initial variables
+                     restoredVariables = parseLooseJson(initVarEntry.content); 
+                 } catch (e) {}
              }
         }
 
