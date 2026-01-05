@@ -18,7 +18,8 @@ import {
     getProxyForTools, 
     saveProxyForTools,
     GlobalConnectionSettings,
-    CompletionSource
+    CompletionSource,
+    ProxyProtocol
 } from '../services/settingsService';
 import { validateOpenRouterKey, getOpenRouterModels } from '../services/geminiService';
 import type { OpenRouterModel } from '../types';
@@ -257,16 +258,20 @@ export const ApiSettings: React.FC = () => {
                 signal: controller.signal,
             };
 
-            if (proxyLegacyMode) {
-                reqOptions.mode = 'no-cors';
-            } else {
-                reqOptions.headers = {
-                    'Content-Type': 'application/json',
-                    ...(proxyPassword ? { 'Authorization': `Bearer ${proxyPassword}` } : {})
-                };
+            // Basic headers
+            const headers: Record<string, string> = {};
+            if (!proxyLegacyMode) {
+                headers['Content-Type'] = 'application/json';
+                if (proxyPassword) {
+                    headers['Authorization'] = `Bearer ${proxyPassword}`;
+                }
             }
+            reqOptions.headers = headers;
+            if (proxyLegacyMode) reqOptions.mode = 'no-cors';
 
+            // Try pinging a standard endpoint
             await fetch(`${cleanUrl}/v1/models`, reqOptions);
+            
             clearTimeout(timeoutId);
             setProxyPingStatus('success');
         } catch (error: any) {
@@ -402,6 +407,37 @@ export const ApiSettings: React.FC = () => {
                 {/* PROXY CONFIG */}
                 {connection.source === 'proxy' && (
                     <div className="space-y-6 animate-fade-in-up">
+                        
+                        {/* Protocol Selection */}
+                        <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                            <label className="block text-sm font-bold text-sky-400 mb-3">Giao thức Proxy (Protocol)</label>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <button
+                                    onClick={() => updateConnection('proxy_protocol', 'openai')}
+                                    className={`p-3 rounded-lg border text-sm flex items-center justify-center gap-2 transition-colors ${
+                                        connection.proxy_protocol !== 'google_native' // Default/Fallback to OpenAI
+                                        ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200' 
+                                        : 'bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700'
+                                    }`}
+                                >
+                                    <span>🌐</span> Chuẩn OpenAI (Mặc định)
+                                </button>
+                                <button
+                                    onClick={() => updateConnection('proxy_protocol', 'google_native')}
+                                    className={`p-3 rounded-lg border text-sm flex items-center justify-center gap-2 transition-colors ${
+                                        connection.proxy_protocol === 'google_native'
+                                        ? 'bg-amber-600/30 border-amber-500 text-amber-200'
+                                        : 'bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700'
+                                    }`}
+                                >
+                                    <span>⚡</span> Google Native (Browser Proxy)
+                                </button>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-2 italic">
+                                * Chọn "Google Native" nếu bạn dùng Browser Proxy để gọi trực tiếp endpoint của Google Gemini.
+                            </p>
+                        </div>
+
                         <div className="grid grid-cols-1 gap-4">
                             {/* Chat Model Selector - Uses PROXY_MODEL_OPTIONS */}
                             <ModelSelectorWithCustom

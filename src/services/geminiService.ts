@@ -33,6 +33,30 @@ const getGeminiClient = (): GoogleGenAI => {
     return new GoogleGenAI({ apiKey });
 };
 
+// --- HELPER: Construct Gemini Payload (Shared) ---
+const buildGeminiPayload = (fullPrompt: string, settings: SillyTavernPreset) => {
+    const config: any = {
+        safetySettings,
+        temperature: settings.temp,
+        topP: settings.top_p,
+        topK: settings.top_k,
+        maxOutputTokens: settings.max_tokens,
+        stopSequences: settings.stopping_strings,
+    };
+
+    if (settings.thinking_budget && Number(settings.thinking_budget) > 0) {
+        config.thinkingConfig = { thinkingBudget: Number(settings.thinking_budget) };
+    }
+
+    return {
+        contents: {
+            role: "user",
+            parts: [{ text: fullPrompt }]
+        },
+        generationConfig: config
+    };
+};
+
 // --- PROXY HELPER FUNCTION ---
 /**
  * Generic function to call an OpenAI-compatible Proxy.
@@ -42,13 +66,43 @@ async function callOpenAIProxy(prompt: string, model: string): Promise<string> {
     const proxyUrl = getProxyUrl();
     const proxyPassword = getProxyPassword();
     const isLegacyMode = getProxyLegacyMode();
+    const conn = getConnectionSettings();
 
     if (!proxyUrl) throw new Error("Proxy URL chưa được cấu hình.");
 
     const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
-    const endpoint = `${cleanUrl}/v1/chat/completions`;
+    
+    // --- SPECIAL HANDLING FOR GOOGLE NATIVE PROTOCOL IN PROXY ---
+    if (conn.proxy_protocol === 'google_native') {
+        const apiKey = getApiKey() || 'placeholder'; // Browser proxy might need key
+        const endpoint = `${cleanUrl}/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        
+        const payload = {
+            contents: { role: 'user', parts: [{ text: prompt }] },
+            generationConfig: {
+                temperature: 0.1, // Task temp
+                safetySettings
+            }
+        };
 
-    // Ensure we have a model string, even if empty passed
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Proxy Google Native Error (${response.status}): ${errorText}`);
+        }
+
+        const data = await response.json();
+        // Extract text from Gemini response structure
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    }
+
+    // --- STANDARD OPENAI PROTOCOL ---
+    const endpoint = `${cleanUrl}/v1/chat/completions`;
     const targetModel = model || 'gemini-3-flash-preview';
 
     const payload = {
@@ -85,13 +139,11 @@ async function callOpenAIProxy(prompt: string, model: string): Promise<string> {
 
 
 export async function summarizeHistory(historySlice: ChatMessage[], cardName: string, customPrompt?: string): Promise<string> {
-  // FIX: Fallback to originalRawContent if content is empty (Interactive Card Support)
-  // NEW: Use cleanMessageContent to strip thoughts/technical blocks
   const historyText = historySlice.map(msg => {
     const rawContent = msg.content || msg.originalRawContent || '';
     const cleanContent = cleanMessageContent(rawContent);
     
-    if (!cleanContent.trim()) return null; // Skip empty lines after cleaning
+    if (!cleanContent.trim()) return null; 
 
     if (msg.role === 'user') return `User: ${cleanContent}`;
     return `${cardName}: ${cleanContent}`;
@@ -100,12 +152,10 @@ export async function summarizeHistory(historySlice: ChatMessage[], cardName: st
   let prompt = "";
   
   if (customPrompt) {
-      // Use user provided prompt, replacing the placeholder and {{char}}
       prompt = customPrompt
         .replace('{{chat_history_slice}}', historyText)
         .replace(/{{char}}/g, cardName);
   } else {
-      // Fallback default prompt
       prompt = `
 Bạn là **Thư Ký Ghi Chép (The Chronicler)** của thế giới này. Nhiệm vụ của bạn là cô đọng 'Trí Nhớ Dài Hạn' từ đoạn hội thoại vừa qua để lưu trữ.
 
@@ -130,15 +180,12 @@ Bản Ghi Chép (Tóm tắt):
   try {
     // --- DUAL DRIVER LOGIC ---
     if (getProxyForTools()) {
-        // PROXY PATH (Get active tool model for proxy)
         const conn = getConnectionSettings();
-        // Priority: Proxy Tool Model -> Proxy Model -> Default
         const model = conn.proxy_tool_model || conn.proxy_model || 'gemini-3-flash-preview';
         return await callOpenAIProxy(prompt, model);
     } else {
         // GOOGLE DIRECT PATH
         const ai = getGeminiClient();
-        // Use gemini model from settings
         const conn = getConnectionSettings();
         const model = conn.gemini_model || 'gemini-3-flash-preview';
         
@@ -151,7 +198,7 @@ Bản Ghi Chép (Tóm tắt):
     }
   } catch (error) {
     console.error("Gemini/Proxy API error in summarizeHistory:", error);
-    return ""; // Return empty string on failure to not break the chat flow
+    return ""; 
   }
 }
 
@@ -168,16 +215,48 @@ export async function sendChatRequest(
     const connection = getConnectionSettings();
     const source = connection.source;
 
-    // 1. REVERSE PROXY (OpenAI Compatible)
+    // 1. REVERSE PROXY
     if (source === 'proxy') {
         const proxyUrl = getProxyUrl();
         const proxyPassword = getProxyPassword();
         const isLegacyMode = getProxyLegacyMode();
-
-        const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
-        const endpoint = `${cleanUrl}/v1/chat/completions`; 
         const model = connection.proxy_model || 'gemini-3-pro-preview';
+        const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
 
+        // --- A. GOOGLE NATIVE PROTOCOL ---
+        if (connection.proxy_protocol === 'google_native') {
+            const apiKey = getApiKey() || ''; // Appends key for browser proxy
+            const endpoint = `${cleanUrl}/v1beta/models/${model}:generateContent?key=${apiKey}`;
+            
+            // Build Native Payload
+            const payload = buildGeminiPayload(fullPrompt, settings);
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Google Native Proxy Error (${response.status}): ${errorText}`);
+                }
+
+                const data = await response.json();
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                
+                // Return in SDK format
+                return { response: { text } as GenerateContentResponse };
+
+            } catch (error) {
+                console.error("Google Native Proxy error:", error);
+                throw error;
+            }
+        }
+
+        // --- B. OPENAI COMPATIBLE PROTOCOL ---
+        const endpoint = `${cleanUrl}/v1/chat/completions`; 
         try {
             const payload = {
                 model: model,
@@ -211,12 +290,6 @@ export async function sendChatRequest(
 
             if (!response.ok) {
                 const errorText = await response.text();
-                if (response.status === 404) {
-                     throw new Error(`Server không tìm thấy endpoint (${endpoint}). Vui lòng kiểm tra lại URL.`);
-                }
-                if (response.status === 401 || response.status === 403) {
-                     throw new Error(`Lỗi xác thực (${response.status}). Vui lòng kiểm tra Password/API Key trong phần Cài đặt.`);
-                }
                 throw new Error(`Proxy Error (${response.status}): ${errorText}`);
             }
 
@@ -343,6 +416,87 @@ export async function sendChatRequest(
 }
 
 /**
+ * Parses Gemini's JSON stream format
+ * Expects chunks like: [{ "candidates": ... }] or , { "candidates": ... }
+ */
+async function* streamGeminiNativeViaProxy(
+    fullPrompt: string, 
+    settings: SillyTavernPreset,
+    proxyUrl: string,
+    model: string,
+    apiKey: string
+): AsyncGenerator<string, void, unknown> {
+    const cleanUrl = proxyUrl.trim().replace(/\/$/, '');
+    const endpoint = `${cleanUrl}/v1beta/models/${model}:streamGenerateContent?key=${apiKey}&alt=sse`; // Request SSE if supported, or handle standard stream
+    
+    // Build Native Payload
+    const payload = buildGeminiPayload(fullPrompt, settings);
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok || !response.body) {
+        const text = await response.text();
+        throw new Error(`Google Native Stream Error (${response.status}): ${text}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = '';
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            
+            // Basic JSON Stream Parser
+            // Gemini Stream returns an array of JSON objects, sometimes comma separated, sometimes wrapped in [ ]
+            // We'll try to extract valid JSON objects from the buffer.
+            
+            // Simple heuristic: split by newlines (SSE style) or scan for balanced braces
+            // Assuming the proxy returns standard SSE "data: {...}" or raw JSON chunks
+            
+            // Try standard SSE parsing first
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                
+                let jsonStr = trimmed;
+                if (trimmed.startsWith('data: ')) {
+                    jsonStr = trimmed.slice(6);
+                }
+                
+                // Cleanup JSON array artifacts if raw stream
+                if (jsonStr === '[' || jsonStr === ']' || jsonStr === ',') continue;
+                if (jsonStr.startsWith(',')) jsonStr = jsonStr.slice(1);
+
+                try {
+                    const data = JSON.parse(jsonStr);
+                    const chunkText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (chunkText) {
+                        yield chunkText;
+                    }
+                } catch (e) {
+                    // Not valid JSON yet, might be split across chunks?
+                    // For robustness, in a complex proxy, proper JSON parser is needed.
+                    // Here we assume well-formed line chunks from proxy.
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+/**
  * Handles OpenAI-compatible streaming (Server-Sent Events)
  * Used for Proxy and OpenRouter.
  */
@@ -461,19 +615,30 @@ export async function* sendChatRequestStream(
     const connection = getConnectionSettings();
     const source = connection.source;
 
-    // --- 1. PROXY / OPENROUTER STREAMING ---
+    // --- 1. PROXY STREAMING ---
     if (source === 'proxy') {
-        yield* streamOpenAICompatible(fullPrompt, settings, 'proxy', connection.proxy_model || 'gemini-3-pro-preview');
+        const proxyUrl = getProxyUrl();
+        const model = connection.proxy_model || 'gemini-3-pro-preview';
+
+        // Branch based on protocol
+        if (connection.proxy_protocol === 'google_native') {
+            const apiKey = getApiKey() || '';
+            yield* streamGeminiNativeViaProxy(fullPrompt, settings, proxyUrl, model, apiKey);
+        } else {
+            // OpenAI Standard
+            yield* streamOpenAICompatible(fullPrompt, settings, 'proxy', model);
+        }
         return;
     }
     
+    // --- 2. OPENROUTER STREAMING ---
     if (source === 'openrouter') {
         if (!connection.openrouter_model) throw new Error("Chưa chọn model OpenRouter.");
         yield* streamOpenAICompatible(fullPrompt, settings, 'openrouter', connection.openrouter_model);
         return;
     }
 
-    // --- 2. GEMINI DIRECT STREAMING ---
+    // --- 3. GEMINI DIRECT STREAMING ---
     const ai = getGeminiClient();
     const model = connection.gemini_model || 'gemini-3-pro-preview';
     
@@ -528,8 +693,6 @@ export async function generateLorebookEntry(
   longTermSummaries: string[],
   existingLorebooks: Lorebook[]
 ): Promise<string> {
-  const ai = getGeminiClient();
-
   // 1. Format Chat Context
   const longTermSummaryString = longTermSummaries.length > 0
     ? longTermSummaries.join('\n\n---\n\n')
@@ -537,7 +700,6 @@ export async function generateLorebookEntry(
 
   const recentHistoryString = chatMessages.map(msg => {
     const role = msg.role === 'user' ? 'User' : (chatMessages.find(c => c.role === 'model')?.originalRawContent?.split(':')[0] || 'Model');
-    // FIX: Fallback here too
     return `${role}: ${msg.content || msg.originalRawContent || ''}`;
   }).join('\n');
 
