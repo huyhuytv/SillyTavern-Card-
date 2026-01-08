@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useChatEngine } from '../hooks/useChatEngine';
 import { useCharacter } from '../contexts/CharacterContext';
 import { useUserPersona } from '../contexts/UserPersonaContext';
@@ -17,6 +17,8 @@ import { FloatingStatusHUD } from './Chat/FloatingStatusHUD';
 import { Loader } from './Loader';
 import { applyVariableOperation } from '../services/variableEngine'; 
 import { countTotalTurns } from '../hooks/useChatMemory'; 
+import { RpgDashboard } from './Chat/RpgDashboard';
+import { ErrorResolutionModal } from './ErrorResolutionModal'; // IMPORT MODAL
 
 interface ChatTesterProps {
     sessionId: string;
@@ -26,7 +28,8 @@ interface ChatTesterProps {
 export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => {
     const {
         messages, isLoading, isSummarizing, error,
-        sendMessage, deleteLastTurn, deleteMessage, regenerateLastResponse, editMessage,
+        sendMessage, stopGeneration, 
+        deleteLastTurn, deleteMessage, regenerateLastResponse, editMessage,
         authorNote, updateAuthorNote,
         worldInfoState, updateWorldInfoState,
         worldInfoPinned, updateWorldInfoPinned,
@@ -43,10 +46,13 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         saveSession,
         isAutoLooping, setIsAutoLooping,
         queueLength, 
-        summaryQueue, // NEW: Full Queue State
+        summaryQueue,
         triggerSmartContext,
         handleRegenerateSummary,
-        handleRetryFailedTask // NEW: Retry Function
+        handleRetryFailedTask,
+        resetStore,
+        interactiveError, // NEW: Error State
+        handleUserDecision // NEW: Decision Handler
     } = useChatEngine(sessionId);
 
     const { characters } = useCharacter();
@@ -57,16 +63,23 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
     const [isAssistantOpen, setIsAssistantOpen] = useState(false);
     const [isHUDOpen, setIsHUDOpen] = useState(false);
     const [isStatusHUDOpen, setIsStatusHUDOpen] = useState(false);
+    const [isRpgDashboardOpen, setIsRpgDashboardOpen] = useState(false);
     const [isAuthorNoteOpen, setIsAuthorNoteOpen] = useState(false);
     const [isWorldInfoOpen, setIsWorldInfoOpen] = useState(false);
     const [isLorebookCreatorOpen, setIsLorebookCreatorOpen] = useState(false);
     const [lorebookKeyword, setLorebookKeyword] = useState('');
     
-    // Edit state
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editingContent, setEditingContent] = useState('');
 
     const iframeRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
+
+    // CLEANUP: Reset store when leaving chat to prevent stale data flashing
+    useEffect(() => {
+        return () => {
+            resetStore();
+        };
+    }, [resetStore]);
 
     const handleStartEdit = (msg: any) => {
         setEditingMessageId(msg.id);
@@ -113,11 +126,11 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         return reversed.find(m => m.interactiveHtml);
     }, [messages]);
 
-    // CALCULATE TURN COUNT FOR UI
-    // Instead of messages.length, we use the helper logic
     const currentTurnCount = useMemo(() => countTotalTurns(messages), [messages]);
 
-    if (!card || !preset) {
+    const isInitializing = isLoading && (!card || !preset);
+
+    if (isInitializing) {
         return (
             <div className="flex justify-center items-center h-full">
                 <Loader message="Đang tải phiên trò chuyện..." />
@@ -128,13 +141,27 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
     if (error) {
         return (
             <div className="flex flex-col justify-center items-center h-full gap-4 text-red-400">
-                <p>Lỗi: {error}</p>
-                <button onClick={onBack} className="text-slate-300 underline">Quay lại</button>
+                <p className="text-center px-4">Lỗi: {error}</p>
+                <button onClick={onBack} className="text-slate-300 underline hover:text-white transition-colors">Quay lại</button>
             </div>
         );
     }
 
-    // Settings for Summaries Dashboard
+    if (!card || !preset) {
+        return (
+            <div className="flex flex-col justify-center items-center h-full gap-4 text-amber-400">
+                <p className="text-center px-4 font-bold text-xl">Dữ liệu không khả dụng</p>
+                <p className="text-center px-4 text-slate-400">
+                    Không tìm thấy thẻ nhân vật hoặc preset tương ứng.<br/>
+                    Có thể bạn đã xóa nhân vật gốc hoặc preset này?
+                </p>
+                <button onClick={onBack} className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition-colors">
+                    Quay lại Sảnh
+                </button>
+            </div>
+        );
+    }
+
     const contextDepth = preset.context_depth || 20;
     const chunkSize = preset.summarization_chunk_size || 10;
 
@@ -144,7 +171,10 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
             
             <ChatHeader 
                 characterName={card.name}
-                onBack={onBack}
+                onBack={() => {
+                    saveSession({}, true); // Force immediate save on back
+                    onBack();
+                }}
                 isImmersive={isImmersive}
                 setIsImmersive={setIsImmersive}
                 visualState={visualState}
@@ -157,6 +187,9 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 onPresetChange={changePreset}
                 onToggleAssistant={() => setIsAssistantOpen(!isAssistantOpen)}
                 isAssistantOpen={isAssistantOpen}
+                hasRpgData={!!card.rpg_data}
+                onToggleRpgDashboard={() => setIsRpgDashboardOpen(!isRpgDashboardOpen)}
+                isRpgDashboardOpen={isRpgDashboardOpen}
             />
 
             <MessageList 
@@ -188,6 +221,7 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
 
             <ChatInput
                 onSend={sendMessage}
+                onStop={stopGeneration}
                 isLoading={isLoading}
                 isImmersive={isImmersive}
                 quickReplies={quickReplies}
@@ -210,7 +244,6 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                     copyStatus={false} 
                     isImmersive={isImmersive}
                     onLorebookCreatorOpen={() => setIsLorebookCreatorOpen(true)}
-                    // CHANGED: Use currentTurnCount instead of messages.length
                     summaryStats={{
                         messageCount: currentTurnCount,
                         summaryCount: longTermSummaries.length,
@@ -219,10 +252,10 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                         queueLength: queueLength
                     }}
                     longTermSummaries={longTermSummaries}
-                    summaryQueue={summaryQueue} // Pass Full Queue
+                    summaryQueue={summaryQueue}
                     onForceSummarize={triggerSmartContext}
                     onRegenerateSummary={handleRegenerateSummary} 
-                    onRetryFailedTask={handleRetryFailedTask} // Pass Retry Function
+                    onRetryFailedTask={handleRetryFailedTask}
                 />
             </ChatInput>
 
@@ -266,6 +299,12 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 onClose={() => setIsHUDOpen(false)}
             />
 
+            <RpgDashboard 
+                data={card.rpg_data}
+                isOpen={isRpgDashboardOpen}
+                onClose={() => setIsRpgDashboardOpen(false)}
+            />
+
             <FloatingStatusHUD 
                 ref={(el) => { if(el) iframeRefs.current['hud'] = el; }}
                 isOpen={isStatusHUDOpen}
@@ -280,6 +319,13 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 characterId={sessionId}
                 sessionId={sessionId}
                 characterAvatarUrl={characterAvatarUrl}
+            />
+
+            {/* Error Handling Modal */}
+            <ErrorResolutionModal 
+                errorState={interactiveError}
+                onRetry={() => handleUserDecision('retry')}
+                onIgnore={() => handleUserDecision('ignore')}
             />
         </ChatLayout>
     );

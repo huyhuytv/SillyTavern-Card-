@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState, useLayoutEffect } from 'react';
 import type { ChatMessage, TavernHelperScript } from '../../types';
 import { InteractiveHtmlMessage } from '../InteractiveHtmlMessage';
@@ -48,6 +49,7 @@ const StandaloneTTSButton: React.FC<{
             onClick={handlePlay}
             className={`p-1.5 rounded-full shadow-lg border transition-all transform hover:scale-110 bg-slate-800/90 text-slate-400 border-slate-600 hover:text-sky-400 hover:border-sky-500 backdrop-blur-sm`}
             title="Đọc nội dung (TTS)"
+            aria-label="Đọc nội dung (TTS)"
         >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />

@@ -1,83 +1,16 @@
 
-import React, { useId, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { SillyTavernPreset } from '../types';
-import { Tooltip } from './Tooltip';
 import { AVAILABLE_VOICES, playTextToSpeech, playNativeTts, getVietnameseVoices } from '../services/ttsService';
 import { useToast } from './ToastSystem';
+import { ToggleInput } from './ui/ToggleInput';
+import { SelectInput } from './ui/SelectInput';
+import { SliderInput } from './ui/SliderInput';
 
 interface TtsSettingsProps {
     preset: SillyTavernPreset;
     onUpdate: (updatedPreset: SillyTavernPreset) => void;
 }
-
-const ToggleInput: React.FC<{ label: string; checked: boolean; onChange: (checked: boolean) => void; tooltipText?: string }> = ({ label, checked, onChange, tooltipText }) => {
-    return (
-        <div className="flex items-center justify-between bg-slate-700/50 p-3 rounded-lg">
-            <Tooltip text={tooltipText}>
-                <label className="text-sm font-medium text-slate-300 cursor-help">{label}</label>
-            </Tooltip>
-            <button
-                type="button"
-                onClick={() => onChange(!checked)}
-                className={`${
-                    checked ? 'bg-sky-500' : 'bg-slate-600'
-                } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-800`}
-                role="switch"
-                aria-checked={checked}
-            >
-                <span
-                    aria-hidden="true"
-                    className={`${
-                        checked ? 'translate-x-5' : 'translate-x-0'
-                    } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
-                />
-            </button>
-        </div>
-    );
-};
-
-const SelectInput: React.FC<{ label: string; value: string; onChange: (value: string) => void; options: { id: string; name: string }[]; tooltipText?: string }> = ({ label, value, onChange, options, tooltipText }) => {
-    const id = useId();
-    return (
-    <div>
-        <Tooltip text={tooltipText || ''}>
-            <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1 cursor-help">{label}</label>
-        </Tooltip>
-        <select
-            id={id}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition"
-        >
-            {options.map(opt => (
-                <option key={opt.id} value={opt.id}>{opt.name}</option>
-            ))}
-        </select>
-    </div>
-)};
-
-const SliderInput: React.FC<{ label: string; value: number; onChange: (value: number) => void; min: number; max: number; step: number; tooltipText?: string }> = ({ label, value, onChange, min, max, step, tooltipText }) => {
-    const id = useId();
-    return (
-    <div>
-        <Tooltip text={tooltipText || ''}>
-            <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1 cursor-help">{label}</label>
-        </Tooltip>
-        <div className="flex items-center gap-4">
-            <input
-                id={id}
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={value}
-                onChange={(e) => onChange(parseFloat(e.target.value))}
-                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-sky-500"
-            />
-            <span className="w-12 text-right font-mono text-sm text-slate-200">{value}</span>
-        </div>
-    </div>
-)};
 
 export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) => {
     const { showToast } = useToast();
@@ -149,7 +82,7 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
                 label="Bật Text-to-Speech (TTS)"
                 checked={preset.tts_enabled ?? false}
                 onChange={(v) => handleUpdate('tts_enabled', v)}
-                tooltipText="Hiển thị nút phát âm thanh trên tin nhắn và cho phép nhân vật đọc thoại."
+                tooltip="Hiển thị nút phát âm thanh trên tin nhắn và cho phép nhân vật đọc thoại."
             />
 
             <div className={`space-y-6 transition-opacity duration-300 ${!preset.tts_enabled ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -158,18 +91,18 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
                     label="Chế độ Đọc Streaming (Real-time)"
                     checked={preset.tts_streaming ?? false}
                     onChange={(v) => handleUpdate('tts_streaming', v)}
-                    tooltipText="Đọc từng câu ngay khi xuất hiện thay vì đợi toàn bộ câu trả lời. Yêu cầu bật 'Stream Response'."
+                    tooltip="Đọc từng câu ngay khi xuất hiện thay vì đợi toàn bộ câu trả lời. Yêu cầu bật 'Stream Response'."
                 />
 
                 <SelectInput 
                     label="Nguồn Giọng Đọc (TTS Provider)"
                     value={preset.tts_provider || 'gemini'}
-                    onChange={(v) => handleUpdate('tts_provider', v)}
+                    onChange={(e) => handleUpdate('tts_provider', e.target.value)}
                     options={[
-                        { id: 'gemini', name: 'Gemini AI (Yêu cầu API Key)' },
-                        { id: 'native', name: 'Trình duyệt (Native/Offline)' }
+                        { value: 'gemini', label: 'Gemini AI (Yêu cầu API Key)' },
+                        { value: 'native', label: 'Trình duyệt (Native/Offline)' }
                     ]}
-                    tooltipText="Gemini: Giọng hay, tốn phí/quota. Native: Giọng máy, miễn phí, không độ trễ."
+                    tooltip="Gemini: Giọng hay, tốn phí/quota. Native: Giọng máy, miễn phí, không độ trễ."
                 />
 
                 {isNative ? (
@@ -180,9 +113,9 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
                             <SelectInput 
                                 label="Giọng Đọc Trình Duyệt (Chỉ Tiếng Việt)"
                                 value={preset.tts_native_voice || (nativeVoices[0]?.voiceURI || '')}
-                                onChange={(v) => handleUpdate('tts_native_voice', v)}
-                                options={nativeVoices.map(v => ({ id: v.voiceURI, name: v.name }))}
-                                tooltipText="Danh sách giọng nói Tiếng Việt có sẵn trong máy của bạn."
+                                onChange={(e) => handleUpdate('tts_native_voice', e.target.value)}
+                                options={nativeVoices.map(v => ({ value: v.voiceURI, label: v.name }))}
+                                tooltip="Danh sách giọng nói Tiếng Việt có sẵn trong máy của bạn."
                             />
                         )}
                         <SliderInput 
@@ -190,14 +123,14 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
                             value={preset.tts_rate ?? 1}
                             onChange={(v) => handleUpdate('tts_rate', v)}
                             min={0.1} max={2} step={0.1}
-                            tooltipText="Tốc độ đọc. 1.0 là bình thường."
+                            tooltip="Tốc độ đọc. 1.0 là bình thường."
                         />
                         <SliderInput 
                             label="Cao độ (Pitch)"
                             value={preset.tts_pitch ?? 1}
                             onChange={(v) => handleUpdate('tts_pitch', v)}
                             min={0} max={2} step={0.1}
-                            tooltipText="Độ cao thấp của giọng. 1.0 là bình thường."
+                            tooltip="Độ cao thấp của giọng. 1.0 là bình thường."
                         />
                     </div>
                 ) : (
@@ -205,9 +138,9 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
                         <SelectInput 
                             label="Giọng đọc Gemini"
                             value={preset.tts_voice || 'Kore'}
-                            onChange={(v) => handleUpdate('tts_voice', v)}
-                            options={AVAILABLE_VOICES}
-                            tooltipText="Chọn chất giọng AI. Lưu ý: Gemini hiện tại chưa hỗ trợ chỉnh tốc độ/cao độ."
+                            onChange={(e) => handleUpdate('tts_voice', e.target.value)}
+                            options={AVAILABLE_VOICES.map(v => ({ value: v.id, label: v.name }))}
+                            tooltip="Chọn chất giọng AI. Lưu ý: Gemini hiện tại chưa hỗ trợ chỉnh tốc độ/cao độ."
                         />
                     </div>
                 )}

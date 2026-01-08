@@ -24,56 +24,12 @@ import {
 import { validateOpenRouterKey, getOpenRouterModels } from '../services/geminiService';
 import type { OpenRouterModel } from '../types';
 import { Loader } from './Loader';
-
-// Components
-const ToggleInput: React.FC<{ label: string; checked: boolean; onChange: (checked: boolean) => void; description?: string }> = ({ label, checked, onChange, description }) => (
-    <div>
-        <div className="flex items-center justify-between bg-slate-700/50 p-3 rounded-lg">
-            <label className="text-sm font-medium text-slate-300">{label}</label>
-            <button
-                type="button"
-                onClick={() => onChange(!checked)}
-                className={`${
-                    checked ? 'bg-sky-500' : 'bg-slate-600'
-                } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-800`}
-                role="switch"
-                aria-checked={checked}
-            >
-                <span
-                    aria-hidden="true"
-                    className={`${
-                        checked ? 'translate-x-5' : 'translate-x-0'
-                    } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
-                />
-            </button>
-        </div>
-        {description && <p className="text-xs text-slate-500 mt-2">{description}</p>}
-    </div>
-);
-
-const SearchableSelect: React.FC<{
-    options: { value: string; label: string }[];
-    value: string;
-    onChange: (value: string) => void;
-    placeholder?: string;
-    disabled?: boolean;
-}> = ({ options, value, onChange, placeholder = "Chọn...", disabled = false }) => {
-    return (
-        <select
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            disabled={disabled}
-            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition disabled:opacity-50"
-        >
-            <option value="">{placeholder}</option>
-            {options.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-        </select>
-    );
-};
+import { ToggleInput } from './ui/ToggleInput';
+import { SelectInput } from './ui/SelectInput';
+import { LabeledInput } from './ui/LabeledInput';
 
 // New Reusable Component for Model Selection with "Other" option
+// Giữ lại component này vì nó có logic đặc thù (custom input) chưa có trong shared UI
 const ModelSelectorWithCustom: React.FC<{
     label: string;
     description?: string;
@@ -81,13 +37,10 @@ const ModelSelectorWithCustom: React.FC<{
     onChange: (val: string) => void;
     options?: { id: string; name: string }[];
 }> = ({ label, description, value, onChange, options = MODEL_OPTIONS }) => {
-    // Kiểm tra xem giá trị hiện tại có nằm trong danh sách định sẵn không
     const isKnownOption = useMemo(() => {
         return options.some(opt => opt.id === value);
     }, [value, options]);
 
-    // Nếu không nằm trong danh sách (hoặc là chuỗi rỗng do người dùng chọn "Khác"),
-    // thì hiển thị ô nhập liệu.
     const showInput = !isKnownOption;
 
     return (
@@ -100,7 +53,6 @@ const ModelSelectorWithCustom: React.FC<{
                 onChange={(e) => {
                     const val = e.target.value;
                     if (val === 'custom_option') {
-                        // Khi chọn "Khác", xóa giá trị để kích hoạt chế độ input
                         onChange(''); 
                     } else {
                         onChange(val);
@@ -112,7 +64,6 @@ const ModelSelectorWithCustom: React.FC<{
                 <option value="custom_option">Khác (Tự nhập Model ID)</option>
             </select>
 
-            {/* Show Text Input if "Other" is selected or value is not in list */}
             {showInput && (
                 <div className="animate-fade-in-up">
                     <input
@@ -329,14 +280,11 @@ export const ApiSettings: React.FC = () => {
                     <div className="space-y-6 animate-fade-in-up">
                         <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
                             <label className="block text-sm font-bold text-indigo-300 mb-2">Mô hình Chính (Chat)</label>
-                            {/* Uses Default MODEL_OPTIONS */}
-                            <select
+                            <SelectInput
                                 value={connection.gemini_model}
                                 onChange={(e) => updateConnection('gemini_model', e.target.value)}
-                                className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white"
-                            >
-                                {MODEL_OPTIONS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                            </select>
+                                options={MODEL_OPTIONS.map(m => ({ value: m.id, label: m.name }))}
+                            />
                         </div>
 
                         <div>
@@ -369,10 +317,10 @@ export const ApiSettings: React.FC = () => {
                             {isFetchingORModels ? <Loader message="Đang tải danh sách..." /> : (
                                 <div className="flex gap-2">
                                     <div className="flex-grow">
-                                        <SearchableSelect 
+                                        <SelectInput 
                                             options={filteredORModels.map(m => ({ value: m.id, label: `${m.name} (${m.pricing.prompt === '0' ? 'Free' : '$'})` }))}
                                             value={connection.openrouter_model}
-                                            onChange={(v) => updateConnection('openrouter_model', v)}
+                                            onChange={(e) => updateConnection('openrouter_model', e.target.value)}
                                             placeholder="Chọn mô hình..."
                                         />
                                     </div>
@@ -477,19 +425,22 @@ export const ApiSettings: React.FC = () => {
                                 {proxyPingStatus === 'error' && <p className="text-xs text-red-400 mt-1">Lỗi: {proxyErrorMessage}</p>}
                             </div>
 
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-1">Password / Key (Optional)</label>
-                                <input
-                                    type="password"
-                                    value={proxyPassword}
-                                    onChange={e => setProxyPassword(e.target.value)}
-                                    className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-white"
-                                />
-                            </div>
+                            <LabeledInput 
+                                label="Password / Key (Optional)"
+                                value={proxyPassword}
+                                onChange={e => setProxyPassword(e.target.value)}
+                                type="password"
+                            />
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                                <ToggleInput label="Legacy Mode (Kingfall)" checked={proxyLegacyMode} onChange={setProxyLegacyMode} description="Dùng text/plain để tránh CORS trên localhost cũ." />
-                                <ToggleInput label="Dùng Proxy cho Tools" checked={proxyForTools} onChange={setProxyForTools} description="Bắt buộc Quét/Dịch chạy qua Proxy này." />
+                                <div>
+                                    <ToggleInput label="Legacy Mode (Kingfall)" checked={proxyLegacyMode} onChange={setProxyLegacyMode} />
+                                    <p className="text-xs text-slate-500 mt-1">Dùng text/plain để tránh CORS trên localhost cũ.</p>
+                                </div>
+                                <div>
+                                    <ToggleInput label="Dùng Proxy cho Tools" checked={proxyForTools} onChange={setProxyForTools} />
+                                    <p className="text-xs text-slate-500 mt-1">Bắt buộc Quét/Dịch chạy qua Proxy này.</p>
+                                </div>
                             </div>
                         </div>
                     </div>

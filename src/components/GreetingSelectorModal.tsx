@@ -1,8 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 // Fix: Import CharacterInContext from its definition file.
-import type { SillyTavernPreset } from '../types';
-import type { CharacterInContext } from '../contexts/CharacterContext';
+import type { SillyTavernPreset, CharacterInContext } from '../types';
 import { truncateText } from '../utils';
 
 interface GreetingSelectorModalProps {

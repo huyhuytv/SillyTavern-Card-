@@ -20,6 +20,10 @@ interface ChatHeaderProps {
     onPresetChange?: (presetName: string) => void;
     onToggleAssistant?: () => void;
     isAssistantOpen?: boolean;
+    // NEW: RPG Dashboard
+    onToggleRpgDashboard?: () => void;
+    isRpgDashboardOpen?: boolean;
+    hasRpgData?: boolean;
 }
 
 const VisualSettingsModal: React.FC<{
@@ -73,7 +77,12 @@ const VisualSettingsModal: React.FC<{
         <div ref={modalRef} className="absolute top-14 right-4 w-80 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 animate-fade-in-up p-4">
             <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
                 <h3 className="font-bold text-slate-200">Cài đặt Giao diện & Âm thanh</h3>
-                <button ref={closeButtonRef} onClick={onClose} className="text-slate-400 hover:text-white">
+                <button 
+                    ref={closeButtonRef} 
+                    onClick={onClose} 
+                    className="text-slate-400 hover:text-white"
+                    aria-label="Đóng cài đặt giao diện"
+                >
                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
                 </button>
             </div>
@@ -156,6 +165,7 @@ const PresetTuningModal: React.FC<{
                             ? 'bg-indigo-600 text-white shadow-sm' 
                             : 'text-slate-400 hover:bg-slate-700 hover:text-white'
                         }`}
+                        aria-label={`Chọn preset ${preset.name}`}
                     >
                         <span className="truncate">{preset.name}</span>
                         {activePresetName === preset.name && <span className="text-[10px]">●</span>}
@@ -182,6 +192,8 @@ const TTSControls: React.FC = () => {
                 onClick={toggleAutoPlay}
                 className={`p-1.5 rounded-full transition-colors ${autoPlayEnabled ? 'text-sky-400 bg-sky-900/20' : 'text-slate-500 hover:text-slate-300'}`}
                 title={autoPlayEnabled ? "Tự động đọc: BẬT" : "Tự động đọc: TẮT"}
+                aria-label={autoPlayEnabled ? "Tắt tự động đọc" : "Bật tự động đọc"}
+                aria-pressed={autoPlayEnabled}
             >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
@@ -198,6 +210,7 @@ const TTSControls: React.FC = () => {
                         onClick={togglePause}
                         className={`p-1.5 rounded-full text-slate-200 hover:text-white hover:bg-slate-700 transition-colors ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                         title={isPaused ? "Tiếp tục" : "Tạm dừng"}
+                        aria-label={isPaused ? "Tiếp tục đọc" : "Tạm dừng đọc"}
                         disabled={isLoading}
                     >
                         {isLoading ? (
@@ -214,6 +227,7 @@ const TTSControls: React.FC = () => {
                         onClick={skip}
                         className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
                         title="Bỏ qua (Next)"
+                        aria-label="Bỏ qua câu hiện tại"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M4.555 5.168A1 1 0 003 6v8a1 1 0 001.555.832L9 12.323V14a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 009 6v1.677L4.555 5.168z" /></svg>
                     </button>
@@ -251,7 +265,8 @@ const ModelBadge: React.FC = () => {
 export const ChatHeader: React.FC<ChatHeaderProps> = ({ 
     characterName, onBack, isImmersive, setIsImmersive, visualState, onVisualUpdate, 
     onToggleHUD, isHUDOpen, onToggleStatusHUD, isStatusHUDOpen,
-    activePresetName, onPresetChange, onToggleAssistant, isAssistantOpen
+    activePresetName, onPresetChange, onToggleAssistant, isAssistantOpen,
+    onToggleRpgDashboard, isRpgDashboardOpen, hasRpgData
 }) => {
     const [isVisualMenuOpen, setIsVisualMenuOpen] = useState(false);
     const [isTuningMenuOpen, setIsTuningMenuOpen] = useState(false);
@@ -268,7 +283,12 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
 
     return (
         <div className={headerClasses}>
-            <button onClick={isImmersive ? () => setIsImmersive(false) : onBack} className="text-slate-400 hover:text-sky-400 transition-colors" title={isImmersive ? "Thoát chế độ nhà hát" : "Quay lại"}>
+            <button 
+                onClick={isImmersive ? () => setIsImmersive(false) : onBack} 
+                className="text-slate-400 hover:text-sky-400 transition-colors" 
+                title={isImmersive ? "Thoát chế độ nhà hát" : "Quay lại"}
+                aria-label={isImmersive ? "Thoát chế độ nhà hát" : "Quay lại sảnh chờ"}
+            >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                     {isImmersive 
                      ? <path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 01-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12zm-9 7a1 1 0 011 1v1.586l2.293-2.293a1 1 0 011.414 1.414L5.414 15H7a1 1 0 010 2H3a1 1 0 01-1-1v-4a1 1 0 011-1zm13.707-1.293a1 1 0 00-1.414-1.414L13.586 15H12a1 1 0 000 2h4a1 1 0 001-1v-4z" clipRule="evenodd" />
@@ -291,12 +311,29 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
             {/* TTS Controls (NEW) */}
             <TTSControls />
 
+            {/* RPG Dashboard Toggle (NEW - Only show if card has RPG data) */}
+            {hasRpgData && onToggleRpgDashboard && (
+                <button
+                    onClick={onToggleRpgDashboard}
+                    className={`p-2 rounded-full transition-colors ${isRpgDashboardOpen ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/50' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                    title="Bật/Tắt RPG Dashboard (Mythic Engine)"
+                    aria-label="Bật tắt bảng điều khiển RPG"
+                    aria-pressed={isRpgDashboardOpen}
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M6 6V5a3 3 0 013-3h2.25a3 3 0 013 3v1h2a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V7a1 1 0 011-1h2zm3-1a1 1 0 011-1h.5a1 1 0 011 1v1h-2.5V5zm7 4a1 1 0 10-2 0 1 1 0 002 0zm-9 0a1 1 0 10-2 0 1 1 0 002 0zm9 3a1 1 0 10-2 0 1 1 0 002 0zm-9 0a1 1 0 10-2 0 1 1 0 002 0z" clipRule="evenodd" />
+                    </svg>
+                </button>
+            )}
+
             {/* Assistant Toggle (NEW) */}
             {onToggleAssistant && (
                 <button
                     onClick={onToggleAssistant}
                     className={`p-2 rounded-full transition-colors ${isAssistantOpen ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
                     title="Bật/Tắt Trợ lý Co-pilot"
+                    aria-label="Bật tắt Trợ lý AI Architect"
+                    aria-pressed={isAssistantOpen}
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
@@ -311,6 +348,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                     onClick={onToggleStatusHUD}
                     className={`p-2 rounded-full transition-colors ${isStatusHUDOpen ? 'bg-amber-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
                     title="Bật/Tắt Giao diện Thẻ Nổi (Card HUD)"
+                    aria-label="Bật tắt Giao diện Thẻ nổi"
+                    aria-pressed={isStatusHUDOpen}
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
@@ -324,6 +363,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                     onClick={onToggleHUD}
                     className={`p-2 rounded-full transition-colors ${isHUDOpen ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
                     title="Bật/Tắt Bảng Biến Số (Debug HUD)"
+                    aria-label="Bật tắt Bảng gỡ lỗi biến số"
+                    aria-pressed={isHUDOpen}
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
@@ -338,6 +379,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                         onClick={() => setIsTuningMenuOpen(!isTuningMenuOpen)}
                         className={`p-2 rounded-full transition-colors ${isTuningMenuOpen ? 'bg-fuchsia-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
                         title="Live Tuning (Đổi Preset Nóng)"
+                        aria-label="Mở menu chọn Preset nhanh"
+                        aria-expanded={isTuningMenuOpen}
                     >
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                           <path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z" />
@@ -359,6 +402,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                     onClick={() => setIsVisualMenuOpen(!isVisualMenuOpen)}
                     className={`p-2 rounded-full transition-colors ${isVisualMenuOpen ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
                     title="Cài đặt Giao diện & Âm thanh"
+                    aria-label="Cài đặt Giao diện và Âm thanh"
+                    aria-expanded={isVisualMenuOpen}
                 >
                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" /></svg>
                 </button>
@@ -375,6 +420,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                 onClick={() => setIsImmersive(!isImmersive)}
                 className={`p-2 rounded-full transition-colors ${isImmersive ? 'text-sky-400 hover:text-sky-300' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
                 title={isImmersive ? "Thoát Chế độ Nhà hát" : "Chế độ Nhà hát (Immersive Mode)"}
+                aria-label={isImmersive ? "Thoát chế độ nhà hát" : "Bật chế độ nhà hát"}
+                aria-pressed={isImmersive}
             >
                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 01-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12zm-9 7a1 1 0 011 1v1.586l2.293-2.293a1 1 0 011.414 1.414L5.414 15H7a1 1 0 010 2H3a1 1 0 01-1-1v-4a1 1 0 011-1zm13.707-1.293a1 1 0 00-1.414-1.414L13.586 15H12a1 1 0 000 2h4a1 1 0 001-1v-4z" clipRule="evenodd" /></svg>
             </button>

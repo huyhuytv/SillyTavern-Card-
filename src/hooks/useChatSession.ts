@@ -1,82 +1,63 @@
 
-import { useState, useEffect, useCallback } from 'react';
-import type { ChatSession, ChatMessage, CharacterCard, SillyTavernPreset, UserPersona, VisualState, WorldInfoRuntimeStats, SummaryQueueItem } from '../types';
+import { useEffect, useCallback, useRef } from 'react';
+import type { ChatSession } from '../types';
 import * as dbService from '../services/dbService';
 import { useCharacter } from '../contexts/CharacterContext';
 import { usePreset } from '../contexts/PresetContext';
 import { useUserPersona } from '../contexts/UserPersonaContext';
 import { mergeSettings } from '../services/settingsMerger';
 import { truncateText } from '../utils';
-
-export interface SessionState {
-    messages: ChatMessage[];
-    variables: Record<string, any>;
-    extensionSettings: Record<string, any>;
-    worldInfoState: Record<string, boolean>;
-    worldInfoPinned: Record<string, boolean>;
-    worldInfoPlacement: Record<string, 'before' | 'after' | undefined>;
-    worldInfoRuntime: Record<string, WorldInfoRuntimeStats>;
-    visualState: VisualState;
-    authorNote: string;
-    lastStateBlock: string;
-    longTermSummaries: string[];
-    summaryQueue: SummaryQueueItem[]; // NEW STATE
-    card: CharacterCard | null;
-    preset: SillyTavernPreset | null;
-    persona: UserPersona | null;
-    mergedSettings: SillyTavernPreset | null;
-    isLoading: boolean;
-    error: string;
-}
+import { useChatStore } from '../store/chatStore';
 
 export const useChatSession = (sessionId: string | null) => {
-    // Core Session State
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
-    const [variables, setVariables] = useState<Record<string, any>>({});
-    const [extensionSettings, setExtensionSettings] = useState<Record<string, any>>({}); 
-    const [worldInfoState, setWorldInfoState] = useState<Record<string, boolean>>({});
-    const [worldInfoPinned, setWorldInfoPinned] = useState<Record<string, boolean>>({});
-    const [worldInfoPlacement, setWorldInfoPlacement] = useState<Record<string, 'before' | 'after' | undefined>>({});
-    const [worldInfoRuntime, setWorldInfoRuntime] = useState<Record<string, WorldInfoRuntimeStats>>({});
-    const [visualState, setVisualState] = useState<VisualState>({});
-    const [authorNote, setAuthorNote] = useState<string>('');
-    const [lastStateBlock, setLastStateBlock] = useState<string>('');
-    const [longTermSummaries, setLongTermSummaries] = useState<string[]>([]);
-    const [summaryQueue, setSummaryQueue] = useState<SummaryQueueItem[]>([]); // NEW STATE
-    const [initialDiagnosticLog, setInitialDiagnosticLog] = useState<string>('');
-    
-    // References
-    const [card, setCard] = useState<CharacterCard | null>(null);
-    const [preset, setPreset] = useState<SillyTavernPreset | null>(null);
-    const [persona, setPersona] = useState<UserPersona | null>(null);
-    const [mergedSettings, setMergedSettings] = useState<SillyTavernPreset | null>(null);
-
-    // Status
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [error, setError] = useState<string>('');
+    const {
+        setSessionData,
+        setError,
+        setLoading,
+        resetStore,
+        // Lấy state từ store để theo dõi sự thay đổi
+        messages,
+        variables,
+        worldInfoState,
+        worldInfoRuntime,
+        isLoading
+    } = useChatStore();
 
     // Contexts for resolution
-    const { characters } = useCharacter();
-    const { presets } = usePreset();
-    const { personas } = useUserPersona();
+    const { characters, isLoading: isCharLoading } = useCharacter();
+    const { presets, isLoading: isPresetLoading } = usePreset();
+    const { personas, isLoading: isPersonaLoading } = useUserPersona();
 
-    // Load Session Data
+    const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    
+    // Cờ kiểm tra xem dữ liệu đã được tải từ DB lên chưa.
+    const isHydratedRef = useRef(false);
+
+    // Hydration Logic (Blocking)
     useEffect(() => {
+        // 1. Reset if no session
+        if (!sessionId) {
+            resetStore();
+            setLoading(false);
+            isHydratedRef.current = false;
+            return;
+        }
+
+        // 2. Wait for dependencies (Contexts) to finish loading from DB
+        if (isCharLoading || isPresetLoading || isPersonaLoading) {
+            setLoading(true); 
+            return;
+        }
+
         const initializeSession = async () => {
-            if (!sessionId) {
-                setIsLoading(false);
-                return;
-            }
-
-            if (!characters || !presets || !personas) return;
-
-            setIsLoading(true);
-            setError('');
+            // Chỉ set loading true nếu chưa có dữ liệu (tránh flash loading khi re-render)
+            if (!isHydratedRef.current) setLoading(true);
+            setError(null);
 
             try {
                 const session = await dbService.getChatSession(sessionId);
                 if (!session) {
-                    throw new Error("Không tìm thấy phiên trò chuyện.");
+                    throw new Error("Không tìm thấy phiên trò chuyện trong Database.");
                 }
 
                 const sessionCardContext = characters.find(c => c.fileName === session.characterFileName);
@@ -84,30 +65,45 @@ export const useChatSession = (sessionId: string | null) => {
                 const sessionPreset = presets.find(p => p.name === session.presetName);
                 const sessionPersona = personas.find(p => p.id === session.userPersonaId) || null;
 
-                if (!sessionCard || !sessionPreset) {
-                    throw new Error("Nhân vật hoặc preset cho phiên này không còn tồn tại.");
+                if (!sessionCard) {
+                    throw new Error(`Không tìm thấy thẻ nhân vật: "${session.characterFileName}".`);
                 }
 
-                sessionCard.fileName = session.characterFileName;
+                if (!sessionPreset) {
+                    throw new Error(`Không tìm thấy Preset: "${session.presetName}".`);
+                }
 
-                setCard(sessionCard);
-                setPreset(sessionPreset);
-                setPersona(sessionPersona);
-                setMergedSettings(mergeSettings(sessionCard, sessionPreset));
+                // --- RPG STATE HYDRATION ---
+                // Clone thẻ để tránh đột biến thẻ gốc trong Context
+                // Nếu session có dữ liệu RPG đã lưu, dùng nó đè lên dữ liệu mặc định của thẻ
+                const cardForSession = { ...sessionCard, fileName: session.characterFileName };
+                if (session.rpgState) {
+                    cardForSession.rpg_data = session.rpgState;
+                }
+                // ---------------------------
 
-                setMessages(session.chatHistory);
-                setVariables(session.variables || {});
-                setExtensionSettings(session.extensionSettings || {}); 
-                setVisualState(session.visualState || {});
-                setAuthorNote(session.authorNote || '');
-                setLastStateBlock(session.lastStateBlock || '');
-                setLongTermSummaries(session.longTermSummaries || []);
-                setSummaryQueue(session.summaryQueue || []); // RESTORE QUEUE
-                setWorldInfoRuntime(session.worldInfoRuntime || {});
-                setWorldInfoPinned(session.worldInfoPinned || {});
-                setWorldInfoPlacement(session.worldInfoPlacement || {});
-                setInitialDiagnosticLog(session.initialDiagnosticLog || '');
+                // Hydrate Store (Atomic update)
+                setSessionData({
+                    sessionId,
+                    card: cardForSession,
+                    preset: sessionPreset,
+                    persona: sessionPersona,
+                    mergedSettings: mergeSettings(sessionCard, sessionPreset),
+                    messages: session.chatHistory,
+                    variables: session.variables || {},
+                    extensionSettings: session.extensionSettings || {},
+                    visualState: session.visualState || {},
+                    authorNote: session.authorNote || '',
+                    lastStateBlock: session.lastStateBlock || '',
+                    longTermSummaries: session.longTermSummaries || [],
+                    summaryQueue: session.summaryQueue || [],
+                    worldInfoRuntime: session.worldInfoRuntime || {},
+                    worldInfoPinned: session.worldInfoPinned || {},
+                    worldInfoPlacement: session.worldInfoPlacement || {},
+                    initialDiagnosticLog: session.initialDiagnosticLog || '',
+                });
 
+                // Hydrate WI State
                 let initialWorldInfoState: Record<string, boolean> = {};
                 if (session.worldInfoState) {
                     initialWorldInfoState = session.worldInfoState;
@@ -116,111 +112,128 @@ export const useChatSession = (sessionId: string | null) => {
                         if (entry.uid) initialWorldInfoState[entry.uid] = entry.enabled !== false;
                     });
                 }
-                setWorldInfoState(initialWorldInfoState);
+                setSessionData({ worldInfoState: initialWorldInfoState });
+                
+                // Đánh dấu đã tải xong dữ liệu
+                isHydratedRef.current = true;
 
             } catch (e) {
                 console.error("Session load error:", e);
                 setError(e instanceof Error ? e.message : 'Không thể tải phiên trò chuyện.');
             } finally {
-                setIsLoading(false);
+                setLoading(false);
             }
         };
 
-        initializeSession();
-    }, [sessionId, characters, presets, personas]);
-
-
-    /**
-     * Persist the current state to IndexedDB.
-     */
-    const saveSession = useCallback(async (overrides: Partial<SessionState> = {}) => {
-        if (!sessionId || !card || !preset) return;
-
-        const currentMessages = overrides.messages ?? messages;
-        const currentVariables = overrides.variables ?? variables;
-        const currentExtensionSettings = overrides.extensionSettings ?? extensionSettings;
-        const currentWorldInfoState = overrides.worldInfoState ?? worldInfoState;
-        const currentWorldInfoPinned = overrides.worldInfoPinned ?? worldInfoPinned;
-        const currentWorldInfoPlacement = overrides.worldInfoPlacement ?? worldInfoPlacement;
-        const currentWorldInfoRuntime = overrides.worldInfoRuntime ?? worldInfoRuntime;
-        const currentVisualState = overrides.visualState ?? visualState;
-        const currentAuthorNote = overrides.authorNote ?? authorNote;
-        const currentLastStateBlock = overrides.lastStateBlock ?? lastStateBlock;
-        const currentSummaries = overrides.longTermSummaries ?? longTermSummaries;
-        const currentSummaryQueue = overrides.summaryQueue ?? summaryQueue; // SAVE QUEUE
-        const currentPersona = overrides.persona ?? persona;
-        
-        const currentPreset = overrides.preset ?? preset;
-
-        const lastMessageContent = currentMessages.length > 0 
-            ? currentMessages[currentMessages.length - 1].content 
-            : '';
-
-        const sessionToSave: ChatSession = {
-            sessionId,
-            characterFileName: card.fileName,
-            presetName: currentPreset.name,
-            userPersonaId: currentPersona?.id || null,
-            chatHistory: currentMessages,
-            longTermSummaries: currentSummaries,
-            summaryQueue: currentSummaryQueue, // PERSIST QUEUE
-            authorNote: currentAuthorNote,
-            worldInfoState: currentWorldInfoState,
-            worldInfoPinned: currentWorldInfoPinned,
-            worldInfoPlacement: currentWorldInfoPlacement,
-            worldInfoRuntime: currentWorldInfoRuntime,
-            variables: currentVariables,
-            extensionSettings: currentExtensionSettings, 
-            lastStateBlock: currentLastStateBlock,
-            visualState: currentVisualState,
-            lastMessageSnippet: truncateText(lastMessageContent, 50),
-            lastUpdated: Date.now(),
-            initialDiagnosticLog,
-        };
-
-        try {
-            await dbService.saveChatSession(sessionToSave);
-        } catch (e) {
-            console.error("Failed to save session:", e);
+        // Chỉ chạy initialize nếu session ID thay đổi hoặc chưa hydrate
+        if (!isHydratedRef.current || sessionId !== useChatStore.getState().sessionId) {
+             initializeSession();
         }
-    }, [sessionId, card, preset, persona, messages, variables, extensionSettings, worldInfoState, worldInfoPinned, worldInfoPlacement, worldInfoRuntime, visualState, authorNote, lastStateBlock, longTermSummaries, summaryQueue, initialDiagnosticLog]);
+       
+    }, [
+        sessionId, 
+        isCharLoading, isPresetLoading, isPersonaLoading, 
+        characters, presets, personas, 
+        setSessionData, setError, setLoading, resetStore
+    ]);
+
+
+    // Auto-Save Logic (Manual Call)
+    const saveSession = useCallback(async (overrides: Record<string, any> = {}) => {
+        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+        saveTimeoutRef.current = setTimeout(async () => {
+            const state = useChatStore.getState();
+            
+            // Chỉ lưu khi đã có session ID và dữ liệu thẻ
+            if (!state.sessionId || !state.card || !state.preset) return;
+
+            const currentMessages = overrides.messages ?? state.messages;
+            const lastMessageContent = currentMessages.length > 0 
+                ? currentMessages[currentMessages.length - 1].content 
+                : '';
+
+            const sessionToSave: ChatSession = {
+                sessionId: state.sessionId,
+                characterFileName: state.card.fileName || state.card.name,
+                presetName: overrides.preset?.name ?? state.preset.name,
+                userPersonaId: state.persona?.id || null,
+                
+                chatHistory: currentMessages,
+                longTermSummaries: overrides.longTermSummaries ?? state.longTermSummaries,
+                summaryQueue: overrides.summaryQueue ?? state.summaryQueue,
+                
+                variables: overrides.variables ?? state.variables,
+                extensionSettings: overrides.extensionSettings ?? state.extensionSettings,
+                
+                worldInfoState: overrides.worldInfoState ?? state.worldInfoState,
+                worldInfoPinned: overrides.worldInfoPinned ?? state.worldInfoPinned,
+                worldInfoPlacement: overrides.worldInfoPlacement ?? state.worldInfoPlacement,
+                worldInfoRuntime: overrides.worldInfoRuntime ?? state.worldInfoRuntime,
+                
+                visualState: overrides.visualState ?? state.visualState,
+                authorNote: overrides.authorNote ?? state.authorNote,
+                lastStateBlock: overrides.lastStateBlock ?? state.lastStateBlock,
+                
+                // --- SAVE RPG STATE ---
+                rpgState: state.card.rpg_data,
+                // ---------------------
+
+                lastMessageSnippet: truncateText(lastMessageContent, 50),
+                lastUpdated: Date.now(),
+                initialDiagnosticLog: state.initialDiagnosticLog,
+            };
+
+            try {
+                await dbService.saveChatSession(sessionToSave);
+                console.debug('[AutoSave] Saved session:', state.sessionId);
+            } catch (e) {
+                console.error("Failed to save session:", e);
+            }
+        }, 500); // Giảm delay xuống 500ms để phản hồi nhanh hơn
+    }, []);
+
+    // WATCHER: Tự động gọi saveSession khi dữ liệu quan trọng thay đổi
+    useEffect(() => {
+        // QUAN TRỌNG: Đã xóa điều kiện `isLoading` chặn lưu. 
+        // Chúng ta muốn lưu ngay cả khi đang loading (để lưu tin nhắn User vừa gửi).
+        if (!sessionId || !isHydratedRef.current) return;
+
+        // Lưu khi có thay đổi quan trọng, bao gồm cả khi rpg_data thay đổi (thông qua setSessionData({ card }))
+        // Vì useChatStore.getState().card thay đổi, và saveSession lấy state trực tiếp, nên nó sẽ bắt được.
+        // Tuy nhiên, để useEffect này trigger khi card thay đổi, ta cần thêm dependency.
+        saveSession();
+    }, [
+        messages, 
+        variables, 
+        worldInfoState, 
+        worldInfoRuntime,
+        useChatStore.getState().card, // Thêm dependency này để trigger khi Medusa update card
+        saveSession
+    ]);
 
     const changePreset = useCallback(async (presetName: string) => {
-        if (!card) return;
+        const state = useChatStore.getState();
+        if (!state.card) return;
         
         const newPreset = presets.find(p => p.name === presetName);
         if (!newPreset) return;
 
-        setPreset(newPreset);
-        setMergedSettings(mergeSettings(card, newPreset));
+        setSessionData({
+            preset: newPreset,
+            mergedSettings: mergeSettings(state.card, newPreset)
+        });
 
-        await saveSession({ preset: newPreset });
+        const session = await dbService.getChatSession(state.sessionId!);
+        if (session) {
+            session.presetName = newPreset.name;
+            await dbService.saveChatSession(session);
+        }
         
         console.log(`[Session] Live Tuned to preset: ${newPreset.name}`);
-    }, [card, presets, saveSession]);
+    }, [presets, setSessionData]);
 
     return {
-        // State
-        messages, setMessages,
-        variables, setVariables,
-        extensionSettings, setExtensionSettings,
-        worldInfoState, setWorldInfoState,
-        worldInfoPinned, setWorldInfoPinned,
-        worldInfoPlacement, setWorldInfoPlacement,
-        worldInfoRuntime, setWorldInfoRuntime,
-        visualState, setVisualState,
-        authorNote, setAuthorNote,
-        lastStateBlock, setLastStateBlock,
-        longTermSummaries, setLongTermSummaries,
-        summaryQueue, setSummaryQueue, // EXPOSE QUEUE
-        initialDiagnosticLog,
-        card,
-        preset,
-        persona,
-        mergedSettings,
-        isLoading,
-        error,
-        // Actions
         saveSession,
         changePreset
     };

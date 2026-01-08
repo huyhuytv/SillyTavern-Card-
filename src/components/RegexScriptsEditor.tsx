@@ -1,95 +1,9 @@
 
 import React, { useState, useCallback, useId } from 'react';
 import type { RegexScript } from '../types';
-
-const CopyButton: React.FC<{ textToCopy: string }> = ({ textToCopy }) => {
-    const [copied, setCopied] = useState(false);
-
-    const handleCopy = (e: React.MouseEvent<HTMLButtonElement>) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!textToCopy) return;
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        });
-    };
-
-    return (
-        <button
-            type="button"
-            onClick={handleCopy}
-            className="absolute top-1/2 right-2 -translate-y-1/2 p-1.5 bg-slate-500/50 hover:bg-slate-400/70 rounded-md text-slate-300 hover:text-white transition-colors"
-            aria-label="Sao chép toàn bộ nội dung"
-            title={copied ? "Đã sao chép!" : "Sao chép toàn bộ nội dung"}
-        >
-            {copied ? (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-            ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-            )}
-        </button>
-    );
-};
-
-const LabeledInput: React.FC<{ label: string; value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; }> = ({ label, value, onChange }) => {
-    const id = useId();
-    return (
-    <div>
-        <label htmlFor={id} className="block text-sm font-medium text-slate-400 mb-1">{label}</label>
-        <div className="relative">
-            <input
-                id={id}
-                type="text"
-                value={value}
-                onChange={onChange}
-                className="w-full bg-slate-600 border border-slate-500 rounded-md p-2 pr-10 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition"
-            />
-            <CopyButton textToCopy={value} />
-        </div>
-    </div>
-)};
-
-const LabeledTextarea: React.FC<{ label: string; value: string; onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void; rows?: number }> = ({ label, value, onChange, rows = 4 }) => {
-    const id = useId();
-    return (
-    <div>
-        <label htmlFor={id} className="block text-sm font-medium text-slate-400 mb-1">{label}</label>
-        <div className="relative">
-            <textarea
-                id={id}
-                value={value}
-                onChange={onChange}
-                rows={rows}
-                className="w-full bg-slate-600 border border-slate-500 rounded-md p-2 pr-10 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition font-mono text-xs"
-            />
-            <CopyButton textToCopy={value} />
-        </div>
-    </div>
-)};
-
-const ToggleInput: React.FC<{ label: string; checked: boolean; onChange: (checked: boolean) => void; "aria-label"?: string; }> = ({ label, checked, onChange, "aria-label": ariaLabel }) => (
-    <div className="flex items-center">
-        {label && <label className="text-sm font-medium text-slate-300 mr-3">{label}</label>}
-        <button
-            type="button"
-            onClick={() => onChange(!checked)}
-            className={`${
-                checked ? 'bg-sky-500' : 'bg-slate-600'
-            } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-900`}
-            role="switch"
-            aria-checked={checked}
-            aria-label={ariaLabel}
-        >
-            <span
-                aria-hidden="true"
-                className={`${
-                    checked ? 'translate-x-5' : 'translate-x-0'
-                } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
-            />
-        </button>
-    </div>
-);
+import { ToggleInput } from './ui/ToggleInput';
+import { LabeledInput } from './ui/LabeledInput';
+import { LabeledTextarea } from './ui/LabeledTextarea';
 
 interface RegexScriptItemProps {
     script: RegexScript;
@@ -109,7 +23,7 @@ const RegexScriptItem: React.FC<RegexScriptItemProps> = ({ script, index, onUpda
         <div className="bg-slate-800 rounded-lg border border-slate-700 transition-shadow">
             <div className="flex items-center p-3">
                  <div className="flex items-center gap-2 flex-shrink-0 mr-4" onClick={(e) => e.stopPropagation()}>
-                    <ToggleInput label="" checked={!script.disabled} onChange={v => handleChange('disabled', !v)} aria-label={`Bật/tắt kịch bản ${script.scriptName || 'không tên'}`} />
+                    <ToggleInput label="" checked={!script.disabled} onChange={v => handleChange('disabled', !v)} className="bg-transparent p-0" />
                 </div>
                 <div className="flex-grow cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
                     <span className={`font-medium truncate ${!script.disabled ? 'text-slate-200' : 'text-slate-500 line-through'}`}>

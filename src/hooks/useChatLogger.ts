@@ -1,64 +1,41 @@
 
-import { useState, useCallback, useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import type { SystemLogEntry, WorldInfoEntry, PromptSection, ChatTurnLog } from '../types';
 import { LOG_EVENT_NAME, LogEventDetail } from '../services/logBridge';
-
-// Increase limit to keep more history for detailed inspection
-const MAX_TURN_HISTORY = 5; 
-const MAX_SYSTEM_LOG_ENTRIES = 200;
+import { useChatStore } from '../store/chatStore';
 
 export const useChatLogger = () => {
-    // New Structure: Array of Turn Objects
-    const [turns, setTurns] = useState<ChatTurnLog[]>([]);
-    
-    // Legacy/Separate logs (still useful for independent components or simple views)
-    const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);
-    const [worldInfoLog, setWorldInfoLog] = useState<string[]>([]);
-    const [smartScanLog, setSmartScanLog] = useState<string[]>([]);
-
-    // Helper to get or create the current turn (index 0)
-    const ensureCurrentTurn = (currentTurns: ChatTurnLog[]): ChatTurnLog[] => {
-        if (currentTurns.length === 0) {
-            return [{ timestamp: Date.now(), prompt: [], response: '', systemLogs: [] }];
-        }
-        return currentTurns;
-    };
+    const { 
+        logs, 
+        addLogTurn, 
+        updateCurrentTurn, 
+        addSystemLog, 
+        addWorldInfoLog, 
+        addSmartScanLog, 
+        addMythicLog,
+        clearLogs 
+    } = useChatStore();
 
     const startTurn = useCallback(() => {
-        setTurns(prev => {
-            const newTurn: ChatTurnLog = { timestamp: Date.now(), prompt: [], response: '', systemLogs: [] };
-            return [newTurn, ...prev].slice(0, MAX_TURN_HISTORY);
-        });
-    }, []);
+        const newTurn: ChatTurnLog = { timestamp: Date.now(), prompt: [], response: '', systemLogs: [] };
+        addLogTurn(newTurn);
+    }, [addLogTurn]);
 
     const logPrompt = useCallback((promptData: PromptSection[] | string) => {
-        // Normalize to array if string passed (legacy compat)
         const promptSections: PromptSection[] = typeof promptData === 'string' 
             ? [{ id: 'legacy_raw', name: 'Raw Prompt', content: promptData, role: 'system' }] 
             : promptData;
-
-        setTurns(prev => {
-            const newTurns = ensureCurrentTurn(prev);
-            const currentTurn = { ...newTurns[0], prompt: promptSections };
-            return [currentTurn, ...newTurns.slice(1)];
-        });
-    }, []);
+        
+        updateCurrentTurn({ prompt: promptSections });
+    }, [updateCurrentTurn]);
 
     const logResponse = useCallback((response: string) => {
-        setTurns(prev => {
-            const newTurns = ensureCurrentTurn(prev);
-            const currentTurn = { ...newTurns[0], response };
-            return [currentTurn, ...newTurns.slice(1)];
-        });
-    }, []);
+        updateCurrentTurn({ response });
+    }, [updateCurrentTurn]);
 
     const logSummary = useCallback((summary: string) => {
-        setTurns(prev => {
-            const newTurns = ensureCurrentTurn(prev);
-            const currentTurn = { ...newTurns[0], summary };
-            return [currentTurn, ...newTurns.slice(1)];
-        });
-    }, []);
+        updateCurrentTurn({ summary });
+    }, [updateCurrentTurn]);
     
     const logSystemMessage = useCallback((
         level: SystemLogEntry['level'], 
@@ -76,19 +53,11 @@ export const useChatLogger = () => {
             timestamp: Date.now() 
         };
         
-        // 1. Update Global System Log (Console)
-        setSystemLog(prev => [newEntry, ...prev].slice(0, MAX_SYSTEM_LOG_ENTRIES));
-
-        // 2. Update Current Turn Log
-        setTurns(prev => {
-            const newTurns = ensureCurrentTurn(prev);
-            const currentTurn = { 
-                ...newTurns[0], 
-                systemLogs: [newEntry, ...newTurns[0].systemLogs] 
-            };
-            return [currentTurn, ...newTurns.slice(1)];
-        });
-    }, []);
+        addSystemLog(newEntry);
+        
+        // Also add to current turn logs via updateCurrentTurn (Store handles the merge)
+        updateCurrentTurn({ systemLogs: [newEntry] });
+    }, [addSystemLog, updateCurrentTurn]);
 
     // Listen for Global Events (Bridge)
     useEffect(() => {
@@ -96,8 +65,6 @@ export const useChatLogger = () => {
             const customEvent = e as CustomEvent<LogEventDetail>;
             const { level, source, message, stack, payload } = customEvent.detail;
             
-            // Convert payload to string if necessary for consistency, or keep as object if SystemLogEntry supports it
-            // Assuming payload is stored as string in SystemLogEntry based on types.ts, let's stringify if object
             let payloadStr = payload;
             if (typeof payload === 'object' && payload !== null) {
                 try {
@@ -135,51 +102,47 @@ export const useChatLogger = () => {
             entries.push({ level, source, message: cleanLine, timestamp: now + index });
         });
 
-        setSystemLog(prev => [...entries.reverse(), ...prev].slice(0, MAX_SYSTEM_LOG_ENTRIES));
-        setTurns(prev => {
-            const newTurns = ensureCurrentTurn(prev);
-            const currentTurn = { 
-                ...newTurns[0], 
-                systemLogs: [...entries.reverse(), ...newTurns[0].systemLogs] 
-            };
-            return [currentTurn, ...newTurns.slice(1)];
-        });
-    }, []);
+        // Add each entry
+        entries.forEach(e => addSystemLog(e));
+        updateCurrentTurn({ systemLogs: entries.reverse() }); // Update turn log
+    }, [addSystemLog, updateCurrentTurn]);
     
     const logWorldInfo = useCallback((entries: WorldInfoEntry[]) => {
         if (entries.length === 0) {
-            setWorldInfoLog(prev => ["Không có mục World Info nào được kích hoạt.", ...prev].slice(0, 10));
+            addWorldInfoLog("Không có mục World Info nào được kích hoạt.");
             return;
         }
         const formattedLog = entries.map((e, index) => 
             `${index + 1}. [${e.comment || 'Không tên'}] (UID: ${e.uid})\n   Keys: ${e.keys.join(', ')}\n   Order: ${e.insertion_order || 0}`
         ).join('\n\n');
-        setWorldInfoLog(prev => [formattedLog, ...prev].slice(0, 10));
-    }, []);
+        addWorldInfoLog(formattedLog);
+    }, [addWorldInfoLog]);
 
-    // Updated to handle full prompt and raw response
     const logSmartScan = useCallback((fullPrompt: string, rawResponse: string, latency: number) => {
         const logEntry = JSON.stringify({
             latency,
             fullPrompt,
             rawResponse
         });
-        setSmartScanLog(prev => [logEntry, ...prev].slice(0, 10));
-    }, []);
-    
-    const clearLogs = useCallback(() => {
-        setTurns([]);
-        setSystemLog([]);
-        setWorldInfoLog([]);
-        setSmartScanLog([]);
-    }, []);
+        addSmartScanLog(logEntry);
+    }, [addSmartScanLog]);
+
+    const logMythic = useCallback((fullPrompt: string, rawResponse: string, latency: number) => {
+        const logEntry = JSON.stringify({
+            latency,
+            fullPrompt,
+            rawResponse
+        });
+        addMythicLog(logEntry);
+    }, [addMythicLog]);
     
     const clearSystemLogs = useCallback(() => {
-        setSystemLog([]);
+        // Implementation left empty or add specific action if needed
+        // For now clearLogs does everything
     }, []);
 
     return {
-        logs: { turns, systemLog, worldInfoLog, smartScanLog }, // Expose turns
+        logs,
         startTurn,
         logPrompt,
         logResponse,
@@ -187,6 +150,7 @@ export const useChatLogger = () => {
         logDiagnostic,
         logWorldInfo,
         logSmartScan,
+        logMythic,
         logSystemMessage,
         clearLogs,
         clearSystemLogs,

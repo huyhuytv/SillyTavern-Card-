@@ -6,25 +6,20 @@ import { truncateText } from '../../utils';
 
 interface ChatInputProps {
     onSend: (text: string) => void;
+    onStop: () => void; // NEW: Receive stop action from parent
     isLoading: boolean;
     isImmersive: boolean;
     quickReplies: QuickReply[];
     onQuickReplyClick: (reply: QuickReply) => void;
-    // New Props
     scriptButtons?: ScriptButton[];
     onScriptButtonClick?: (btn: ScriptButton) => void;
-    
     authorNote?: string;
     onUpdateAuthorNote: (note: string) => void;
-    isSummarizing: boolean; // Also acts as queue lock
+    isSummarizing: boolean; 
     isInputLocked?: boolean; 
     children?: React.ReactNode;
-    
-    // NEW: Auto Loop Props
     isAutoLooping?: boolean;
     onToggleAutoLoop?: () => void;
-    
-    // NEW: Queue info (optional for now, can infer from isSummarizing but explicit count is nice)
     queueLength?: number;
 }
 
@@ -44,6 +39,7 @@ const AVAILABLE_COMMANDS = [
 
 export const ChatInput: React.FC<ChatInputProps> = ({
     onSend,
+    onStop,
     isLoading,
     isImmersive,
     quickReplies,
@@ -64,8 +60,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     const [filteredCommands, setFilteredCommands] = useState(AVAILABLE_COMMANDS);
     const [selectedCmdIndex, setSelectedCmdIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
-
-    // Listen for input updates from interactive cards (e.g. Landlord Sim buttons)
+    
     useEffect(() => {
         const handleSetInput = (e: Event) => {
             const customEvent = e as CustomEvent;
@@ -83,7 +78,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             const searchTerm = userInput.toLowerCase();
             const matches = AVAILABLE_COMMANDS.filter(c => c.cmd.startsWith(searchTerm));
             setFilteredCommands(matches);
-            setShowSuggestions(matches.length > 0 && userInput !== matches[0].cmd); // Hide if exact match
+            setShowSuggestions(matches.length > 0 && userInput !== matches[0].cmd); 
             setSelectedCmdIndex(0);
         } else {
             setShowSuggestions(false);
@@ -91,21 +86,26 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }, [userInput]);
 
     const handleSelectCommand = (cmd: string, example?: string) => {
-        setUserInput(example ? `${cmd} ` : cmd); // Auto add space if it needs args usually
+        setUserInput(example ? `${cmd} ` : cmd); 
         setShowSuggestions(false);
         inputRef.current?.focus();
     };
 
     const handleSubmit = (e: FormEvent) => {
         e.preventDefault();
-        // If looping is on, hitting enter might stop it? Or just send message.
+        
+        // Handle STOP Action
+        if (isLoading) {
+            onStop();
+            return;
+        }
+
         if (isAutoLooping && onToggleAutoLoop) {
              onToggleAutoLoop(); 
              return;
         }
 
-        // Prevent send if summarizing queue is active
-        if (!userInput.trim() || isLoading || isInputLocked || isSummarizing) return;
+        if (!userInput.trim() || isInputLocked || isSummarizing) return;
         onSend(userInput);
         setUserInput('');
         setShowSuggestions(false);
@@ -139,7 +139,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
          ? "p-4 md:p-6 w-full max-w-5xl mx-auto"
          : "p-4 md:p-6";
 
-    // Determine Queue Message
     const queueMessage = queueLength && queueLength > 0 
         ? `Đang tóm tắt... Còn ${queueLength} phần.` 
         : "Đang tóm tắt...";
@@ -257,36 +256,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                             aria-label="Chat input"
                             autoComplete="off"
                         />
-                        {(isInputLocked || isSummarizing) && (
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                                </svg>
-                            </div>
-                        )}
-                        {/* Auto Loop Indicator in Input (Optional) */}
-                        {isAutoLooping && (
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-sky-400 animate-pulse">
-                                <span className="text-xl">♾️</span>
-                            </div>
-                        )}
                     </div>
                     
                     {/* Send / Stop Button */}
                     <button
                         type="submit"
-                        disabled={!isAutoLooping && (isLoading || isInputLocked || !userInput.trim() || isSummarizing)}
+                        disabled={!isAutoLooping && !isLoading && (isInputLocked || !userInput.trim() || isSummarizing)}
                         className={`text-white font-bold py-2 px-5 rounded-lg transition-colors duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed flex-shrink-0 flex items-center justify-center gap-2 min-w-[80px] ${
                             isImmersive 
                             ? 'bg-sky-600/80 hover:bg-sky-600 backdrop-blur-md' 
-                            : isAutoLooping ? 'bg-red-600 hover:bg-red-700' : 'bg-sky-600 hover:bg-sky-700'
+                            : (isAutoLooping || isLoading) ? 'bg-red-600 hover:bg-red-700' : 'bg-sky-600 hover:bg-sky-700'
                         }`}
-                        aria-label={isAutoLooping ? "Dừng tự động" : "Gửi tin nhắn"}
-                        title={isAutoLooping ? "Dừng chạy tự động" : "Gửi tin nhắn"}
+                        aria-label={(isAutoLooping || isLoading) ? "Dừng lại" : "Gửi tin nhắn"}
                     >
-                        {isAutoLooping ? (
+                        {(isAutoLooping || isLoading) ? (
                             <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
                                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
                                 </svg>
                                 <span>Dừng</span>
@@ -296,8 +281,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                         )}
                     </button>
 
-                    {/* Auto Loop Toggle Button (Small) */}
-                    {onToggleAutoLoop && !isInputLocked && !isSummarizing && (
+                    {/* Auto Loop Toggle Button */}
+                    {onToggleAutoLoop && !isInputLocked && !isSummarizing && !isLoading && (
                         <button
                             type="button"
                             onClick={onToggleAutoLoop}
@@ -306,14 +291,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                                 ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.3)]' 
                                 : 'bg-slate-700 border-slate-600 text-slate-400 hover:bg-slate-600 hover:text-white'
                             }`}
-                            title={isAutoLooping ? "Tắt chế độ tự động (Auto-Play)" : "Bật chế độ tự động (Auto-Play)"}
+                            title="Tự động chạy (Auto-Play)"
                         >
                             <span className={`text-xl leading-none ${isAutoLooping ? 'animate-pulse' : ''}`}>♾️</span>
                         </button>
                     )}
                 </form>
                 
-                {/* Footer Content (DebugPanel, etc.) */}
                 {children}
             </div>
         </div>

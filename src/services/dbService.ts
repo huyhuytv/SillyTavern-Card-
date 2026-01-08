@@ -1,5 +1,5 @@
-import type { CharacterCard, Lorebook, SillyTavernPreset, ChatSession, UserPersona } from '../types';
-import type { CharacterInContext } from '../contexts/CharacterContext';
+
+import type { CharacterCard, Lorebook, SillyTavernPreset, ChatSession, UserPersona, CharacterInContext } from '../types';
 
 const DB_NAME = 'SillyTavernCardStudioDB';
 const DB_VERSION = 6; // Tăng phiên bản để kích hoạt onupgradeneeded

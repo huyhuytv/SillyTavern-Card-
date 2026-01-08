@@ -1,72 +1,14 @@
 
-import React, { useId } from 'react';
+import React from 'react';
 import type { SillyTavernPreset } from '../types';
-import { Tooltip } from './Tooltip';
+import { SliderInput } from './ui/SliderInput';
+import { SelectInput } from './ui/SelectInput';
+import { LabeledTextarea } from './ui/LabeledTextarea';
 
 interface SmartContextSettingsProps {
     preset: SillyTavernPreset;
     onUpdate: (updatedPreset: SillyTavernPreset) => void;
 }
-
-const SliderInput: React.FC<{ label: string; value: number; onChange: (value: number) => void; min: number; max: number; step: number; tooltipText?: string }> = ({ label, value, onChange, min, max, step, tooltipText }) => {
-    const id = useId();
-    return (
-    <div>
-        <Tooltip text={tooltipText || ''}>
-            <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1 cursor-help">{label}</label>
-        </Tooltip>
-        <div className="flex items-center gap-4">
-            <input
-                id={id}
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={value}
-                onChange={(e) => onChange(parseFloat(e.target.value))}
-                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-sky-500"
-            />
-            <span className="w-12 text-right font-mono text-sm text-slate-200">{value}</span>
-        </div>
-    </div>
-)};
-
-const SelectInput: React.FC<{ label: string; value: string; onChange: (value: string) => void; options: { value: string; label: string }[]; tooltipText?: string }> = ({ label, value, onChange, options, tooltipText }) => {
-    const id = useId();
-    return (
-    <div>
-        <Tooltip text={tooltipText || ''}>
-            <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1 cursor-help">{label}</label>
-        </Tooltip>
-        <select
-            id={id}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition"
-        >
-            {options.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-        </select>
-    </div>
-)};
-
-const LabeledTextarea: React.FC<{ label: string; value: string; onChange: (value: string) => void; rows?: number, tooltipText?: string }> = ({ label, value, onChange, rows=6, tooltipText }) => {
-    const id = useId();
-    return (
-    <div>
-        <Tooltip text={tooltipText || ''}>
-            <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1 cursor-help">{label}</label>
-        </Tooltip>
-        <textarea
-            id={id}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            rows={rows}
-            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition font-sans text-sm"
-        />
-    </div>
-)};
 
 export const SmartContextSettings: React.FC<SmartContextSettingsProps> = ({ preset, onUpdate }) => {
     
@@ -95,7 +37,7 @@ export const SmartContextSettings: React.FC<SmartContextSettingsProps> = ({ pres
                         min={4}
                         max={100}
                         step={2}
-                        tooltipText="Khi số LƯỢT (Turns) chưa tóm tắt đạt đến ngưỡng này, hệ thống sẽ kích hoạt tóm tắt. (Ví dụ: 20 lượt)."
+                        tooltip="Khi số LƯỢT (Turns) chưa tóm tắt đạt đến ngưỡng này, hệ thống sẽ kích hoạt tóm tắt. (Ví dụ: 20 lượt)."
                     />
 
                     <SliderInput
@@ -105,18 +47,18 @@ export const SmartContextSettings: React.FC<SmartContextSettingsProps> = ({ pres
                         min={1}
                         max={preset.context_depth || 20}
                         step={1}
-                        tooltipText="Số LƯỢT (Turns) CŨ NHẤT sẽ được cắt ra để tóm tắt mỗi lần kích hoạt. (Ví dụ: Cắt 10 lượt cũ nhất, giữ lại 10 lượt mới nhất làm ngữ cảnh)."
+                        tooltip="Số LƯỢT (Turns) CŨ NHẤT sẽ được cắt ra để tóm tắt mỗi lần kích hoạt. (Ví dụ: Cắt 10 lượt cũ nhất, giữ lại 10 lượt mới nhất làm ngữ cảnh)."
                     />
 
                     <SelectInput 
                         label="Chế độ Ghép nối Lịch sử"
                         value={preset.context_mode || 'standard'}
-                        onChange={(v) => handleUpdate('context_mode', v)}
+                        onChange={(e) => handleUpdate('context_mode', e.target.value)}
                         options={[
                             { value: 'standard', label: 'Tiêu chuẩn (Cả User & AI)' },
                             { value: 'ai_only', label: 'Chế độ Tự thuật (Chỉ AI)' }
                         ]}
-                        tooltipText="'Tiêu chuẩn': Gửi toàn bộ hội thoại. 'Chế độ Tự thuật': Chỉ gửi các phản hồi của AI trong phần lịch sử, bỏ qua lời thoại của bạn để tạo cảm giác tiểu thuyết liền mạch và tiết kiệm token."
+                        tooltip="'Tiêu chuẩn': Gửi toàn bộ hội thoại. 'Chế độ Tự thuật': Chỉ gửi các phản hồi của AI trong phần lịch sử, bỏ qua lời thoại của bạn để tạo cảm giác tiểu thuyết liền mạch và tiết kiệm token."
                     />
                 </div>
 
@@ -124,9 +66,9 @@ export const SmartContextSettings: React.FC<SmartContextSettingsProps> = ({ pres
                     <LabeledTextarea 
                         label="Lời nhắc Tóm tắt (Summarization Prompt)"
                         value={preset.summarization_prompt || ''}
-                        onChange={(v) => handleUpdate('summarization_prompt', v)}
+                        onChange={(e) => handleUpdate('summarization_prompt', e.target.value)}
                         rows={10}
-                        tooltipText="Hướng dẫn cho 'Thư Ký Ghi Chép'. AI sẽ sử dụng lời nhắc này để tóm tắt các đoạn hội thoại cũ thành Trí nhớ Dài hạn. Sử dụng {{chat_history_slice}} để chèn đoạn hội thoại cần tóm tắt."
+                        tooltip="Hướng dẫn cho 'Thư Ký Ghi Chép'. AI sẽ sử dụng lời nhắc này để tóm tắt các đoạn hội thoại cũ thành Trí nhớ Dài hạn. Sử dụng {{chat_history_slice}} để chèn đoạn hội thoại cần tóm tắt."
                     />
                     <p className="text-xs text-slate-500 italic">
                         * Lời nhắc này được sử dụng khi lịch sử trò chuyện vượt quá "Độ sâu Cửa sổ Nhớ".

@@ -1,74 +1,16 @@
 
-import React, { useState, useId } from 'react';
+import React, { useState } from 'react';
 import type { SillyTavernPreset } from '../types';
-import { Tooltip } from './Tooltip';
 import { MODEL_OPTIONS } from '../services/settingsService';
 import defaultPreset from '../data/defaultPreset';
+import { SelectInput } from './ui/SelectInput';
+import { SliderInput } from './ui/SliderInput';
+import { LabeledTextarea } from './ui/LabeledTextarea';
 
 interface SmartScanSettingsProps {
     preset: SillyTavernPreset;
     onUpdate: (updatedPreset: SillyTavernPreset) => void;
 }
-
-const SelectInput: React.FC<{ label: string; value: string; onChange: (value: string) => void; options: { id: string; name: string }[]; tooltipText?: string }> = ({ label, value, onChange, options, tooltipText }) => {
-    const id = useId();
-    return (
-    <div>
-        <Tooltip text={tooltipText || ''}>
-            <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1 cursor-help">{label}</label>
-        </Tooltip>
-        <select
-            id={id}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition"
-        >
-            {options.map(opt => (
-                <option key={opt.id} value={opt.id}>{opt.name}</option>
-            ))}
-        </select>
-    </div>
-)};
-
-const SliderInput: React.FC<{ label: string; value: number; onChange: (value: number) => void; min: number; max: number; step: number; tooltipText?: string }> = ({ label, value, onChange, min, max, step, tooltipText }) => {
-    const id = useId();
-    return (
-    <div>
-        <Tooltip text={tooltipText || ''}>
-            <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1 cursor-help">{label}</label>
-        </Tooltip>
-        <div className="flex items-center gap-4">
-            <input
-                id={id}
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={value}
-                onChange={(e) => onChange(parseFloat(e.target.value))}
-                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-sky-500"
-            />
-            <span className="w-12 text-right font-mono text-sm text-slate-200">{value}</span>
-        </div>
-    </div>
-)};
-
-const LabeledTextarea: React.FC<{ label: string; value: string; onChange: (value: string) => void; rows?: number, tooltipText?: string }> = ({ label, value, onChange, rows=6, tooltipText }) => {
-    const id = useId();
-    return (
-    <div>
-        <Tooltip text={tooltipText || ''}>
-            <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1 cursor-help">{label}</label>
-        </Tooltip>
-        <textarea
-            id={id}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            rows={rows}
-            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition font-mono text-xs"
-        />
-    </div>
-)};
 
 export const SmartScanSettings: React.FC<SmartScanSettingsProps> = ({ preset, onUpdate }) => {
     const [showPromptEditor, setShowPromptEditor] = useState(false);
@@ -102,13 +44,13 @@ export const SmartScanSettings: React.FC<SmartScanSettingsProps> = ({ preset, on
             <SelectInput 
                 label="Chế độ Quét (Scan Mode)"
                 value={currentMode}
-                onChange={(v) => handleUpdate('smart_scan_mode', v)}
+                onChange={(e) => handleUpdate('smart_scan_mode', e.target.value)}
                 options={[
-                    { id: 'keyword', name: '1. Quét Thủ công (Keyword Only)' },
-                    { id: 'hybrid', name: '2. Kết hợp (Manual + AI)' },
-                    { id: 'ai_only', name: '3. AI Toàn Quyền (AI Only)' }
+                    { value: 'keyword', label: '1. Quét Thủ công (Keyword Only)' },
+                    { value: 'hybrid', label: '2. Kết hợp (Manual + AI)' },
+                    { value: 'ai_only', label: '3. AI Toàn Quyền (AI Only)' }
                 ]}
-                tooltipText={
+                tooltip={
                     currentMode === 'keyword' ? "Chỉ kích hoạt các mục khớp chính xác từ khóa/Regex được định nghĩa trong thẻ." :
                     currentMode === 'hybrid' ? "Kích hoạt bằng từ khóa VÀ bổ sung thêm các mục liên quan theo ngữ cảnh do AI phát hiện." :
                     "Bỏ qua từ khóa và thời gian hồi chiêu (Cooldown). AI sẽ tự quyết định toàn bộ các mục cần thiết dựa trên ngữ cảnh."
@@ -119,9 +61,9 @@ export const SmartScanSettings: React.FC<SmartScanSettingsProps> = ({ preset, on
                 <SelectInput 
                     label="Mô hình Quét (Khuyên dùng Flash)"
                     value={preset.smart_scan_model || 'gemini-2.5-flash'}
-                    onChange={(v) => handleUpdate('smart_scan_model', v)}
-                    options={MODEL_OPTIONS}
-                    tooltipText="Chọn mô hình AI để thực hiện việc quét. Gemini Flash nhanh và rẻ, phù hợp nhất cho tác vụ này."
+                    onChange={(e) => handleUpdate('smart_scan_model', e.target.value)}
+                    options={MODEL_OPTIONS.map(opt => ({ value: opt.id, label: opt.name }))}
+                    tooltip="Chọn mô hình AI để thực hiện việc quét. Gemini Flash nhanh và rẻ, phù hợp nhất cho tác vụ này."
                 />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -132,7 +74,7 @@ export const SmartScanSettings: React.FC<SmartScanSettingsProps> = ({ preset, on
                         min={1}
                         max={10}
                         step={1}
-                        tooltipText="Số lượng tin nhắn gần nhất trong lịch sử trò chuyện sẽ được gửi cho AI để phân tích ngữ cảnh."
+                        tooltip="Số lượng tin nhắn gần nhất trong lịch sử trò chuyện sẽ được gửi cho AI để phân tích ngữ cảnh."
                     />
 
                     <SliderInput
@@ -142,7 +84,7 @@ export const SmartScanSettings: React.FC<SmartScanSettingsProps> = ({ preset, on
                         min={1}
                         max={20}
                         step={1}
-                        tooltipText="Số lượng mục World Info tối đa mà AI được phép kích hoạt thêm trong mỗi lượt."
+                        tooltip="Số lượng mục World Info tối đa mà AI được phép kích hoạt thêm trong mỗi lượt."
                     />
                 </div>
 
@@ -172,9 +114,9 @@ export const SmartScanSettings: React.FC<SmartScanSettingsProps> = ({ preset, on
                             <LabeledTextarea 
                                 label="Nội dung Prompt"
                                 value={preset.smart_scan_system_prompt || defaultPreset.smart_scan_system_prompt || ''}
-                                onChange={(v) => handleUpdate('smart_scan_system_prompt', v)}
+                                onChange={(e) => handleUpdate('smart_scan_system_prompt', e.target.value)}
                                 rows={15}
-                                tooltipText="Tùy chỉnh cách AI suy nghĩ và lựa chọn thông tin. Đảm bảo giữ lại định dạng Output JSON."
+                                tooltip="Tùy chỉnh cách AI suy nghĩ và lựa chọn thông tin. Đảm bảo giữ lại định dạng Output JSON."
                             />
                             
                             <div className="flex justify-end">

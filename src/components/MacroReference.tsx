@@ -10,6 +10,7 @@ const macroData = [
   { name: '{{last_turn}}', description: 'Ngữ cảnh tức thời: Chèn lượt trao đổi ngay trước đó.' },
   { name: '{{author_note}}', description: 'Chèn Ghi chú của Tác giả bền bỉ từ cài đặt phiên trò chuyện.' },
   { name: '{{smart_state_block}}', description: 'Thông minh chèn <LogicStore> (Biến số) và <VisualInterface> (HTML State) nếu chúng tồn tại. Tự động ẩn nếu không có dữ liệu.' },
+  { name: '{{mythic_database}}', description: 'Chèn toàn bộ bảng dữ liệu RPG (Mythic Engine) dưới dạng Markdown.' },
   { name: '{{worldInfo_before}}', description: 'Chèn các mục World Info được cấu hình ở vị trí "Đầu" (Thường là Quy tắc, Bối cảnh chung).' },
   { name: '{{worldInfo_after}}', description: 'Chèn các mục World Info được cấu hình ở vị trí "Cuối" (Thường là Ngữ cảnh cụ thể, Trạng thái, Đồ vật).' },
   { name: '{{worldInfo}}', description: 'Chèn toàn bộ các mục World Info đã được bật (Gộp cả Before và After - Dùng cho tương thích ngược).' },

@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import type { SystemLogEntry, ChatTurnLog, PromptSection, SummaryQueueItem } from '../../types';
+import { CopyButton } from '../ui/CopyButton';
 
 interface SummaryStats {
     messageCount: number;
@@ -16,6 +17,7 @@ interface DebugPanelProps {
         systemLog: SystemLogEntry[];
         smartScanLog: string[];
         worldInfoLog: string[];
+        mythicLog: string[]; // NEW
     };
     onClearLogs: () => void;
     onInspectState: () => void;
@@ -33,26 +35,6 @@ interface DebugPanelProps {
     onRetryFailedTask?: () => Promise<void>; // NEW: Retry Function
 }
 
-const CopyButton: React.FC<{ textToCopy: string, label?: string }> = ({ textToCopy, label = 'Sao chép' }) => {
-    const [copied, setCopied] = useState(false);
-    const handleCopy = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!textToCopy) return;
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-        });
-    };
-    return (
-        <button 
-            onClick={handleCopy}
-            className="text-[10px] text-slate-400 hover:text-sky-400 bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded transition-colors border border-slate-700 flex-shrink-0 focus:ring-1 focus:ring-sky-500 focus:outline-none"
-        >
-            {copied ? 'Đã chép!' : label}
-        </button>
-    );
-};
-
 const PromptBlock: React.FC<{ section: PromptSection }> = ({ section }) => {
     // Use subSections if available (for World Info explotion), otherwise default logic
     const hasSubSections = section.subSections && section.subSections.length > 0;
@@ -61,7 +43,7 @@ const PromptBlock: React.FC<{ section: PromptSection }> = ({ section }) => {
 
     // Logic tự động phát hiện chế độ hiển thị dựa trên tên tiêu đề (cho các mục không có subSections)
     const isListMode = useMemo(() => {
-        const keywords = ['World Info', 'Lore', 'Book', 'Replacement', 'Stop Strings', 'Author Note'];
+        const keywords = ['World Info', 'Lore', 'Book', 'Replacement', 'Stop Strings', 'Author Note', 'Dữ liệu tham khảo'];
         return keywords.some(k => section.name.toLowerCase().includes(k.toLowerCase()));
     }, [section.name]);
 
@@ -84,10 +66,11 @@ const PromptBlock: React.FC<{ section: PromptSection }> = ({ section }) => {
                 <div className="flex items-center gap-2 overflow-hidden">
                     <h4 className="text-xs font-bold text-violet-300 truncate" title={section.name}>
                         {section.name} 
-                        {hasSubSections && <span className="ml-2 text-[9px] text-emerald-400 font-normal border border-emerald-800 px-1 rounded bg-emerald-900/30">Expanded View</span>}
+                        {hasSubSections && <span className="ml-2 text-[9px] text-emerald-400 font-normal border border-emerald-800 px-1 rounded bg-emerald-900/30">Expanded View ({section.subSections?.length})</span>}
                         {!hasSubSections && isListMode && <span className="ml-2 text-[9px] text-slate-500 font-normal border border-slate-700 px-1 rounded bg-slate-900">List Mode</span>}
                     </h4>
                 </div>
+                <CopyButton textToCopy={section.content} absolute={false} />
             </div>
             
             <div className="p-2 flex flex-col gap-1 bg-slate-900/30 max-h-[400px] overflow-y-auto custom-scrollbar group">
@@ -260,7 +243,7 @@ const WorldInfoLogView: React.FC<{ logs: string[] }> = ({ logs }) => {
                 logs.map((log, idx) => (
                     <div key={idx} className="bg-slate-900/30 border border-slate-700/50 rounded-lg p-3">
                         <div className="flex justify-end mb-1">
-                            <CopyButton textToCopy={log} label="Copy" />
+                            <CopyButton textToCopy={log} label="Copy" absolute={false} />
                         </div>
                         <pre className="text-[10px] text-emerald-300 font-mono whitespace-pre-wrap break-words">{log}</pre>
                     </div>
@@ -299,7 +282,7 @@ const SmartScanLogView: React.FC<{ logs: string[] }> = ({ logs }) => {
                                 </summary>
                                 <div className="relative mt-1">
                                     <div className="absolute top-1 right-1 z-10">
-                                        <CopyButton textToCopy={parsedLog.fullPrompt} />
+                                        <CopyButton textToCopy={parsedLog.fullPrompt} absolute={false} />
                                     </div>
                                     <pre className="text-[9px] text-slate-300 font-mono whitespace-pre-wrap break-words bg-black/20 p-2 rounded border border-slate-700/50 max-h-40 overflow-y-auto custom-scrollbar">
                                         {parsedLog.fullPrompt}
@@ -310,9 +293,124 @@ const SmartScanLogView: React.FC<{ logs: string[] }> = ({ logs }) => {
                             <div className="relative">
                                 <div className="flex justify-between items-center mb-1">
                                     <span className="text-[10px] text-green-400 font-bold">📥 Phản hồi Thô (AI Response)</span>
-                                    <CopyButton textToCopy={parsedLog.rawResponse} label="Copy JSON" />
+                                    <CopyButton textToCopy={parsedLog.rawResponse} label="Copy JSON" absolute={false} />
                                 </div>
                                 <pre className="text-[10px] text-indigo-200 font-mono whitespace-pre-wrap break-words bg-black/20 p-2 rounded border border-indigo-500/20">
+                                    {parsedLog.rawResponse}
+                                </pre>
+                            </div>
+                        </div>
+                    );
+                })
+            )}
+        </div>
+    );
+}
+
+// --- 8. Mythic Engine Logs (UPDATED with STRUCTURED PARSER) ---
+
+// Helper Parser
+const parseMythicPrompt = (fullText: string): PromptSection[] => {
+    const sections: PromptSection[] = [];
+    
+    // 1. System Instructions (Start to Schema)
+    const schemaStart = fullText.indexOf('<Cấu trúc bảng & Luật lệ>');
+    if (schemaStart === -1) {
+        // Fallback: No structure found, return whole text as one section
+        return [{ id: 'mythic_raw', name: 'Raw Prompt (Unstructured)', content: fullText, role: 'system' }];
+    }
+
+    const systemContent = fullText.substring(0, schemaStart).trim();
+    if (systemContent) {
+        sections.push({ id: 'mythic_system', name: '🎛️ System Instructions (Chỉ dẫn)', content: systemContent, role: 'system' });
+    }
+
+    // 2. Schema
+    const schemaMatch = fullText.match(/<Cấu trúc bảng & Luật lệ>([\s\S]*?)<\/Cấu trúc bảng & Luật lệ>/);
+    if (schemaMatch) {
+        sections.push({ id: 'mythic_schema', name: '📐 Schema & Rules (Cấu trúc bảng)', content: schemaMatch[1].trim(), role: 'system' });
+    }
+
+    // 3. Lorebook (with Splitting)
+    const loreMatch = fullText.match(/<Dữ liệu tham khảo \(Lorebook\)>([\s\S]*?)<\/Dữ liệu tham khảo \(Lorebook\)>/);
+    if (loreMatch) {
+        const rawLore = loreMatch[1].trim();
+        const entries = rawLore.split('### [Lore:').filter(Boolean).map(e => '### [Lore:' + e);
+        
+        sections.push({ 
+            id: 'mythic_lore', 
+            name: '📚 Lorebook Reference (Dữ liệu tham khảo)', 
+            content: rawLore, 
+            role: 'system',
+            subSections: entries.length > 0 ? entries : undefined
+        });
+    }
+
+    // 4. Current Data
+    const dataMatch = fullText.match(/<Dữ liệu bảng hiện tại>([\s\S]*?)<\/Dữ liệu bảng hiện tại>/);
+    if (dataMatch) {
+        sections.push({ id: 'mythic_data', name: '💾 Current Database (Dữ liệu hiện tại)', content: dataMatch[1].trim(), role: 'system' });
+    }
+
+    // 5. Chat History
+    const chatMatch = fullText.match(/<Dữ liệu chính văn>([\s\S]*?)<\/Dữ liệu chính văn>/);
+    if (chatMatch) {
+        sections.push({ id: 'mythic_chat', name: '💬 Chat Context (Chính văn)', content: chatMatch[1].trim(), role: 'system' });
+    }
+
+    // 6. Global Rules
+    const globalMatch = fullText.match(/LUẬT CHUNG:([\s\S]*)$/);
+    if (globalMatch) {
+        sections.push({ id: 'mythic_global', name: '⚖️ Global Rules (Luật chung)', content: globalMatch[1].trim(), role: 'system' });
+    }
+
+    return sections;
+};
+
+const MythicLogView: React.FC<{ logs: string[] }> = ({ logs }) => {
+    return (
+        <div className="space-y-4">
+            {logs.length === 0 ? (
+                <div className="p-4 text-center text-slate-600 italic text-xs bg-slate-900/30 rounded-lg border border-slate-800">Chưa có dữ liệu Mythic Engine.</div>
+            ) : (
+                logs.map((logString, idx) => {
+                    let parsedLog = { latency: 0, fullPrompt: '', rawResponse: '' };
+                    try {
+                        parsedLog = JSON.parse(logString);
+                    } catch (e) {
+                        parsedLog.fullPrompt = logString;
+                    }
+
+                    // Parse the huge prompt into sections
+                    const structuredPrompt = parseMythicPrompt(parsedLog.fullPrompt);
+
+                    return (
+                        <div key={idx} className="bg-slate-900/30 border border-rose-500/20 rounded-lg p-3">
+                            <div className="flex justify-between items-center mb-2 border-b border-rose-500/20 pb-2">
+                                <span className="text-xs font-bold text-rose-400">Medusa Cycle #{logs.length - idx} <span className="text-slate-500 font-normal">({parsedLog.latency}ms)</span></span>
+                            </div>
+                            
+                            <details className="mb-2 group">
+                                <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-sky-400 font-bold mb-1 flex items-center gap-2">
+                                    <span>📤 Lời nhắc Gửi đi (Outgoing Prompt)</span>
+                                    <span className="transform group-open:rotate-90 transition-transform text-[8px]" aria-hidden="true">▶</span>
+                                </summary>
+                                <div className="mt-2 space-y-2 pl-2 border-l border-slate-800">
+                                    <div className="flex justify-end">
+                                        <CopyButton textToCopy={parsedLog.fullPrompt} label="Copy Toàn bộ" absolute={false} />
+                                    </div>
+                                    {structuredPrompt.map((section) => (
+                                        <PromptBlock key={section.id} section={section} />
+                                    ))}
+                                </div>
+                            </details>
+
+                            <div className="relative">
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-[10px] text-orange-400 font-bold">📥 Phản hồi Thô (AI Response)</span>
+                                    <CopyButton textToCopy={parsedLog.rawResponse} label="Copy" absolute={false} />
+                                </div>
+                                <pre className="text-[10px] text-orange-100 font-mono whitespace-pre-wrap break-words bg-black/20 p-2 rounded border border-rose-500/20 max-h-60 overflow-y-auto custom-scrollbar">
                                     {parsedLog.rawResponse}
                                 </pre>
                             </div>
@@ -345,7 +443,7 @@ const PromptsView: React.FC<{ turns: ChatTurnLog[] }> = ({ turns }) => {
                         </summary>
                         <div className="p-3 space-y-2 border-t border-slate-700/50">
                              <div className="flex justify-end mb-2">
-                                 <CopyButton textToCopy={turn.prompt.map(p => p.content).join('\n\n')} label="Sao chép tất cả" />
+                                 <CopyButton textToCopy={turn.prompt.map(p => p.content).join('\n\n')} label="Sao chép tất cả" absolute={false} />
                              </div>
                             {turn.prompt.length === 0 ? (
                                 <p className="text-xs text-slate-600 italic">Không có dữ liệu prompt.</p>
@@ -380,7 +478,7 @@ const ResponsesView: React.FC<{ turns: ChatTurnLog[] }> = ({ turns }) => {
                         </summary>
                         <div className="p-3 border-t border-slate-700/50 relative">
                             <div className="absolute top-3 right-3 z-10">
-                                <CopyButton textToCopy={turn.response} />
+                                <CopyButton textToCopy={turn.response} absolute={true} />
                             </div>
                             <pre className="bg-slate-950 p-3 rounded border border-slate-800 text-[10px] font-mono text-slate-300 whitespace-pre-wrap break-words">
                                 {turn.response || '(Chưa có phản hồi)'}
@@ -544,7 +642,7 @@ const SummariesView: React.FC<{
                         </summary>
                         <div className="p-3 border-t border-slate-700/50 relative">
                              <div className="absolute top-3 right-3 z-10 flex gap-1">
-                                <CopyButton textToCopy={summaryContent || ''} />
+                                <CopyButton textToCopy={summaryContent || ''} absolute={true} />
                             </div>
                             <div className="bg-amber-900/10 border border-amber-900/30 p-3 rounded mb-2">
                                 <p className="text-[10px] text-slate-300 leading-relaxed whitespace-pre-wrap">{summaryContent}</p>
@@ -614,7 +712,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                 </svg>
             </button>
 
-            {/* Body: Linear Layout with 7 Sections */}
+            {/* Body: Linear Layout with 8 Sections */}
             {isExpanded && (
                 <div className="bg-slate-900/50 border-x border-b border-slate-800 rounded-b-lg p-2 animate-fade-in-up max-h-[70vh] overflow-y-auto custom-scrollbar">
                     
@@ -666,7 +764,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                         <ResponsesView turns={logs.turns} />
                     </div>
 
-                    {/* Section 7: Summaries (ENHANCED) */}
+                    {/* Section 7: Summaries */}
                     <div className="mb-6">
                         <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2 border-b border-amber-500/20 pb-1 flex items-center gap-2">
                             <span>7. Tóm tắt (Summaries)</span>
@@ -680,6 +778,14 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                             onRegenerate={onRegenerateSummary}
                             onRetry={onRetryFailedTask} // Pass Retry
                         />
+                    </div>
+
+                    {/* Section 8: Mythic Engine (NEW) */}
+                    <div className="mb-6">
+                        <h3 className="text-xs font-bold text-rose-400 uppercase tracking-wider mb-2 border-b border-rose-500/20 pb-1 flex items-center gap-2">
+                            <span>8. Nhật ký Mythic Engine (RPG)</span>
+                        </h3>
+                        <MythicLogView logs={logs.mythicLog} />
                     </div>
 
                 </div>

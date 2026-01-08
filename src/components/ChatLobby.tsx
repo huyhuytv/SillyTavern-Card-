@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { ChatSession, ChatMessage, WorldInfoEntry, SillyTavernPreset } from '../types';
+import type { ChatSession, ChatMessage, WorldInfoEntry, SillyTavernPreset, CharacterInContext } from '../types';
 import * as dbService from '../services/dbService';
-import { useCharacter, CharacterInContext } from '../contexts/CharacterContext';
+import { useCharacter } from '../contexts/CharacterContext';
 import { usePreset } from '../contexts/PresetContext';
 import { useUserPersona } from '../contexts/UserPersonaContext';
 import { Loader } from './Loader';
@@ -295,7 +295,7 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
 
         try {
             // Need to manually trigger download here since createSnapshot handles it internally with logic that doesn't easily accept filename override
-            // But actually createSnapshot handles the blob creation. I should modify it or just copy its logic here to use the filename.
+            // But actually createSnapshot handles the blob creation. I should modify it or just copy its logic here.
             // For now, I'll assume createSnapshot *forces* a name, I need to update it or reimplement it here briefly.
             // RE-IMPLEMENTATION for Custom Name:
             

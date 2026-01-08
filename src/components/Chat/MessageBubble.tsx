@@ -55,7 +55,7 @@ export const MessageMenu: React.FC<{
                 className="p-1 rounded-full text-slate-400 hover:bg-slate-600 hover:text-white transition-colors"
                 aria-haspopup="true"
                 aria-expanded={isOpen}
-                aria-label="Message options"
+                aria-label="Tùy chọn tin nhắn"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                     <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
@@ -292,6 +292,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                                 'bg-slate-800 text-slate-400 border-slate-600 hover:text-sky-400 hover:border-sky-500'
                             }`}
                             title={isPlayingThis ? "Đang đọc..." : "Đọc tin nhắn (TTS)"}
+                            aria-label={isPlayingThis ? "Đang đọc tin nhắn" : "Đọc tin nhắn này"}
                         >
                             {isPlayingThis ? (
                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">

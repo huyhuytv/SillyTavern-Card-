@@ -71,6 +71,45 @@ const getMessageIndexFromTurns = (messages: ChatMessage[], turnsToSkip: number):
 };
 
 /**
+ * Helper: Format RPG Database to Markdown Table string
+ */
+const formatRpgData = (rpgData: any): string => {
+    if (!rpgData || !rpgData.tables || !Array.isArray(rpgData.tables)) return '';
+    
+    let output = '';
+    
+    for (const table of rpgData.tables) {
+        // Skip tables with no columns or missing config
+        if (!table.config || !table.config.columns || table.config.columns.length === 0) continue;
+        
+        // Skip empty tables to save tokens (Optional logic, can be changed if schema is needed empty)
+        if (!table.data || !table.data.rows || table.data.rows.length === 0) continue;
+        
+        output += `### ${table.config.name}\n`;
+        
+        // Markdown Table Header
+        const headers = table.config.columns.map((c: any) => c.label);
+        output += `| ${headers.join(' | ')} |\n`;
+        output += `| ${headers.map(() => '---').join(' | ')} |\n`;
+        
+        // Markdown Table Body
+        for (const row of table.data.rows) {
+            // Row structure: [UUID, Col1, Col2...]
+            // We skip UUID at index 0 for display
+            const cells = row.slice(1).map((cell: any) => {
+                if (cell === null || cell === undefined) return '';
+                // Simple escape for pipes and newlines to keep table structure
+                return String(cell).replace(/\|/g, '\\|').replace(/\n/g, '<br>'); 
+            });
+            output += `| ${cells.join(' | ')} |\n`;
+        }
+        output += '\n';
+    }
+    
+    return output.trim();
+};
+
+/**
  * Processes a string through the EJS engine with RECURSIVE support.
  */
 const processEjsTemplate = async (
@@ -220,7 +259,7 @@ export const cleanMessageContent = (text: string): string => {
         .replace(/<LogicStore>[\s\S]*?<\/LogicStore>/gi, '') // Remove LogicStore
         .replace(/<VisualInterface>[\s\S]*?<\/VisualInterface>/gi, '') // Remove VisualInterface
         .replace(/<StatusPlaceHolderImpl\s*\/?>/gi, '') // Remove Status Bar placeholders
-        .replace(/\[CHOICE:.*?\]/g, '') // Remove Choices
+        .replace(/\[CHOICE:[\s\S]*?\]/gi, '') // Remove Choices (Case insensitive, handle multiline)
         .replace(/```[\s\S]*?```/g, '') // Remove Code blocks (mechanics/status)
         .replace(/\n\s*\n/g, '\n') // Collapse extra newlines
         .trim();
@@ -336,7 +375,7 @@ export async function constructChatPrompt(
     const worldInfoAfterString = worldInfoAfterList.join('\n');
     const worldInfoCombinedString = worldInfoCombinedList.join('\n');
 
-    // --- 2. Prepare Prompt Variables (MOVED AFTER WI PROCESSING) ---
+    // --- 2. Prepare Prompt Variables & RPG Data (MOVED AFTER WI PROCESSING) ---
     // Now that WI scripts have run, the 'variables' object is up-to-date.
     
     const formatVariablesForPrompt = (vars: Record<string, any>): string => {
@@ -367,15 +406,19 @@ export async function constructChatPrompt(
     };
 
     const variablesStateString = formatVariablesForPrompt(variables);
+    
+    // --- MYTHIC ENGINE DATA PREP ---
+    const mythicStateString = formatRpgData(card.rpg_data);
+    const mythicBlock = mythicStateString ? `<MythicDatabase>\n${mythicStateString}\n</MythicDatabase>` : '';
+    // -------------------------------
 
     let smartStateString = '';
-    if (variablesStateString && lastStateBlock) {
-        smartStateString = `<LogicStore>\n${variablesStateString}\n</LogicStore>\n\n<VisualInterface>\n${lastStateBlock}\n</VisualInterface>`;
-    } else if (variablesStateString) {
-        smartStateString = `<LogicStore>\n${variablesStateString}\n</LogicStore>`;
-    } else if (lastStateBlock) {
-        smartStateString = `<VisualInterface>\n${lastStateBlock}\n</VisualInterface>`;
-    }
+    const stateParts: string[] = [];
+    if (variablesStateString) stateParts.push(`<LogicStore>\n${variablesStateString}\n</LogicStore>`);
+    if (mythicBlock) stateParts.push(mythicBlock);
+    if (lastStateBlock) stateParts.push(`<VisualInterface>\n${lastStateBlock}\n</VisualInterface>`);
+    
+    smartStateString = stateParts.join('\n\n');
 
     // --- 3. Prepare Context Strings & Lists ---
     
@@ -537,6 +580,7 @@ export async function constructChatPrompt(
             .replace(/<user>/g, userPersonaName)
             .replace(/{{smart_state_block}}/g, smartStateString)
             .replace(/{{current_variables_state}}/g, variablesStateString)
+            .replace(/{{mythic_database}}/g, mythicStateString) // NEW MACRO SUPPORT
             .replace(/{{last_state}}/g, lastStateBlock)
             .replace(/{{author_note}}/g, authorNote || '')
             .replace(/{{long_term_summary}}/g, longTermSummaryString)

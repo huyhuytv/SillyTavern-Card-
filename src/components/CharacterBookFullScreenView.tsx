@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { WorldInfoEntry } from '../types';
 import { CharacterBookEditor } from './CharacterBookEditor';
-import { translateLorebookBatch } from '../services/geminiService';
-import { exportLorebookToJson } from '../services/lorebookExporter'; // Re-use exporter for backup
+import { translateLorebookBatch } from '../services/translationService'; // UPDATED IMPORT
+import { exportLorebookToJson } from '../services/lorebookExporter'; 
 import { MODEL_OPTIONS } from '../services/settingsService';
 import { useToast } from './ToastSystem';
 import _ from 'lodash';
@@ -40,8 +40,8 @@ interface CharacterBookFullScreenViewProps {
     initialEntries: WorldInfoEntry[];
     onClose: () => void;
     onSave: (entries: WorldInfoEntry[]) => void;
-    onExport?: () => void; // Tùy chọn: Cho phép xuất file
-    onDelete?: () => void; // Tùy chọn: Cho phép xóa file
+    onExport?: () => void; 
+    onDelete?: () => void; 
 }
 
 interface Batch {

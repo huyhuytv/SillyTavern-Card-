@@ -3,12 +3,22 @@ import React, { useState, useRef } from 'react';
 import { createFullSystemBackup, restoreFullSystemBackup } from '../services/snapshotService';
 import { Loader } from './Loader';
 import { useToast } from './ToastSystem';
+import { useCharacter } from '../contexts/CharacterContext';
+import { usePreset } from '../contexts/PresetContext';
+import { useLorebook } from '../contexts/LorebookContext';
+import { useUserPersona } from '../contexts/UserPersonaContext';
 
 export const BackupRestoreSettings: React.FC = () => {
     const [isBackingUp, setIsBackingUp] = useState(false);
     const [isRestoring, setIsRestoring] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { showToast } = useToast();
+
+    // Import Reload Functions from Contexts
+    const { reloadCharacters } = useCharacter();
+    const { reloadPresets } = usePreset();
+    const { reloadLorebooks } = useLorebook();
+    const { reloadPersonas } = useUserPersona();
 
     // HANDLE BACKUP
     const handleBackup = async () => {
@@ -59,22 +69,30 @@ export const BackupRestoreSettings: React.FC = () => {
         if (!e.target.files || e.target.files.length === 0) return;
         
         const file = e.target.files[0];
-        if (!confirm("CẢNH BÁO: Khôi phục sẽ GHI ĐÈ các dữ liệu hiện tại (nếu trùng tên) và thêm dữ liệu mới. Bạn có chắc chắn muốn tiếp tục không?")) {
-            e.target.value = ''; // Reset
-            return;
-        }
+        
+        // REMOVED: window.confirm due to sandbox restrictions
+        // Proceeding directly with restore
 
         setIsRestoring(true);
         try {
+            // 1. Perform DB Restoration
             await restoreFullSystemBackup(file);
-            showToast("Khôi phục thành công! Đang tải lại...", 'success');
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
+            
+            // 2. Trigger Context Refreshes (Crucial for UI Update)
+            await Promise.all([
+                reloadCharacters(),
+                reloadPresets(),
+                reloadLorebooks(),
+                reloadPersonas()
+            ]);
+
+            showToast("Khôi phục thành công! Dữ liệu đã được cập nhật.", 'success');
+            
         } catch (e) {
+            console.error(e);
             showToast(`Lỗi khôi phục: ${e instanceof Error ? e.message : String(e)}`, 'error');
-            e.target.value = '';
         } finally {
+            e.target.value = ''; // Reset input
             setIsRestoring(false);
         }
     };
@@ -121,7 +139,7 @@ export const BackupRestoreSettings: React.FC = () => {
                     </div>
                     <h4 className="text-lg font-bold text-slate-200 mb-2">Khôi Phục Dữ Liệu</h4>
                     <p className="text-xs text-slate-500 mb-6 px-4">
-                        Nhập tệp sao lưu <code>FullBackup_....json</code> để khôi phục lại trạng thái cũ. Ứng dụng sẽ tự động tải lại sau khi hoàn tất.
+                        Nhập tệp sao lưu <code>FullBackup_....json</code>. <span className="text-amber-400">Lưu ý: Dữ liệu trùng tên sẽ bị ghi đè.</span>
                     </p>
                     <input
                         ref={fileInputRef}
@@ -135,7 +153,7 @@ export const BackupRestoreSettings: React.FC = () => {
                         disabled={isRestoring}
                         className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-lg shadow-emerald-900/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                        {isRestoring ? <Loader message="Đang khôi phục..." /> : (
+                        {isRestoring ? <Loader message="Đang xử lý..." /> : (
                             <>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
                                 Chọn Tệp Khôi Phục
@@ -150,9 +168,9 @@ export const BackupRestoreSettings: React.FC = () => {
                 <div>
                     <strong>Lưu ý quan trọng:</strong>
                     <ul className="list-disc list-inside mt-1 space-y-1 opacity-90 text-xs">
-                        <li>File sao lưu chứa TOÀN BỘ dữ liệu (bao gồm cả API Keys nếu có). Hãy bảo mật file này.</li>
-                        <li>Khi khôi phục, nếu trùng tên dữ liệu (ví dụ trùng tên nhân vật), dữ liệu mới sẽ GHI ĐÈ dữ liệu cũ.</li>
-                        <li>Trên điện thoại, nút "Sao Lưu" sẽ mở menu chia sẻ (Share Sheet) để bạn lưu vào Google Drive hoặc Zalo dễ dàng.</li>
+                        <li>File sao lưu chứa TOÀN BỘ dữ liệu. Hãy bảo mật file này.</li>
+                        <li>Khi khôi phục, dữ liệu mới sẽ được nạp ngay lập tức vào ứng dụng.</li>
+                        <li>Nếu bạn đang ở trong một cuộc trò chuyện, vui lòng quay lại sảnh chính để thấy danh sách cập nhật.</li>
                     </ul>
                 </div>
             </div>

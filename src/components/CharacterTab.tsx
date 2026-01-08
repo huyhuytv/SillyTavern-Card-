@@ -2,7 +2,8 @@
 import React, { useRef, useState } from 'react';
 import { CharacterEditor } from './CharacterEditor';
 import { AnalysisPane } from './AnalysisPane';
-import { useCharacter, CharacterInContext } from '../contexts/CharacterContext';
+import { useCharacter } from '../contexts/CharacterContext';
+import type { CharacterInContext } from '../types';
 import { Loader } from './Loader';
 import { CharacterBookFullScreenView } from './CharacterBookFullScreenView';
 import type { WorldInfoEntry, CharacterCard } from '../types';

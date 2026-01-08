@@ -618,6 +618,19 @@ Bạn phải kiểm soát độ dài của phản hồi dựa trên cài đặt 
             identifier: "custom_prompt_rag_context_local",
             enabled: true,
         },
+        
+        // --- MYTHIC ENGINE DATA INJECTION ---
+        {
+            name: "### [System Data] Cơ sở dữ liệu RPG (Mythic Engine)",
+            content: `Dưới đây là trạng thái hiện tại của thế giới và nhân vật.
+{{mythic_database}}
+[Chỉ dẫn: Bạn chỉ được ĐỌC dữ liệu này để dẫn chuyện. KHÔNG tự ý thay đổi con số trong lời thoại nếu không có hành động thực tế.]`,
+            role: "system",
+            identifier: "mythic_rpg_data_injection",
+            enabled: true,
+        },
+        // ------------------------------------
+
         {
             name: "C. Trạng thái Biến số & Giao diện Hiện tại",
             content: `Đây là trạng thái hiện tại của các biến số và giao diện trong câu chuyện. Hãy dựa vào chúng để duy trì tính nhất quán.
