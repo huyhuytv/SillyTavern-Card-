@@ -43,7 +43,7 @@ const PromptBlock: React.FC<{ section: PromptSection }> = ({ section }) => {
 
     // Logic tự động phát hiện chế độ hiển thị dựa trên tên tiêu đề (cho các mục không có subSections)
     const isListMode = useMemo(() => {
-        const keywords = ['World Info', 'Lore', 'Book', 'Replacement', 'Stop Strings', 'Author Note', 'Dữ liệu tham khảo'];
+        const keywords = ['Replacement', 'Stop Strings'];
         return keywords.some(k => section.name.toLowerCase().includes(k.toLowerCase()));
     }, [section.name]);
 
@@ -76,7 +76,7 @@ const PromptBlock: React.FC<{ section: PromptSection }> = ({ section }) => {
             <div className="p-2 flex flex-col gap-1 bg-slate-900/30 max-h-[400px] overflow-y-auto custom-scrollbar group">
                 
                 {hasSubSections ? (
-                    // --- CHẾ ĐỘ DANH SÁCH MỞ RỘNG (SubSections - World Info) ---
+                    // --- CHẾ ĐỘ DANH SÁCH MỞ RỘNG (SubSections - Dành cho Lorebook) ---
                     section.subSections!.map((sub, idx) => (
                         <div 
                             key={idx}
@@ -105,7 +105,7 @@ const PromptBlock: React.FC<{ section: PromptSection }> = ({ section }) => {
                         );
                     })
                 ) : (
-                    // --- CHẾ ĐỘ VĂN BẢN (Text Mode) ---
+                    // --- CHẾ ĐỘ VĂN BẢN (Text Mode - Mặc định cho Schema, Data, Chat) ---
                     <div 
                         tabIndex={0}
                         className="bg-slate-950/80 border border-slate-800 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/30 focus:outline-none rounded px-2 py-2 text-[10px] font-mono text-slate-300 break-words whitespace-pre-wrap transition-colors"
@@ -331,10 +331,11 @@ const parseMythicPrompt = (fullText: string): PromptSection[] => {
         sections.push({ id: 'mythic_schema', name: '📐 Schema & Rules (Cấu trúc bảng)', content: schemaMatch[1].trim(), role: 'system' });
     }
 
-    // 3. Lorebook (with Splitting)
+    // 3. Lorebook (with Splitting for detailed view)
     const loreMatch = fullText.match(/<Dữ liệu tham khảo \(Lorebook\)>([\s\S]*?)<\/Dữ liệu tham khảo \(Lorebook\)>/);
     if (loreMatch) {
         const rawLore = loreMatch[1].trim();
+        // Split by "### [Lore:" to create sub-sections as requested
         const entries = rawLore.split('### [Lore:').filter(Boolean).map(e => '### [Lore:' + e);
         
         sections.push({ 
@@ -346,13 +347,13 @@ const parseMythicPrompt = (fullText: string): PromptSection[] => {
         });
     }
 
-    // 4. Current Data
+    // 4. Current Data (Consolidated Block)
     const dataMatch = fullText.match(/<Dữ liệu bảng hiện tại>([\s\S]*?)<\/Dữ liệu bảng hiện tại>/);
     if (dataMatch) {
         sections.push({ id: 'mythic_data', name: '💾 Current Database (Dữ liệu hiện tại)', content: dataMatch[1].trim(), role: 'system' });
     }
 
-    // 5. Chat History
+    // 5. Chat History (Consolidated Block)
     const chatMatch = fullText.match(/<Dữ liệu chính văn>([\s\S]*?)<\/Dữ liệu chính văn>/);
     if (chatMatch) {
         sections.push({ id: 'mythic_chat', name: '💬 Chat Context (Chính văn)', content: chatMatch[1].trim(), role: 'system' });

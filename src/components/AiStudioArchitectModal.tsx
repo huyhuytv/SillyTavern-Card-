@@ -247,6 +247,7 @@ export const AiStudioArchitectModal: React.FC<AiStudioArchitectModalProps> = ({ 
                         onClick={handleSendMessage}
                         disabled={!input.trim() || isSending}
                         className="absolute bottom-2 right-2 p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        aria-label="Gửi tin nhắn"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                             <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
@@ -377,7 +378,11 @@ export const AiStudioArchitectModal: React.FC<AiStudioArchitectModalProps> = ({ 
                             <p className="text-xs text-indigo-300 font-medium">Chuyên gia tối ưu hóa thẻ nhân vật</p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white transition-colors">
+                    <button 
+                        onClick={onClose} 
+                        className="p-2 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                        aria-label="Đóng Architect"
+                    >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 </header>

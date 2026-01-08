@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { RPGDatabase, RPGSettings } from '../types/rpg';
+import type { RPGDatabase, RPGSettings, RPGTable, RPGColumn } from '../types/rpg';
 import type { WorldInfoEntry } from '../types'; // Import WorldInfoEntry
 import { MODEL_OPTIONS } from '../services/settingsService';
 import { LabeledInput } from './ui/LabeledInput';
@@ -26,6 +26,100 @@ const MACROS = [
     { label: '{{chat_history}}', desc: 'Lịch sử hội thoại gần nhất' },
     { label: '{{rpg_lorebook}}', desc: 'Dữ liệu Sổ tay (Hybrid)' }, // New Macro
 ];
+
+// --- ADAPTER: CONVERT LEGACY CHAT SHEETS TO MYTHIC V2 ---
+const convertLegacyToV2 = (rawData: any): RPGDatabase => {
+    const tables: RPGTable[] = [];
+    
+    // Detect sheets: keys starting with "sheet_" or containing "content" array
+    const sheetKeys = Object.keys(rawData).filter(k => 
+        (k.startsWith('sheet_') || (rawData[k]?.content && Array.isArray(rawData[k].content))) &&
+        typeof rawData[k] === 'object'
+    );
+
+    if (sheetKeys.length === 0) {
+        throw new Error("Không tìm thấy dữ liệu bảng hợp lệ (ChatSheets format).");
+    }
+
+    for (const key of sheetKeys) {
+        const sheet = rawData[key];
+        const content = sheet.content || [];
+        
+        // Skip empty sheets or sheets without headers
+        if (content.length === 0) continue;
+
+        // 1. Extract Columns from Header (Row 0)
+        // ChatSheets format: [null, "Col1", "Col2"]
+        const headerRow = content[0];
+        // Skip index 0 (usually null)
+        const validHeaders = headerRow.slice(1);
+        
+        const columns: RPGColumn[] = validHeaders.map((header: string, index: number) => ({
+            id: String(index), // Use index as ID for mapping simplicity
+            label: header || `Column ${index + 1}`,
+            type: 'string'
+        }));
+
+        // 2. Extract Data Rows (Row 1+)
+        const rows = content.slice(1).map((row: any[]) => {
+            // ChatSheets row: [null, "Val1", "Val2"]
+            // Mythic V2 row: [UUID, "Val1", "Val2"]
+            const newRow = [...row];
+            // Generate UUID for index 0
+            newRow[0] = `row_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+            return newRow;
+        });
+
+        // 3. Map Rules
+        const source = sheet.sourceData || {};
+        const aiRules = {
+            init: source.initNode,
+            update: source.updateNode,
+            insert: source.insertNode,
+            delete: source.deleteNode
+        };
+
+        // 4. Map Export Config
+        const exp = sheet.exportConfig || {};
+        const exportConfig = {
+            enabled: exp.enabled !== false,
+            format: 'markdown_table' as const,
+            // Convert 'keyword' type to 'on_change' strategy, otherwise 'always'
+            strategy: exp.entryType === 'keyword' ? 'on_change' as const : 'always' as const,
+            
+            // Preserve specific fields
+            splitByRow: exp.splitByRow,
+            entryName: exp.entryName || sheet.name,
+            entryType: exp.entryType,
+            keywords: exp.keywords,
+            preventRecursion: exp.preventRecursion,
+            injectIntoWorldbook: exp.injectIntoWorldbook
+        };
+
+        tables.push({
+            config: {
+                id: sheet.uid || key,
+                name: sheet.name || key,
+                description: source.note,
+                columns,
+                export: exportConfig,
+                aiRules,
+                orderNo: sheet.orderNo
+            },
+            data: { rows }
+        });
+    }
+
+    // Sort by orderNo
+    tables.sort((a, b) => (a.config.orderNo || 0) - (b.config.orderNo || 0));
+
+    return {
+        version: 2,
+        tables,
+        globalRules: "Hệ thống RPG Tự động.",
+        lastUpdated: Date.now()
+    };
+};
 
 export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onClose, database, onSave, lorebookEntries = [] }) => {
     const [activeTab, setActiveTab] = useState<Tab>('operation');
@@ -101,18 +195,29 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
         const reader = new FileReader();
         reader.onload = (ev) => {
             try {
-                const importedDb = JSON.parse(ev.target?.result as string);
-                // Validate basic structure
-                if (!importedDb.tables || !Array.isArray(importedDb.tables)) {
-                    throw new Error("Cấu trúc file không hợp lệ.");
+                const jsonContent = JSON.parse(ev.target?.result as string);
+                let importedDb: RPGDatabase;
+
+                // Check 1: Is it standard Mythic V2?
+                if (jsonContent.tables && Array.isArray(jsonContent.tables)) {
+                    importedDb = jsonContent;
+                } 
+                // Check 2: Is it legacy ChatSheets?
+                else {
+                    try {
+                        importedDb = convertLegacyToV2(jsonContent);
+                        console.log("Converted legacy format to V2:", importedDb);
+                    } catch (conversionError) {
+                        throw new Error("Không nhận diện được định dạng file (Không phải Mythic V2 hoặc ChatSheets hợp lệ).");
+                    }
                 }
                 
-                if (window.confirm("Hành động này sẽ GHI ĐÈ toàn bộ dữ liệu RPG hiện tại. Bạn có chắc chắn không?")) {
-                    onSave(importedDb);
-                    onClose();
-                }
+                // DIRECTLY SAVE AND CLOSE WITHOUT CONFIRMATION
+                onSave(importedDb);
+                onClose();
+                
             } catch (err) {
-                alert("Lỗi nhập file: " + err);
+                alert("Lỗi nhập file: " + (err instanceof Error ? err.message : String(err)));
             }
         };
         reader.readAsText(file);
@@ -138,7 +243,11 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                     <h2 className="text-xl font-bold text-sky-400 flex items-center gap-2">
                         <span>⚙️</span> Cấu hình Mythic Engine
                     </h2>
-                    <button onClick={onClose} className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors">
+                    <button 
+                        onClick={onClose} 
+                        className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
+                        aria-label="Đóng cấu hình"
+                    >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 </div>

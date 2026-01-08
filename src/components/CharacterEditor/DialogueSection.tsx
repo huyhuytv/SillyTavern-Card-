@@ -116,7 +116,11 @@ export const DialogueSection: React.FC<DialogueSectionProps> = ({ card, onUpdate
                                     </button>
                                 )}
                                 {allGreetings.length > 1 && (
-                                    <button onClick={() => removeGreeting(index)} className="text-slate-400 hover:text-red-400">
+                                    <button 
+                                        onClick={() => removeGreeting(index)} 
+                                        className="text-slate-400 hover:text-red-400"
+                                        aria-label={`Xóa lời chào số ${index}`}
+                                    >
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
                                     </button>
                                 )}
@@ -150,7 +154,11 @@ export const DialogueSection: React.FC<DialogueSectionProps> = ({ card, onUpdate
                     <div key={index} className="bg-slate-700/50 p-4 rounded-lg">
                         <div className="flex justify-between items-center mb-2">
                             <label className="text-sm font-bold text-slate-300">Lời chào Nhóm #{index + 1}</label>
-                            <button onClick={() => removeGroupGreeting(index)} className="text-slate-400 hover:text-red-400">
+                            <button 
+                                onClick={() => removeGroupGreeting(index)} 
+                                className="text-slate-400 hover:text-red-400"
+                                aria-label={`Xóa lời chào nhóm số ${index + 1}`}
+                            >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
                             </button>
                         </div>

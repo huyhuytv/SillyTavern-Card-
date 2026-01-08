@@ -76,7 +76,11 @@ const WorldInfoEditModal: React.FC<WorldInfoEditModalProps> = ({ isOpen, entry, 
             <div ref={modalRef} className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-fade-in-up" onClick={e => e.stopPropagation()}>
                 <header className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-xl">
                     <h3 className="text-xl font-bold text-sky-400">Chỉnh sửa Mục World Info</h3>
-                    <button onClick={onClose} className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors">
+                    <button 
+                        onClick={onClose} 
+                        className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
+                        aria-label="Đóng chỉnh sửa"
+                    >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 </header>
@@ -173,10 +177,19 @@ const WorldInfoItem: React.FC<WorldInfoItemProps> = ({ entry, index, onUpdate, o
                     {entry.constant ? 'Hằng số: BẬT' : 'Hằng số: TẮT'}
                 </button>
                 <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                    <button onClick={(e) => { e.stopPropagation(); onEdit(index); }} disabled={isMarkedForDeletion} className="p-1.5 rounded-md transition-colors text-slate-400 hover:text-sky-400 hover:bg-slate-700">
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onEdit(index); }} 
+                        disabled={isMarkedForDeletion} 
+                        className="p-1.5 rounded-md transition-colors text-slate-400 hover:text-sky-400 hover:bg-slate-700"
+                        aria-label={`Chỉnh sửa mục ${entry.comment}`}
+                    >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); onRemove(index); }} className={`p-1.5 rounded-md transition-colors ${isMarkedForDeletion ? 'text-green-400 hover:bg-green-900/30' : 'text-slate-500 hover:text-red-400 hover:bg-slate-700'}`}>
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onRemove(index); }} 
+                        className={`p-1.5 rounded-md transition-colors ${isMarkedForDeletion ? 'text-green-400 hover:bg-green-900/30' : 'text-slate-500 hover:text-red-400 hover:bg-slate-700'}`}
+                        aria-label={isMarkedForDeletion ? `Khôi phục mục ${entry.comment}` : `Xóa mục ${entry.comment}`}
+                    >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                             {isMarkedForDeletion 
                                 ? <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L9.414 11H13a1 1 0 100-2H9.414l1.293-1.293z" clipRule="evenodd" />

@@ -102,16 +102,15 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
     };
 
     const handleDeleteTable = (id: string) => {
-        if (!window.confirm("Bạn có chắc chắn muốn xóa bảng này không?")) return;
+        // DIRECT DELETE - NO CONFIRMATION
         setDbState(prev => ({ ...prev, tables: prev.tables.filter(t => t.config.id !== id) }));
         if (activeTableId === id) setActiveTableId(null);
     };
     
     const handleResetToTemplate = () => {
-        if (window.confirm("Hành động này sẽ GHI ĐÈ toàn bộ cấu trúc bằng Template chuẩn. Bạn có chắc không?")) {
-            setDbState(getTemplateVH());
-            setActiveTableId(null);
-        }
+        // DIRECT RESET - NO CONFIRMATION
+        setDbState(getTemplateVH());
+        setActiveTableId(null);
     };
 
     if (!isOpen) return null;
@@ -127,8 +126,8 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
                         <button onClick={handleResetToTemplate} className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600">
                             Reset Template
                         </button>
-                        <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded hover:bg-slate-700 transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                        <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded hover:bg-slate-700 transition-colors" aria-label="Đóng trình chỉnh sửa">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                     </div>
                 </div>
@@ -149,6 +148,7 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); handleDeleteTable(table.config.id); }}
                                         className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-300 transition-opacity"
+                                        aria-label={`Xóa bảng ${table.config.name}`}
                                     >
                                         ×
                                     </button>
@@ -213,7 +213,7 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
                                                             <option value="number">Number</option>
                                                             <option value="boolean">Bool</option>
                                                         </select>
-                                                        <button onClick={() => handleRemoveColumn(idx)} className="text-red-400 hover:bg-red-900/30 p-1 rounded">×</button>
+                                                        <button onClick={() => handleRemoveColumn(idx)} className="text-red-400 hover:bg-red-900/30 p-1 rounded" aria-label={`Xóa cột ${col.label}`}>×</button>
                                                     </div>
                                                 ))}
                                             </div>

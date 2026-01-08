@@ -324,7 +324,14 @@ export const ApiSettings: React.FC = () => {
                                             placeholder="Chọn mô hình..."
                                         />
                                     </div>
-                                    <button onClick={fetchOpenRouterModels} className="px-3 bg-slate-700 rounded hover:bg-slate-600 text-slate-300" title="Tải lại danh sách">↻</button>
+                                    <button 
+                                        onClick={fetchOpenRouterModels} 
+                                        className="px-3 bg-slate-700 rounded hover:bg-slate-600 text-slate-300" 
+                                        title="Tải lại danh sách"
+                                        aria-label="Tải lại danh sách mô hình"
+                                    >
+                                        ↻
+                                    </button>
                                 </div>
                             )}
                             <div className="mt-2">

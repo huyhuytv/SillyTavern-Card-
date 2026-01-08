@@ -105,7 +105,11 @@ const TranslateModal: React.FC<{
                         <span>🌐</span> Dịch Sổ tay Tự động (AI)
                     </h3>
                     {!isProcessing && queue.length === 0 && (
-                        <button onClick={onClose} className="text-slate-400 hover:text-white">
+                        <button 
+                            onClick={onClose} 
+                            className="text-slate-400 hover:text-white"
+                            aria-label="Đóng cửa sổ dịch"
+                        >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                     )}
@@ -242,7 +246,13 @@ const TranslateModal: React.FC<{
                                 <div className="bg-slate-900 border border-slate-700 rounded-lg p-3 animate-fade-in-up flex flex-col gap-2 max-h-[300px]">
                                     <div className="flex justify-between items-center border-b border-slate-700 pb-2">
                                         <span className="text-xs font-bold text-sky-400">🔍 Chi tiết Gói #{activeBatchInfo.id}</span>
-                                        <button onClick={() => setSelectedBatchId(null)} className="text-slate-500 hover:text-white">✕</button>
+                                        <button 
+                                            onClick={() => setSelectedBatchId(null)} 
+                                            className="text-slate-500 hover:text-white"
+                                            aria-label="Đóng chi tiết"
+                                        >
+                                            ✕
+                                        </button>
                                     </div>
                                     <div className="flex-grow overflow-hidden flex flex-col gap-2 text-xs">
                                         <div className="flex gap-2 h-full">
@@ -536,6 +546,7 @@ export const CharacterBookFullScreenView: React.FC<CharacterBookFullScreenViewPr
                         onClick={onClose}
                         className="p-2 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
                         title="Quay lại"
+                        aria-label="Quay lại"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
                     </button>

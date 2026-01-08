@@ -1,4 +1,3 @@
-
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { 
@@ -62,7 +61,7 @@ interface ChatActions {
     updateCurrentTurn: (updates: Partial<ChatTurnLog>) => void;
     addWorldInfoLog: (log: string) => void;
     addSmartScanLog: (log: string) => void;
-    addMythicLog: (log: string) => void; // NEW ACTION
+    addMythicLog: (log: string) => void; 
     
     setLongTermSummaries: (summaries: string[]) => void;
     setSummaryQueue: (queue: SummaryQueueItem[]) => void;
@@ -79,6 +78,11 @@ interface ChatActions {
 
     clearLogs: () => void;
     resetStore: () => void;
+
+    // --- RPG ACTIONS ---
+    updateRpgCell: (tableId: string, rowIndex: number, colIndex: number, value: any) => void;
+    addRpgRow: (tableId: string) => void;
+    deleteRpgRow: (tableId: string, rowIndex: number) => void;
 }
 
 const initialState: Omit<ChatState, 'abortController'> = {
@@ -134,6 +138,38 @@ export const useChatStore = create<ChatState & ChatActions>()(
         setAbortController: (ac) => set((state) => { state.abortController = ac; }),
 
         clearLogs: () => set((state) => { state.logs = { turns: [], systemLog: [], worldInfoLog: [], smartScanLog: [], mythicLog: [] }; }),
-        resetStore: () => set((state) => { Object.assign(state, initialState); state.abortController = null; })
+        resetStore: () => set((state) => { Object.assign(state, initialState); state.abortController = null; }),
+
+        // --- RPG ACTIONS IMPLEMENTATION ---
+        updateRpgCell: (tableId, rowIndex, colIndex, value) => set((state) => {
+            if (!state.card?.rpg_data) return;
+            const table = state.card.rpg_data.tables.find(t => t.config.id === tableId);
+            if (table && table.data.rows[rowIndex]) {
+                // colIndex maps to array index + 1 (index 0 is UUID)
+                table.data.rows[rowIndex][colIndex + 1] = value;
+                state.card.rpg_data.lastUpdated = Date.now();
+            }
+        }),
+
+        addRpgRow: (tableId) => set((state) => {
+            if (!state.card?.rpg_data) return;
+            const table = state.card.rpg_data.tables.find(t => t.config.id === tableId);
+            if (table) {
+                const newId = `row_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+                const newRow = new Array(table.config.columns.length + 1).fill("");
+                newRow[0] = newId;
+                table.data.rows.push(newRow);
+                state.card.rpg_data.lastUpdated = Date.now();
+            }
+        }),
+
+        deleteRpgRow: (tableId, rowIndex) => set((state) => {
+            if (!state.card?.rpg_data) return;
+            const table = state.card.rpg_data.tables.find(t => t.config.id === tableId);
+            if (table) {
+                table.data.rows.splice(rowIndex, 1);
+                state.card.rpg_data.lastUpdated = Date.now();
+            }
+        }),
     }))
 );

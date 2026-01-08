@@ -180,7 +180,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                             disabled={isSummarizing}
                             className="px-3 py-1.5 text-xs font-bold rounded bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 transition-all transform active:scale-95 border border-indigo-400/30 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <span className="text-indigo-200">⚡</span> {btn.label}
+                            <span className="text-indigo-200" aria-hidden="true">⚡</span> {btn.label}
                         </button>
                     ))}
                 </div>
@@ -222,8 +222,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                             onClick={() => onUpdateAuthorNote('')} 
                             className="text-slate-500 hover:text-white p-1 rounded-full flex-shrink-0" 
                             title="Xóa ghi chú"
+                            aria-label="Xóa ghi chú của tác giả"
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                             </svg>
                         </button>
@@ -271,7 +272,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     >
                         {(isAutoLooping || isLoading) ? (
                             <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
                                 </svg>
                                 <span>Dừng</span>
@@ -292,8 +293,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                                 : 'bg-slate-700 border-slate-600 text-slate-400 hover:bg-slate-600 hover:text-white'
                             }`}
                             title="Tự động chạy (Auto-Play)"
+                            aria-label={isAutoLooping ? "Tắt tự động chạy" : "Bật tự động chạy"}
+                            aria-pressed={isAutoLooping}
                         >
-                            <span className={`text-xl leading-none ${isAutoLooping ? 'animate-pulse' : ''}`}>♾️</span>
+                            <span className={`text-xl leading-none ${isAutoLooping ? 'animate-pulse' : ''}`} aria-hidden="true">♾️</span>
                         </button>
                     )}
                 </form>
