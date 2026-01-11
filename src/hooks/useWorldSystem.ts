@@ -16,7 +16,8 @@ export interface WorldSystemResult {
         preset?: SillyTavernPreset, 
         historyForScan?: string[],
         latestInput?: string, // NEW: Specific latest input for AI mode
-        variables?: Record<string, any> // NEW: Pass current variables
+        variables?: Record<string, any>, // NEW: Pass current variables
+        dynamicEntries?: WorldInfoEntry[] // NEW: Pass generated entries from RPG
     ) => Promise<{
         activeEntries: WorldInfoEntry[];
         updatedRuntimeState: Record<string, WorldInfoRuntimeStats>;
@@ -47,9 +48,12 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
         preset?: SillyTavernPreset,
         historyForScan: string[] = [],
         latestInput: string = '',
-        variables: Record<string, any> = {}
+        variables: Record<string, any> = {},
+        dynamicEntries: WorldInfoEntry[] = []
     ) => {
-        const allEntries = card?.char_book?.entries || [];
+        // MERGE LOGIC: Combine static entries from card with dynamic entries from RPG
+        const staticEntries = card?.char_book?.entries || [];
+        const allEntries = [...staticEntries, ...dynamicEntries];
         
         let aiActiveUids: string[] = [];
         let smartScanLogData;
@@ -84,6 +88,7 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
                 }
 
                 // 3. Prepare Lorebook Payload (Separated)
+                // NOW USING allEntries which includes Dynamic Entries
                 const { contextString, candidateString } = prepareLorebookForAI(allEntries);
 
                 // Only scan if there are candidates to choose from
@@ -119,6 +124,7 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
 
         // --- HYBRID / KEYWORD SCANNING ---
         // Pass bypassKeywordScan=true if mode is 'ai_only'
+        // NOW USING allEntries which includes Dynamic Entries for Keyword Matching too
         const result = performWorldInfoScan(
             textToScan, 
             allEntries, 

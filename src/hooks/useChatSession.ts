@@ -21,6 +21,7 @@ export const useChatSession = (sessionId: string | null) => {
         worldInfoState,
         worldInfoRuntime,
         generatedLorebookEntries, // Track this
+        storyQueue, // NEW: Track story queue
         isLoading
     } = useChatStore();
 
@@ -98,6 +99,7 @@ export const useChatSession = (sessionId: string | null) => {
                     lastStateBlock: session.lastStateBlock || '',
                     longTermSummaries: session.longTermSummaries || [],
                     summaryQueue: session.summaryQueue || [],
+                    storyQueue: session.storyQueue || [], // NEW
                     worldInfoRuntime: session.worldInfoRuntime || {},
                     worldInfoPinned: session.worldInfoPinned || {},
                     worldInfoPlacement: session.worldInfoPlacement || {},
@@ -165,6 +167,8 @@ export const useChatSession = (sessionId: string | null) => {
                 longTermSummaries: overrides.longTermSummaries ?? state.longTermSummaries,
                 summaryQueue: overrides.summaryQueue ?? state.summaryQueue,
                 
+                storyQueue: overrides.storyQueue ?? state.storyQueue, // NEW: Save Queue
+                
                 variables: overrides.variables ?? state.variables,
                 extensionSettings: overrides.extensionSettings ?? state.extensionSettings,
                 
@@ -215,6 +219,7 @@ export const useChatSession = (sessionId: string | null) => {
         worldInfoState, 
         worldInfoRuntime,
         generatedLorebookEntries, // Trigger save when links update
+        storyQueue, // Trigger save when queue changes
         useChatStore.getState().card, // Thêm dependency này để trigger khi Medusa update card
         saveSession
     ]);

@@ -3,8 +3,9 @@ import { GoogleGenAI } from "@google/genai";
 import type { RPGDatabase, MedusaAction, MedusaResult } from '../types/rpg';
 import type { WorldInfoEntry } from '../types';
 import { parseLooseJson } from '../utils';
+import { getConnectionSettings, getProxyForTools } from './settingsService';
+import { callOpenAIProxyTask } from './api/proxyApi';
 
-// ... (Existing DEFAULT_MEDUSA_PROMPT - No change needed here) ...
 export const DEFAULT_MEDUSA_PROMPT = `
 Bạn là một Medusa chuyên điền bảng biểu. Bạn cần tham khảo bối cảnh thiết lập trước đó cũng như <Dữ liệu chính văn> được gửi cho bạn để ghi lại dưới dạng bảng. 
 
@@ -105,6 +106,13 @@ Xóa: deleteRow(2, 5)
 LUẬT CHUNG:
 {{global_rules}}
 `;
+
+const safetySettings = [
+    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+];
 
 // --- HELPER FUNCTIONS ---
 
@@ -374,13 +382,13 @@ const applyMedusaActions = (
     return { newDb, notifications, logs };
 };
 
-// --- LIVE LINK LOGIC (NEW) ---
+// --- LIVE LINK LOGIC (OPTION A: MARKDOWN CARD) ---
 
 /**
- * Generates temporary Lorebook entries based on database content.
- * Follows the rules:
+ * Generates Lorebook entries from database content using Markdown formatting.
+ * Rules:
  * 1. Checks `lorebookLink.enabled`.
- * 2. Formats content as "Label: Value | Label: Value".
+ * 2. Formats as clean Markdown Card.
  * 3. Uses Smart Naming: "[Mythic] <KeyWord>".
  */
 export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
@@ -401,29 +409,37 @@ export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
             
             if (!keyValue) return; // Skip rows without key value
 
-            // Format Content: Option A (Full Info)
-            const contentParts = table.config.columns.map((col, idx) => {
+            // --- OPTION A: MARKDOWN CARD FORMAT ---
+            // Header
+            let contentLines = [`### [Mythic Data] ${keyValue}`];
+            contentLines.push(`**Nguồn:** ${table.config.name}`);
+            
+            // Body Loop
+            table.config.columns.forEach((col, idx) => {
                 const val = row[idx + 1];
-                if (val === null || val === undefined || val === '') return null;
-                return `${col.label}: ${val}`;
-            }).filter(Boolean);
+                // Skip empty/null values to save tokens and keep it clean
+                if (val === null || val === undefined || val === '') return;
 
-            const fullContent = contentParts.join(' | ');
+                // Format: - **Label:** Value
+                contentLines.push(`- **${col.label}:** ${val}`);
+            });
+
+            const fullContent = contentLines.join('\n');
 
             // Create Entry
             const entry: WorldInfoEntry = {
                 uid: `mythic_${table.config.id}_${rowId}`,
                 keys: [String(keyValue)], // The main key
-                secondary_keys: [],
-                // Smart Naming (Option 3)
-                comment: `[Mythic] ${keyValue} (${table.config.name})`,
+                secondary_keys: [], 
+                // Smart Naming
+                comment: `[Live-Link] ${keyValue}`,
                 content: fullContent,
                 constant: false,
                 selective: true,
                 enabled: true,
-                position: 'before_char', // Default placement
+                position: 'before_char',
                 use_regex: false,
-                insertion_order: 100 // High priority?
+                insertion_order: 100 // High priority
             };
 
             entries.push(entry);
@@ -444,9 +460,11 @@ export const MedusaService = {
         allAvailableEntries: WorldInfoEntry[],
         defaultModelId: string = 'gemini-2.5-pro'
     ): Promise<MedusaResult> => { 
-        const ai = new GoogleGenAI({ apiKey });
         
-        const targetModel = database.settings?.modelId || defaultModelId;
+        const connection = getConnectionSettings();
+        const useProxy = connection.source === 'proxy' || getProxyForTools();
+        
+        const targetModel = database.settings?.modelId || (useProxy ? connection.proxy_tool_model || connection.proxy_model : defaultModelId);
 
         const pinnedUids = database.settings?.pinnedLorebookUids || [];
         const uniqueEntriesMap = new Map<string, WorldInfoEntry>();
@@ -470,15 +488,29 @@ export const MedusaService = {
         const resolvedSystemPrompt = resolveMedusaMacros(rawSystemPrompt, database, historyLog, lorebookContext);
 
         try {
-            const response = await ai.models.generateContent({
-                model: targetModel,
-                contents: resolvedSystemPrompt, 
-                config: {
-                    temperature: 0.1,
-                }
-            });
+            let rawText = "";
 
-            const rawText = response.text || "";
+            if (useProxy) {
+                // PROXY ROUTE
+                rawText = await callOpenAIProxyTask(
+                    resolvedSystemPrompt,
+                    targetModel,
+                    connection.proxy_protocol,
+                    safetySettings
+                );
+            } else {
+                // DIRECT GEMINI ROUTE
+                const ai = new GoogleGenAI({ apiKey });
+                const response = await ai.models.generateContent({
+                    model: targetModel,
+                    contents: resolvedSystemPrompt, 
+                    config: {
+                        temperature: 0.1,
+                        safetySettings
+                    }
+                });
+                rawText = response.text || "";
+            }
             
             const thinkMatch = rawText.match(/<tableThink>([\s\S]*?)<\/tableThink>/);
             const thinkContent = thinkMatch ? thinkMatch[1].replace(/<!--|-->/g, '').trim() : "No thinking data.";

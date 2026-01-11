@@ -196,6 +196,11 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 isAutoLooping={engine.isAutoLooping} 
                 onToggleAutoLoop={() => engine.setIsAutoLooping(!engine.isAutoLooping)} 
                 queueLength={engine.queueLength} 
+                // STORY MODE PROPS
+                isStoryMode={engine.isStoryMode}
+                storyQueueLength={engine.storyQueue ? engine.storyQueue.length : 0}
+                onNextStoryChunk={engine.advanceStoryChunk}
+                onCancelStoryMode={engine.cancelStoryMode} // NEW: Pass down cancellation handler
             >
                 <DebugPanel 
                     logs={engine.logs} 

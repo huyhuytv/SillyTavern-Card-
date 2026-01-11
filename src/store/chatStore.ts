@@ -6,6 +6,8 @@ import type {
     VisualState, WorldInfoRuntimeStats, SystemLogEntry, ChatTurnLog, 
     QuickReply, ScriptButton, SummaryQueueItem, WorldInfoEntry
 } from '../types';
+// IMPORT SYNC LOGIC
+import { syncDatabaseToLorebook } from '../services/medusaService'; 
 
 interface ChatState {
     sessionId: string | null;
@@ -21,6 +23,10 @@ interface ChatState {
     
     longTermSummaries: string[];
     summaryQueue: SummaryQueueItem[];
+    
+    // Story Mode State
+    storyQueue: string[];
+
     worldInfoState: Record<string, boolean>;
     worldInfoPinned: Record<string, boolean>;
     worldInfoPlacement: Record<string, 'before' | 'after' | undefined>;
@@ -70,6 +76,8 @@ interface ChatActions {
     
     setLongTermSummaries: (summaries: string[]) => void;
     setSummaryQueue: (queue: SummaryQueueItem[]) => void;
+    setStoryQueue: (queue: string[]) => void; // NEW
+    clearStoryQueue: () => void; // NEW: Clear queue to stop story mode
     setLastStateBlock: (block: string) => void;
     
     setIsInputLocked: (locked: boolean) => void;
@@ -97,7 +105,7 @@ interface ChatActions {
 const initialState: Omit<ChatState, 'abortController'> = {
     sessionId: null, card: null, preset: null, persona: null, mergedSettings: null,
     messages: [], variables: {}, extensionSettings: {}, worldInfoRuntime: {},
-    longTermSummaries: [], summaryQueue: [], worldInfoState: {}, 
+    longTermSummaries: [], summaryQueue: [], storyQueue: [], worldInfoState: {}, 
     worldInfoPinned: {}, worldInfoPlacement: {}, authorNote: '',
     lastStateBlock: '', initialDiagnosticLog: '', rpgNotification: null, generatedLorebookEntries: [],
     visualState: {}, quickReplies: [], scriptButtons: [],
@@ -135,6 +143,8 @@ export const useChatStore = create<ChatState & ChatActions>()(
         
         setLongTermSummaries: (summaries) => set((state) => { state.longTermSummaries = summaries; }),
         setSummaryQueue: (queue) => set((state) => { state.summaryQueue = queue; }),
+        setStoryQueue: (queue) => set((state) => { state.storyQueue = queue; }),
+        clearStoryQueue: () => set((state) => { state.storyQueue = []; }), // Implementation
         setLastStateBlock: (block) => set((state) => { state.lastStateBlock = block; }),
         
         setIsInputLocked: (locked) => set((state) => { state.isInputLocked = locked; }),
@@ -158,6 +168,13 @@ export const useChatStore = create<ChatState & ChatActions>()(
             if (table && table.data.rows[rowIndex]) {
                 table.data.rows[rowIndex][colIndex + 1] = value;
                 state.card.rpg_data.lastUpdated = Date.now();
+                
+                // AUTO SYNC: Regenerate lorebook entries when data changes
+                try {
+                    state.generatedLorebookEntries = syncDatabaseToLorebook(state.card.rpg_data);
+                } catch(e) {
+                    console.error("Sync error in updateRpgCell", e);
+                }
             }
         }),
 
@@ -170,6 +187,13 @@ export const useChatStore = create<ChatState & ChatActions>()(
                 newRow[0] = newId;
                 table.data.rows.push(newRow);
                 state.card.rpg_data.lastUpdated = Date.now();
+
+                // AUTO SYNC
+                try {
+                    state.generatedLorebookEntries = syncDatabaseToLorebook(state.card.rpg_data);
+                } catch(e) {
+                    console.error("Sync error in addRpgRow", e);
+                }
             }
         }),
 
@@ -179,6 +203,13 @@ export const useChatStore = create<ChatState & ChatActions>()(
             if (table) {
                 table.data.rows.splice(rowIndex, 1);
                 state.card.rpg_data.lastUpdated = Date.now();
+
+                // AUTO SYNC
+                try {
+                    state.generatedLorebookEntries = syncDatabaseToLorebook(state.card.rpg_data);
+                } catch(e) {
+                    console.error("Sync error in deleteRpgRow", e);
+                }
             }
         }),
     }))

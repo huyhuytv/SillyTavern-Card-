@@ -31,6 +31,9 @@ export interface ChatSession {
     chatHistory: ChatMessage[];
     longTermSummaries: string[];
     
+    // Story Mode Queue (NEW)
+    storyQueue?: string[]; // Array of text chunks waiting to be processed
+    
     // Runtime State Persistence
     summaryQueue?: SummaryQueueItem[];
     variables: Record<string, any>;

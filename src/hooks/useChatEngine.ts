@@ -1,13 +1,15 @@
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { useChatFlow } from './chat/useChatFlow';
 import { useChatSession } from './useChatSession';
-import { useChatMemory } from './useChatMemory';
+import { useChatMemory, countTotalTurns } from './useChatMemory';
 import { useChatLogger } from './useChatLogger';
 import { useChatInterface } from './chat/useChatInterface';
 import { useMessageManipulator } from './chat/useMessageManipulator';
 import { useChatCommands } from './chat/useChatCommands';
+import { useLorebook } from '../contexts/LorebookContext'; 
+// MedusaService, syncDatabaseToLorebook, getApiKey REMOVED from here as they are now handled in useChatFlow
 
 /**
  * useChatEngine: A unified aggregator for chat state and logic.
@@ -15,9 +17,11 @@ import { useChatCommands } from './chat/useChatCommands';
 export const useChatEngine = (sessionId: string | null) => {
     const store = useChatStore();
     const logger = useChatLogger();
+    const { lorebooks } = useLorebook(); 
     const { saveSession, changePreset } = useChatSession(sessionId);
-    // Destructure new error handling props and manual trigger
-    const { sendMessage, stopGeneration, interactiveError, handleUserDecision, manualMythicTrigger } = useChatFlow(); 
+    
+    // sendMessage now supports forcedContent for Story Mode
+    const { sendMessage, stopGeneration, interactiveError, handleUserDecision, manualMythicTrigger, processAIResponse } = useChatFlow(); 
     const { 
         isSummarizing, 
         triggerSmartContext, 
@@ -61,8 +65,55 @@ export const useChatEngine = (sessionId: string | null) => {
         showPopup: (content) => console.log('Popup:', content),
     });
 
+    // --- STORY MODE LOGIC ---
+    const isStoryMode = store.storyQueue && store.storyQueue.length > 0;
+
+    const advanceStoryChunk = useCallback(async () => {
+        if (!store.storyQueue || store.storyQueue.length === 0 || store.isLoading || isSummarizing) return;
+
+        const nextChunk = store.storyQueue[0];
+        const remainingQueue = store.storyQueue.slice(1);
+
+        // 1. Trigger the Unified Pipeline (Snapshot -> Smart Scan -> Logic -> RPG)
+        // We pass "Tiếp tục..." as the user trigger, and nextChunk as the forced AI response.
+        await sendMessage("Tiếp tục...", { forcedContent: nextChunk });
+
+        // 2. Update Queue & Save State
+        store.setStoryQueue(remainingQueue);
+        await saveSession({ storyQueue: remainingQueue });
+
+        // 3. Smart Context Check (Summarization)
+        // Note: sendMessage adds 2 messages (User + AI), so we check length now.
+        const currentMessages = store.messages; // State updated by sendMessage
+        const turnCount = countTotalTurns(currentMessages);
+        const contextLimit = store.preset?.context_depth || 24;
+
+        if (turnCount >= contextLimit) {
+            logger.logSystemMessage('warn', 'system', `[Story Mode] Đạt ngưỡng ngữ cảnh (${turnCount}/${contextLimit}). Đang tạm dừng để tóm tắt...`);
+            await triggerSmartContext(); 
+        }
+
+    }, [store.storyQueue, store.isLoading, isSummarizing, sendMessage, saveSession, store.setStoryQueue, store.preset?.context_depth, store.messages, logger, triggerSmartContext]);
+
+    // --- AUTO LOOP LOGIC (Story Mode - Synchronized) ---
+    useEffect(() => {
+        let timer: ReturnType<typeof setTimeout>;
+        
+        // Điều kiện chạy Auto Loop:
+        // 1. Phải đang bật AutoLoop và là Story Mode.
+        // 2. KHÔNG đang tải (Loading) -> Chờ sendMessage/RPG xử lý xong.
+        // 3. KHÔNG đang tóm tắt (Summarizing) -> Chờ bộ nhớ xử lý xong (QUAN TRỌNG).
+        // 4. Không có lỗi.
+        if (isAutoLooping && !store.isLoading && !isSummarizing && !store.error && isStoryMode) {
+            timer = setTimeout(() => {
+                advanceStoryChunk();
+            }, 1000); // Fixed delay 1s
+        }
+        return () => clearTimeout(timer);
+    }, [isAutoLooping, store.isLoading, isSummarizing, store.error, isStoryMode, advanceStoryChunk]);
+
+
     // --- REGENERATE LOGIC (SAFE STATE ROLLBACK) ---
-    // Moved here to access both deleteMessage (Manipulator) and sendMessage (Flow)
     const regenerateLastResponse = useCallback(async () => {
         const msgs = store.messages;
         if (msgs.length === 0 || store.isLoading) return;
@@ -108,11 +159,12 @@ export const useChatEngine = (sessionId: string | null) => {
         isAutoLooping,
         quickReplies,
         scriptButtons,
-        interactiveError, // Export
+        interactiveError, 
+        isStoryMode, 
 
         // Actions
         sendMessage,
-        regenerateLastResponse, // Now uses the safe implementation
+        regenerateLastResponse, 
         stopGeneration, 
         deleteMessage,
         deleteLastTurn,
@@ -124,8 +176,9 @@ export const useChatEngine = (sessionId: string | null) => {
         handleRetryFailedTask,
         handleScriptButtonClick,
         executeSlashCommands,
-        handleUserDecision, // Export
-        handleRetryMythic: manualMythicTrigger, // NEW: Manual Mythic Trigger
+        handleUserDecision, 
+        handleRetryMythic: manualMythicTrigger,
+        cancelStoryMode: store.clearStoryQueue, // Expose cancellation
         
         // Specific Setters
         setIsAutoLooping,
@@ -136,5 +189,8 @@ export const useChatEngine = (sessionId: string | null) => {
         updateVisualState: (type: 'bg' | 'music' | 'sound' | 'class', value: string) => 
             store.setSessionData({ visualState: { ...store.visualState, [type]: value } }),
         clearLogs: logger.clearLogs,
+        
+        // Story Mode Actions
+        advanceStoryChunk
     };
 };

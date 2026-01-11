@@ -7,6 +7,7 @@ import { usePreset } from '../contexts/PresetContext';
 import { useUserPersona } from '../contexts/UserPersonaContext';
 import { Loader } from './Loader';
 import { GreetingSelectorModal } from './GreetingSelectorModal';
+import { StoryImporterModal } from './StoryImporterModal'; // NEW IMPORT
 import { useTimeAgo, truncateText, parseLooseJson } from '../utils'; // IMPORTED parseLooseJson
 import { processWithRegex } from '../services/regexService';
 import { performWorldInfoScan } from '../services/worldInfoScanner';
@@ -128,9 +129,10 @@ const ContinueCard: React.FC<{
 const NewChatCard: React.FC<{
     character: CharacterInContext;
     onClick: () => void;
-}> = ({ character, onClick }) => {
+    onImportStory: (e: React.MouseEvent) => void; // NEW
+}> = ({ character, onClick, onImportStory }) => {
     return (
-        <div className="bg-slate-800/50 p-3 rounded-lg flex flex-col items-center gap-2 hover:bg-slate-800/80 transition-colors duration-200">
+        <div className="bg-slate-800/50 p-3 rounded-lg flex flex-col items-center gap-2 hover:bg-slate-800/80 transition-colors duration-200 relative group">
             <button
                 onClick={onClick}
                 className="w-20 h-20 rounded-full bg-slate-700 flex-shrink-0 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
@@ -150,11 +152,22 @@ const NewChatCard: React.FC<{
             >
                 {character.card.name}
             </button>
+            
+            {/* Story Import Button (Overlay) */}
+            <button
+                onClick={onImportStory}
+                className="absolute top-2 right-2 p-1.5 bg-slate-900/80 text-amber-400 rounded-full hover:bg-amber-600 hover:text-white transition-all opacity-0 group-hover:opacity-100 shadow-lg border border-amber-500/30"
+                title="Nhập Tiền Truyện (Story Mode)"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
+                </svg>
+            </button>
         </div>
     );
 };
 
-// --- IMPORT AREA COMPONENT ---
+// ... (AdventureImporter remains same) ...
 const AdventureImporter: React.FC<{ onImport: (file: File) => void, isLoading: boolean }> = ({ onImport, isLoading }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -196,6 +209,7 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
     const { presets, activePresetName, reloadPresets } = usePreset();
     const { activePersonaId, activePersona, personas, reloadPersonas } = useUserPersona();
     const [greetingModalChar, setGreetingModalChar] = useState<CharacterInContext | null>(null);
+    const [storyModalChar, setStoryModalChar] = useState<CharacterInContext | null>(null); // NEW: Story Modal
     const [error, setError] = useState<string>('');
     const [isImporting, setIsImporting] = useState(false);
     const { showToast } = useToast();
@@ -239,22 +253,9 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
         setError('');
         try {
             const sessionId = await importSnapshot(file);
-            
-            // Reload EVERYTHING to ensure contexts are up to date from DB
-            // This is critical because useChatEngine relies on Contexts (Character, Preset, Persona)
-            // matching the IDs stored in the Session.
-            
-            await Promise.all([
-                reloadCharacters(),
-                reloadPresets(),
-                reloadPersonas(),
-                refreshSessions()
-            ]);
-            
-            // Auto-redirect to the imported session
+            await Promise.all([reloadCharacters(), reloadPresets(), reloadPersonas(), refreshSessions()]);
             showToast("Nhập bản ghi thành công!", 'success');
             onSessionSelect(sessionId);
-            
         } catch (err) {
             setError(`Lỗi nhập bản ghi: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
@@ -270,7 +271,6 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
 
     const performExport = (filename: string) => {
         if (!sessionToExport) return;
-        
         const session = sessionToExport;
         const char = characters.find(c => c.fileName === session.characterFileName);
         const personaToExport = personas.find(p => p.id === session.userPersonaId) || activePersona;
@@ -288,31 +288,14 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
             return;
         }
 
-        const presetToExport = {
-            ...sourcePreset,
-            name: `[Cài đặt] ${char.card.name}`
-        };
+        const presetToExport = { ...sourcePreset, name: `[Cài đặt] ${char.card.name}` };
 
         try {
-            // Need to manually trigger download here since createSnapshot handles it internally with logic that doesn't easily accept filename override
-            // But actually createSnapshot handles the blob creation. I should modify it or just copy its logic here.
-            // For now, I'll assume createSnapshot *forces* a name, I need to update it or reimplement it here briefly.
-            // RE-IMPLEMENTATION for Custom Name:
-            
             const snapshot = {
                 version: 1,
                 timestamp: Date.now(),
-                meta: {
-                    exportedBy: 'AI Studio Card Tool',
-                    description: `Bản ghi phiêu lưu: ${char.card.name} - ${new Date().toLocaleString()}`
-                },
-                data: {
-                    character: char.card,
-                    characterFileName: session.characterFileName,
-                    preset: presetToExport,
-                    session: session,
-                    userPersona: personaToExport
-                }
+                meta: { exportedBy: 'AI Studio Card Tool', description: `Bản ghi phiêu lưu: ${char.card.name} - ${new Date().toLocaleString()}` },
+                data: { character: char.card, characterFileName: session.characterFileName, preset: presetToExport, session: session, userPersona: personaToExport }
             };
 
             const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
@@ -324,13 +307,11 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-
         } catch (e) {
             console.error(e);
             alert("Lỗi khi tạo bản ghi xuất.");
         }
     };
-
 
     const handleStartNewChat = async (character: CharacterInContext, greeting: string) => {
         if (!activePreset) {
@@ -340,7 +321,6 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
         }
 
         const newSessionId = character.fileName;
-
         const existingSession = sessions.find(s => s.sessionId === newSessionId);
         if (existingSession) {
             if (!window.confirm(`Một cuộc trò chuyện với ${character.card.name} đã tồn tại. Bạn có muốn bắt đầu lại từ đầu và xóa cuộc trò chuyện cũ không?`)) {
@@ -349,36 +329,27 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
             }
         }
 
-        // Replace {{user}} and {{char}} macros directly in the greeting content
         const userName = activePersona ? activePersona.name : 'User';
         const charName = character.card.name;
         const processedGreetingRaw = greeting
             .replace(/{{user}}/gi, userName)
             .replace(/{{char}}/gi, charName);
 
-        // 1. Process the greeting to separate content from interactive HTML
         let { displayContent, interactiveHtml, diagnosticLog } = processWithRegex(
             processedGreetingRaw,
             character.card.extensions?.regex_scripts || []
         );
 
-        // --- FORCE IFRAME LOGIC FOR SCRIPT CARDS ---
-        // Check if card has enabled TavernHelper scripts
         const hasEnabledScripts = character.card.extensions?.TavernHelper_scripts?.some(
             s => s.type === 'script' && s.value.enabled
         );
 
-        // If we have scripts but no HTML was found by Regex, FORCE the creation of an Iframe message.
-        // We put the text content inside the HTML so it displays, while the scripts run in background.
         if (hasEnabledScripts && !interactiveHtml) {
-            console.log('[ChatLobby] Detected TavernHelper scripts. Forcing Interactive Message.');
-            interactiveHtml = displayContent || processedGreetingRaw; // Use the text as the HTML body
-            displayContent = ''; // Clear display content so we don't double render
-            if (!interactiveHtml.trim()) interactiveHtml = '<div></div>'; // Ensure at least empty div if text is empty
+            interactiveHtml = displayContent || processedGreetingRaw;
+            displayContent = ''; 
+            if (!interactiveHtml.trim()) interactiveHtml = '<div></div>'; 
         }
-        // -------------------------------------------
 
-        // 2. Pre-parse initial variables from the card using LOOSE JSON PARSER
         let initialVariables = {};
         if (character.card.char_book?.entries) {
             const initVarEntry = character.card.char_book.entries.find(
@@ -386,34 +357,21 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
             );
             if (initVarEntry?.content) {
                 try {
-                    // Use parseLooseJson instead of JSON.parse
                     initialVariables = parseLooseJson(initVarEntry.content);
-                } catch (e) {
-                    console.error("Lỗi phân tích JSON [InitVar] khi tạo cuộc trò chuyện mới:", e);
-                    setError("Không thể phân tích dữ liệu biến khởi tạo từ thẻ nhân vật.");
-                }
+                } catch (e) {}
             }
         }
 
-        // --- LOGIC MỚI: CHẠY SCRIPT KHỞI TẠO TRONG LỜI CHÀO ---
-        // Nhiều thẻ Game (như Tu Tiên DnD) đặt script <UpdateVariable> ngay trong first_mes để khởi tạo chỉ số.
-        // Nếu không chạy cái này, nhân vật sẽ bắt đầu với chỉ số mặc định (thường là 0 hoặc rỗng).
         let startVariables = initialVariables;
         try {
             const result = processVariableUpdates(processedGreetingRaw, initialVariables);
             startVariables = result.updatedVariables;
-        } catch (e) {
-            console.warn("Không thể thực thi script khởi tạo trong lời chào đầu:", e);
-            // Vẫn tiếp tục với initialVariables nếu lỗi
-        }
-        // ------------------------------------------------------
+        } catch (e) {}
 
-        // 3. Perform initial World Info scan on the greeting
         const { updatedRuntimeState } = performWorldInfoScan(
             processedGreetingRaw,
             character.card.char_book?.entries || [],
-            {}, // Initial manual state is empty/default
-            {}  // Initial runtime state is empty
+            {}, {}, {}
         );
 
         const initialMessages: ChatMessage[] = [];
@@ -432,14 +390,12 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
             initialMessages.push({
                 id: `msg-start-${Date.now()}-${messageIdCounter++}`,
                 role: 'model',
-                content: '', // Content empty because it's fully rendered by Iframe
+                content: '', 
                 interactiveHtml: interactiveHtml,
                 originalRawContent: processedGreetingRaw
             });
         }
         
-        // Fallback if regex processing results in nothing but the original greeting existed
-        // (And we didn't force interactive mode above)
         if (initialMessages.length === 0 && processedGreetingRaw) {
             initialMessages.push({
                 id: `msg-start-${Date.now()}-${messageIdCounter++}`,
@@ -455,8 +411,8 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
             userPersonaId: activePersonaId,
             chatHistory: initialMessages,
             longTermSummaries: [],
-            variables: startVariables, // Sử dụng biến đã được script cập nhật
-            worldInfoRuntime: updatedRuntimeState, // Initialize with scanned state
+            variables: startVariables, 
+            worldInfoRuntime: updatedRuntimeState, 
             lastMessageSnippet: truncateText(displayContent || processedGreetingRaw || "Bắt đầu cuộc trò chuyện...", 50),
             lastUpdated: Date.now(),
             initialDiagnosticLog: diagnosticLog,
@@ -476,13 +432,12 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
     const sessionsWithCharacterData = sessions.map(s => ({
         session: s,
         character: characters.find(c => c.fileName === s.characterFileName)
-    })).filter(item => item.character); // Filter out sessions for deleted characters
+    })).filter(item => item.character); 
 
     if (isLoading || charactersLoading) {
         return <div className="flex justify-center items-center h-full"><Loader message="Đang tải sảnh trò chuyện..." /></div>;
     }
 
-    // Default export name logic
     const getInitialExportName = () => {
         if (!sessionToExport) return 'Adventure';
         const charName = characters.find(c => c.fileName === sessionToExport.characterFileName)?.card.name || 'Character';
@@ -490,11 +445,20 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
         return `Adventure_${safeCharName}_${sessionToExport.sessionId.substring(0, 8)}`;
     };
 
+    // OPEN STORY IMPORT MODAL
+    const handleOpenStoryImport = (e: React.MouseEvent, char: CharacterInContext) => {
+        e.stopPropagation();
+        if (!activePreset) {
+            showToast("Vui lòng chọn một Preset trước.", 'error');
+            return;
+        }
+        setStoryModalChar(char);
+    };
+
     return (
         <div className="space-y-10">
             {error && <p className="text-red-400 text-center bg-red-900/20 p-3 rounded">{error}</p>}
             
-            {/* Import / Snapshot Area */}
             <div className="animate-fade-in-up">
                 <AdventureImporter onImport={handleImportSnapshot} isLoading={isImporting} />
             </div>
@@ -530,6 +494,7 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
                                 key={character.fileName}
                                 character={character}
                                 onClick={() => setGreetingModalChar(character)}
+                                onImportStory={(e) => handleOpenStoryImport(e, character)}
                            />
                        ))}
                     </div>
@@ -538,12 +503,25 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
                 )}
             </div>
 
+            {/* MODALS */}
             {greetingModalChar && activePreset && (
                 <GreetingSelectorModal 
                     character={greetingModalChar}
                     preset={activePreset}
                     onClose={() => setGreetingModalChar(null)}
                     onStart={(greeting) => handleStartNewChat(greetingModalChar, greeting)}
+                />
+            )}
+
+            {storyModalChar && activePreset && (
+                <StoryImporterModal 
+                    character={storyModalChar}
+                    preset={activePreset}
+                    onClose={() => setStoryModalChar(null)}
+                    onStart={(sessionId) => {
+                        setStoryModalChar(null);
+                        onSessionSelect(sessionId);
+                    }}
                 />
             )}
 

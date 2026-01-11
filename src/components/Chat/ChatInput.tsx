@@ -21,6 +21,11 @@ interface ChatInputProps {
     isAutoLooping?: boolean;
     onToggleAutoLoop?: () => void;
     queueLength?: number;
+    // New Props for Story Mode
+    isStoryMode?: boolean;
+    storyQueueLength?: number;
+    onNextStoryChunk?: () => void;
+    onCancelStoryMode?: () => void; // NEW
 }
 
 const AVAILABLE_COMMANDS = [
@@ -53,7 +58,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     children,
     isAutoLooping = false,
     onToggleAutoLoop,
-    queueLength
+    queueLength,
+    isStoryMode = false,
+    storyQueueLength = 0,
+    onNextStoryChunk,
+    onCancelStoryMode
 }) => {
     const [userInput, setUserInput] = useState('');
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -103,6 +112,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         if (isAutoLooping && onToggleAutoLoop) {
              onToggleAutoLoop(); 
              return;
+        }
+
+        // Story Mode Logic: Send next chunk instead of user input
+        if (isStoryMode && onNextStoryChunk) {
+            onNextStoryChunk();
+            return;
         }
 
         if (!userInput.trim() || isInputLocked || isSummarizing) return;
@@ -241,28 +256,56 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 {/* Input Form */}
                 <form onSubmit={handleSubmit} className="flex gap-4">
                     <div className="relative flex-grow">
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            value={userInput}
-                            onChange={(e) => setUserInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            placeholder={isInputLocked ? "Đang chờ kịch bản..." : (isSummarizing ? "Hệ thống đang tóm tắt..." : (isAutoLooping ? "Đang tự động chạy..." : (isImmersive ? "Nhập tin nhắn..." : "Nhập tin nhắn... (Gõ / để xem lệnh)")))}
-                            className={`w-full rounded-lg p-3 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition disabled:opacity-50 ${
-                                isImmersive 
-                                ? 'bg-slate-800/70 border-slate-600/50 backdrop-blur-md placeholder-slate-400' 
-                                : 'bg-slate-700 border border-slate-600'
-                            } ${(isInputLocked || isSummarizing) ? 'cursor-not-allowed opacity-60' : ''}`}
-                            disabled={isLoading || isInputLocked || isAutoLooping || isSummarizing}
-                            aria-label="Chat input"
-                            autoComplete="off"
-                        />
+                        {isStoryMode ? (
+                            <div className={`w-full rounded-lg p-2 md:p-3 flex items-center justify-between transition border border-amber-500/30 gap-2 ${
+                                isImmersive ? 'bg-slate-800/70 backdrop-blur-md' : 'bg-slate-700'
+                            }`}>
+                                <div className="flex items-center gap-3 overflow-hidden">
+                                    <span className="text-amber-400 font-bold flex items-center gap-2 shrink-0">
+                                        <span className="text-xl">📖</span>
+                                        <span className="hidden sm:inline">Chế độ Cốt truyện</span>
+                                    </span>
+                                    
+                                    {onCancelStoryMode && (
+                                        <button 
+                                            type="button"
+                                            onClick={onCancelStoryMode}
+                                            className="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-900 text-red-200 rounded border border-red-700 hover:border-red-500 transition-colors whitespace-nowrap"
+                                        >
+                                            Hủy (Dừng & Chat)
+                                        </button>
+                                    )}
+                                </div>
+                                <span className="text-slate-300 text-sm font-mono shrink-0">
+                                    <span className="hidden sm:inline">Còn: </span>
+                                    <span className="text-white font-bold">{storyQueueLength}</span>
+                                    <span className="sm:hidden"> left</span>
+                                </span>
+                            </div>
+                        ) : (
+                            <input
+                                ref={inputRef}
+                                type="text"
+                                value={userInput}
+                                onChange={(e) => setUserInput(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                placeholder={isInputLocked ? "Đang chờ kịch bản..." : (isSummarizing ? "Hệ thống đang tóm tắt..." : (isAutoLooping ? "Đang tự động chạy..." : (isImmersive ? "Nhập tin nhắn..." : "Nhập tin nhắn... (Gõ / để xem lệnh)")))}
+                                className={`w-full rounded-lg p-3 text-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition disabled:opacity-50 ${
+                                    isImmersive 
+                                    ? 'bg-slate-800/70 border-slate-600/50 backdrop-blur-md placeholder-slate-400' 
+                                    : 'bg-slate-700 border border-slate-600'
+                                } ${(isInputLocked || isSummarizing) ? 'cursor-not-allowed opacity-60' : ''}`}
+                                disabled={isLoading || isInputLocked || isAutoLooping || isSummarizing}
+                                aria-label="Chat input"
+                                autoComplete="off"
+                            />
+                        )}
                     </div>
                     
                     {/* Send / Stop Button */}
                     <button
                         type="submit"
-                        disabled={!isAutoLooping && !isLoading && (isInputLocked || !userInput.trim() || isSummarizing)}
+                        disabled={!isAutoLooping && !isLoading && (isInputLocked || (!userInput.trim() && !isStoryMode) || isSummarizing)}
                         className={`text-white font-bold py-2 px-5 rounded-lg transition-colors duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed flex-shrink-0 flex items-center justify-center gap-2 min-w-[80px] ${
                             isImmersive 
                             ? 'bg-sky-600/80 hover:bg-sky-600 backdrop-blur-md' 
@@ -278,7 +321,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                                 <span>Dừng</span>
                             </>
                         ) : (
-                            <span>Gửi</span>
+                            isStoryMode ? (
+                                <>
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                    <span>Tiếp tục</span>
+                                </>
+                            ) : (
+                                <span>Gửi</span>
+                            )
                         )}
                     </button>
 

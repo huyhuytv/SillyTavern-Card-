@@ -182,7 +182,9 @@ export const useChatFlow = () => {
 
     }, [state, lorebooks, logger, showToast]);
 
-    const sendMessage = useCallback(async (text: string) => {
+    // --- UNIFIED SEND MESSAGE ---
+    // Modified to accept 'options' including 'forcedContent' for Story Mode
+    const sendMessage = useCallback(async (text: string, options?: { forcedContent?: string }) => {
         if (!state.card || !state.preset || !text.trim()) return;
 
         // 1. Reset trạng thái
@@ -195,6 +197,7 @@ export const useChatFlow = () => {
 
         // --- SNAPSHOT CREATION (Time Machine) ---
         // Clone current states BEFORE any processing to save in the message
+        // This ensures if we undo/delete this message, we go back to EXACTLY this state.
         const currentVariablesSnapshot = JSON.parse(JSON.stringify(state.variables));
         const currentRpgSnapshot = state.card.rpg_data ? JSON.parse(JSON.stringify(state.card.rpg_data)) : undefined;
         const currentWIRuntimeSnapshot = JSON.parse(JSON.stringify(state.worldInfoRuntime));
@@ -210,8 +213,8 @@ export const useChatFlow = () => {
             // Store Full State
             contextState: currentVariablesSnapshot,
             rpgState: currentRpgSnapshot,
-            worldInfoRuntime: currentWIRuntimeSnapshot, // NEW
-            worldInfoState: currentWIStateSnapshot      // NEW
+            worldInfoRuntime: currentWIRuntimeSnapshot,
+            worldInfoState: currentWIStateSnapshot
         };
         state.addMessage(userMsg);
 
@@ -219,15 +222,21 @@ export const useChatFlow = () => {
             // 4. Smart Scan (World Info) - WITH RETRY LOGIC
             let scanResult;
             let retryScan = true;
-            let forceKeywordMode = false; // Flag cho trường hợp "Bỏ qua" (Ignore)
+            let forceKeywordMode = false;
+
+            const dynamicEntries = state.generatedLorebookEntries || [];
 
             while (retryScan) {
                 try {
                     const recentHistoryText = state.messages.slice(-3).map(m => m.content).join('\n');
-                    const textToScan = `${recentHistoryText}\n${text}`;
+                    
+                    // IMPORTANT: Include the UPCOMING content in scan if available (Story Mode prediction)
+                    const textToScan = options?.forcedContent 
+                        ? `${recentHistoryText}\n${text}\n${options.forcedContent}`
+                        : `${recentHistoryText}\n${text}`;
+                        
                     const historyList = state.messages.map(m => m.content).slice(-3);
 
-                    // Nếu bị ép dùng Keyword Mode (do user chọn Ignore lỗi AI), ta tạo preset tạm
                     const effectivePreset = forceKeywordMode 
                         ? { ...state.preset, smart_scan_mode: 'keyword' as const } 
                         : state.preset;
@@ -240,15 +249,15 @@ export const useChatFlow = () => {
                         effectivePreset,
                         historyList, 
                         text, 
-                        state.variables
+                        state.variables,
+                        dynamicEntries
                     );
                     
-                    retryScan = false; // Thành công, thoát vòng lặp
+                    retryScan = false;
 
                 } catch (e: any) {
                     logger.logSystemMessage('error', 'system', `Smart Scan Error: ${e.message}`);
                     
-                    // Hiện Modal hỏi ý kiến
                     const decision = await waitForUserDecision(
                         "Lỗi Smart Scan (Quét Thông Minh)",
                         "Hệ thống gặp lỗi khi cố gắng phân tích ngữ cảnh bằng AI. Bạn muốn thử lại hay chuyển sang chế độ quét từ khóa cơ bản?",
@@ -256,109 +265,105 @@ export const useChatFlow = () => {
                     );
 
                     if (decision === 'retry') {
-                        retryScan = true; // Loop lại
+                        retryScan = true;
                         logger.logSystemMessage('interaction', 'system', 'Người dùng chọn: Thử lại Smart Scan.');
                     } else {
-                        retryScan = false; // Thoát vòng lặp
-                        forceKeywordMode = true; // Bật cờ để chạy fallback logic bên dưới
-                        
-                        // Để đơn giản, ta chạy lại vòng lặp NGAY LẬP TỨC với cờ forceKeywordMode
+                        retryScan = false;
+                        forceKeywordMode = true;
                         retryScan = true; 
                         logger.logSystemMessage('warn', 'system', 'Người dùng chọn: Bỏ qua lỗi, chuyển sang quét từ khóa.');
                     }
                 }
             }
             
-            // Nếu scanResult vẫn null (trường hợp cực hữu), fallback object rỗng
             if (!scanResult) {
                  scanResult = { activeEntries: [], updatedRuntimeState: state.worldInfoRuntime };
             }
 
+            // Apply new World Info Runtime State (Cooldowns etc.)
             state.setSessionData({ worldInfoRuntime: scanResult.updatedRuntimeState });
-            
-            // 5. Chuẩn bị Prompt
-            // NOTE: We pass generated entries implicitly? No, prepareChat needs them.
-            // But generated entries are in session state, not card. 
-            // Wait, we need to pass activeEntriesOverride which includes generated entries if they are scanned.
-            // scanInput automatically includes card entries. But generated entries are in ChatSession.
-            // We need to inject generated entries into scanInput?
-            // Actually, the simplest way for now is to rely on next turn scanning them if they exist in card.
-            // BUT here generated entries are ephemeral.
-            // Let's modify prepareChat to accept generated entries.
-            // HOWEVER, generated entries are just WorldInfoEntry. We can append them to card.char_book.entries temporarily for the scan?
-            // BETTER: pass them as activeEntriesOverride if they were selected by scan.
-            // Scan logic uses `allEntries`. We need to merge `generatedLorebookEntries` into `allEntries` before scanning.
-            // This requires modifying `scanInput` usage or `useWorldSystem`.
-            
-            // FIX: Merging generated entries for prompt construction
-            const generatedEntries = state.generatedLorebookEntries || [];
-            // We'll handle this in promptManager by passing them via lorebooks arg or similar?
-            // Actually, constructChatPrompt takes `lorebooks`. We can mock a lorebook.
-            const sessionLorebook = { name: "Session Generated", book: { entries: generatedEntries } };
-            const effectiveLorebooks = [...lorebooks, sessionLorebook];
-
-            const { baseSections } = prepareChat(state.card, state.preset, effectiveLorebooks, state.persona);
-            logger.logPrompt(baseSections); 
-
-            const { fullPrompt, structuredPrompt } = await constructChatPrompt(
-                baseSections, 
-                [...state.messages, userMsg], 
-                state.authorNote,
-                state.card, 
-                state.longTermSummaries, 
-                state.preset.summarization_chunk_size || 10,
-                state.variables, 
-                state.lastStateBlock, 
-                effectiveLorebooks, // Pass effective lorebooks
-                state.preset.context_mode || 'standard',
-                state.persona?.name || 'User',
-                state.worldInfoState,
-                scanResult.activeEntries, 
-                state.worldInfoPlacement,
-                state.preset
-            );
-
-            logger.logPrompt(structuredPrompt); 
+            logger.logWorldInfo(scanResult.activeEntries);
             if (scanResult.smartScanLog) {
                 logger.logSmartScan(scanResult.smartScanLog.fullPrompt, scanResult.smartScanLog.rawResponse, scanResult.smartScanLog.latency);
             }
-            logger.logWorldInfo(scanResult.activeEntries);
+            
+            // 5. Chuẩn bị Prompt (SKIP if Story Mode to save tokens/time, unless needed later)
+            // Actually, we should only construct prompt if we are hitting the API.
+            let fullPrompt = "";
+            
+            if (!options?.forcedContent) {
+                // Mock effective lorebook list for prompt construction
+                const sessionLorebook = { name: "Session Generated", book: { entries: dynamicEntries } };
+                const effectiveLorebooks = [...lorebooks, sessionLorebook];
 
-            // 6. Tạo tin nhắn chờ của AI
+                const { baseSections } = prepareChat(state.card, state.preset, effectiveLorebooks, state.persona);
+                logger.logPrompt(baseSections); 
+
+                const constructed = await constructChatPrompt(
+                    baseSections, 
+                    [...state.messages, userMsg], 
+                    state.authorNote,
+                    state.card, 
+                    state.longTermSummaries, 
+                    state.preset.summarization_chunk_size || 10,
+                    state.variables, 
+                    state.lastStateBlock, 
+                    effectiveLorebooks,
+                    state.preset.context_mode || 'standard',
+                    state.persona?.name || 'User',
+                    state.worldInfoState,
+                    scanResult.activeEntries, 
+                    state.worldInfoPlacement,
+                    state.preset
+                );
+                fullPrompt = constructed.fullPrompt;
+                logger.logPrompt(constructed.structuredPrompt); 
+            }
+
+            // 6. Tạo tin nhắn AI (Placeholder)
             const aiMsg = createPlaceholderMessage('model');
-            // Attach initial state to AI msg too (will be updated if Medusa runs)
+            // Attach snapshots to AI msg too
             aiMsg.rpgState = currentRpgSnapshot;
-            // Also attach runtime state to AI msg so if we delete FROM AI message, we have context
             aiMsg.worldInfoRuntime = scanResult.updatedRuntimeState; 
             
             state.addMessage(aiMsg);
 
-            // 7. Thực hiện gọi API
+            // 7. Thực hiện lấy nội dung (API vs Queue)
             let accumulatedText = "";
-            const shouldStream = state.preset.stream_response; 
-
-            if (shouldStream) {
-                const stream = sendChatRequestStream(fullPrompt, state.preset, ac.signal);
-                for await (const chunk of stream) {
-                    if (ac.signal.aborted) break;
-                    accumulatedText += chunk;
-                    state.updateMessage(aiMsg.id, { content: accumulatedText + " ▌" });
-                }
+            
+            if (options?.forcedContent) {
+                // STORY MODE PATH: Immediate content, no API call
+                accumulatedText = options.forcedContent;
+                state.updateMessage(aiMsg.id, { content: accumulatedText });
+                // No streaming delay requested by user
             } else {
-                state.updateMessage(aiMsg.id, { content: "..." }); 
-                const result = await sendChatRequest(fullPrompt, state.preset);
-                if (!ac.signal.aborted) {
-                    accumulatedText = result.response.text || "";
-                    state.updateMessage(aiMsg.id, { content: accumulatedText });
+                // CHAT MODE PATH: Call API
+                const shouldStream = state.preset.stream_response; 
+
+                if (shouldStream) {
+                    const stream = sendChatRequestStream(fullPrompt, state.preset, ac.signal);
+                    for await (const chunk of stream) {
+                        if (ac.signal.aborted) break;
+                        accumulatedText += chunk;
+                        state.updateMessage(aiMsg.id, { content: accumulatedText + " ▌" });
+                    }
+                } else {
+                    state.updateMessage(aiMsg.id, { content: "..." }); 
+                    const result = await sendChatRequest(fullPrompt, state.preset);
+                    if (!ac.signal.aborted) {
+                        accumulatedText = result.response.text || "";
+                        state.updateMessage(aiMsg.id, { content: accumulatedText });
+                    }
                 }
             }
 
             // 8. Xử lý hậu kỳ & Mythic Engine
             if (!ac.signal.aborted) {
+                // Post-process logic (Variables, Regex, HTML)
                 await processAIResponse(accumulatedText, aiMsg.id);
                 logger.logResponse(accumulatedText);
 
-                // --- VÒNG LẶP 2: MYTHIC ENGINE (RPG SYSTEM) - WITH RETRY LOGIC ---
+                // --- VÒNG LẶP 2: MYTHIC ENGINE (RPG SYSTEM) ---
                 if (state.card.rpg_data) {
                     logger.logSystemMessage('state', 'system', 'Mythic Engine: Đang kích hoạt Medusa...');
                     const apiKey = getApiKey();
@@ -369,6 +374,8 @@ export const useChatFlow = () => {
                         while (retryMedusa) {
                             try {
                                 const mythicStartTime = Date.now();
+                                
+                                // History for RPG: User Input + AI Output (or Story Chunk)
                                 let historyLog = `User: ${text}\nGM/System: ${accumulatedText}`;
                                 
                                 if (state.messages.length <= 3) {
@@ -411,7 +418,6 @@ export const useChatFlow = () => {
                                         logger.logSystemMessage('state', 'system', '[RPG] Không có thay đổi trạng thái.');
                                     }
 
-                                    // --- NEW: SET PERSISTENT NOTIFICATION ---
                                     if (medusaResult.notifications && medusaResult.notifications.length > 0) {
                                         const notificationText = medusaResult.notifications.join('\n');
                                         state.setRpgNotification(notificationText);
@@ -419,13 +425,11 @@ export const useChatFlow = () => {
                                         state.setRpgNotification(null);
                                     }
                                     
-                                    // --- LIVE LINK SYNC ---
                                     const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
                                     state.setGeneratedLorebookEntries(generatedEntries);
                                     if (generatedEntries.length > 0) {
                                         logger.logSystemMessage('state', 'system', `[Live-Link] Synced ${generatedEntries.length} entries from RPG.`);
                                     }
-                                    // ---------------------
 
                                     retryMedusa = false; // Success
                                 } else {
@@ -456,7 +460,8 @@ export const useChatFlow = () => {
                 }
                 // --------------------------------------------------
 
-            } else if (shouldStream) {
+            } else if (!options?.forcedContent && state.preset.stream_response) {
+                // If aborted during stream, ensure partial content is saved
                 state.updateMessage(aiMsg.id, { content: accumulatedText });
             }
 
@@ -478,6 +483,7 @@ export const useChatFlow = () => {
         stopGeneration,
         interactiveError,
         handleUserDecision,
-        manualMythicTrigger // Exported
+        manualMythicTrigger,
+        processAIResponse // Export this so Engine can use it for specific needs
     };
 };
