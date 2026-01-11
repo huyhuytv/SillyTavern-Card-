@@ -181,15 +181,18 @@ const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog: string
 
 const parseCustomActions = (rawText: string): MedusaAction[] => {
     const actions: MedusaAction[] = [];
-    const editBlockMatch = rawText.match(/<tableEdit>([\s\S]*?)<\/tableEdit>/);
+    
+    // 1. Clean Markdown Fences first (Fix for Parser Error)
+    let cleanText = rawText.replace(/```(?:json|text|xml)?\s*([\s\S]*?)\s*```/gi, '$1').trim();
+    
+    const editBlockMatch = cleanText.match(/<tableEdit>([\s\S]*?)<\/tableEdit>/);
     if (!editBlockMatch) return [];
+    
     let content = editBlockMatch[1];
     
+    // Additional cleaning inside the block
     content = content
-        .replace(/<!--/g, '')
-        .replace(/-->/g, '')
-        .replace(/```[a-z]*\n?/gi, '')
-        .replace(/```/g, '')
+        .replace(/<!--[\s\S]*?-->/g, '') // Remove comments
         .trim();
 
     const extractJson = (str: string, startPos: number): { json: any, endPos: number } | null => {
@@ -384,13 +387,6 @@ const applyMedusaActions = (
 
 // --- LIVE LINK LOGIC (OPTION A: MARKDOWN CARD) ---
 
-/**
- * Generates Lorebook entries from database content using Markdown formatting.
- * Rules:
- * 1. Checks `lorebookLink.enabled`.
- * 2. Formats as clean Markdown Card.
- * 3. Uses Smart Naming: "[Mythic] <KeyWord>".
- */
 export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
     const entries: WorldInfoEntry[] = [];
 
@@ -398,40 +394,29 @@ export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
         const linkConfig = table.config.lorebookLink;
         if (!linkConfig || !linkConfig.enabled || !linkConfig.keyColumnId) return;
 
-        // Find index of the key column
         const keyColIndex = table.config.columns.findIndex(c => c.id === linkConfig.keyColumnId);
         if (keyColIndex === -1) return;
 
         table.data.rows.forEach(row => {
-            const rowId = row[0]; // UUID
-            // Get Key Value (e.g. "Excalibur")
+            const rowId = row[0]; 
             const keyValue = row[keyColIndex + 1]; 
             
-            if (!keyValue) return; // Skip rows without key value
+            if (!keyValue) return;
 
-            // --- OPTION A: MARKDOWN CARD FORMAT ---
-            // Header
             let contentLines = [`### [Mythic Data] ${keyValue}`];
             contentLines.push(`**Nguồn:** ${table.config.name}`);
             
-            // Body Loop
             table.config.columns.forEach((col, idx) => {
                 const val = row[idx + 1];
-                // Skip empty/null values to save tokens and keep it clean
                 if (val === null || val === undefined || val === '') return;
-
-                // Format: - **Label:** Value
                 contentLines.push(`- **${col.label}:** ${val}`);
             });
 
             const fullContent = contentLines.join('\n');
 
-            // Create Entry
             const entry: WorldInfoEntry = {
                 uid: `mythic_${table.config.id}_${rowId}`,
-                keys: [String(keyValue)], // The main key
-                secondary_keys: [], 
-                // Smart Naming
+                keys: [String(keyValue)], 
                 comment: `[Live-Link] ${keyValue}`,
                 content: fullContent,
                 constant: false,
@@ -439,7 +424,7 @@ export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
                 enabled: true,
                 position: 'before_char',
                 use_regex: false,
-                insertion_order: 100 // High priority
+                insertion_order: 100 
             };
 
             entries.push(entry);
@@ -512,10 +497,14 @@ export const MedusaService = {
                 rawText = response.text || "";
             }
             
-            const thinkMatch = rawText.match(/<tableThink>([\s\S]*?)<\/tableThink>/);
+            // Clean markdown fences to help parser
+            const cleanRawText = rawText.replace(/```(?:json|text|xml)?\s*([\s\S]*?)\s*```/gi, '$1').trim();
+
+            const thinkMatch = cleanRawText.match(/<tableThink>([\s\S]*?)<\/tableThink>/);
             const thinkContent = thinkMatch ? thinkMatch[1].replace(/<!--|-->/g, '').trim() : "No thinking data.";
             
-            const actions = parseCustomActions(rawText);
+            // This checks for the actual Edit block
+            const actions = parseCustomActions(cleanRawText);
 
             if (actions.length > 0) {
                 const { newDb, notifications, logs } = applyMedusaActions(database, actions);
@@ -533,8 +522,14 @@ export const MedusaService = {
                     }
                 };
             } else {
+                // Determine if it was a failure to parse or just no action
+                // If the raw text contains "tableEdit" but we got no actions, it might be a malformed response
+                if (cleanRawText.includes('<tableEdit>') && !cleanRawText.includes('</tableEdit>')) {
+                     throw new Error("Phản hồi từ AI bị cắt cụt hoặc sai định dạng thẻ (Malformed XML tags).");
+                }
+
                 return {
-                    success: true,
+                    success: true, // No action is technically a success state for the engine
                     newDb: database,
                     notifications: [],
                     logs: [`[Thinking]: ${thinkContent.substring(0, 100)}...`, "No actions required."],

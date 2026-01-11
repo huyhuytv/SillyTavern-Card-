@@ -67,44 +67,44 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
             setIsScanning(true);
             const startTime = Date.now();
             
-            try {
-                // 1. Prepare Context (History)
-                const depth = preset?.smart_scan_depth || 3;
-                // Ensure we only take what is asked, historyForScan is already reversed/sliced usually but safeguard here
-                const chatContext = historyForScan.slice(-depth).join('\n');
-                
-                // 2. Prepare State String
-                let stateString = "";
-                if (variables && Object.keys(variables).length > 0) {
-                    // Simplified formatting for AI reading
-                    stateString = Object.entries(variables)
-                        .map(([k, v]) => {
-                            if (Array.isArray(v) && v.length > 1 && typeof v[1] === 'string') {
-                                return `- ${k}: ${v[0]} (${v[1]})`; // Value + Desc
-                            }
-                            return `- ${k}: ${JSON.stringify(v)}`;
-                        })
-                        .join('\n');
-                }
+            // REMOVED TRY-CATCH HERE TO LET ERRORS BUBBLE UP TO UI
+            // The caller (useChatFlow) will handle the error with the Retry/Ignore modal.
+            
+            // 1. Prepare Context (History)
+            const depth = preset?.smart_scan_depth || 3;
+            const chatContext = historyForScan.slice(-depth).join('\n');
+            
+            // 2. Prepare State String
+            let stateString = "";
+            if (variables && Object.keys(variables).length > 0) {
+                stateString = Object.entries(variables)
+                    .map(([k, v]) => {
+                        if (Array.isArray(v) && v.length > 1 && typeof v[1] === 'string') {
+                            return `- ${k}: ${v[0]} (${v[1]})`; 
+                        }
+                        return `- ${k}: ${JSON.stringify(v)}`;
+                    })
+                    .join('\n');
+            }
 
-                // 3. Prepare Lorebook Payload (Separated)
-                // NOW USING allEntries which includes Dynamic Entries
-                const { contextString, candidateString } = prepareLorebookForAI(allEntries);
+            // 3. Prepare Lorebook Payload
+            const { contextString, candidateString } = prepareLorebookForAI(allEntries);
 
-                // Only scan if there are candidates to choose from
-                if (candidateString) {
-                    // 4. Call API with New Structure
+            // Only scan if there are candidates
+            if (candidateString) {
+                try {
+                    // 4. Call API
                     const { selectedIds, outgoingPrompt, rawResponse } = await scanWorldInfoWithAI(
-                        chatContext, // Old sig placeholder, treated as history inside service now
+                        chatContext, 
                         contextString,
                         candidateString,
-                        latestInput || textToScan, // Fallback to textToScan if latestInput missing
+                        latestInput || textToScan, 
                         stateString,
                         preset?.smart_scan_model || 'gemini-2.5-flash',
-                        preset?.smart_scan_system_prompt // Pass custom prompt
+                        preset?.smart_scan_system_prompt 
                     );
                     
-                    // 5. Apply "Token Budget" / Max Entries
+                    // 5. Apply "Token Budget"
                     const maxEntries = preset?.smart_scan_max_entries || 5;
                     aiActiveUids = selectedIds.slice(0, maxEntries);
                     
@@ -114,17 +114,16 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
                         rawResponse: rawResponse,
                         latency: endTime - startTime
                     };
+                } catch (error) {
+                    setIsScanning(false);
+                    // Re-throw to trigger the modal in parent
+                    throw error;
                 }
-            } catch (e) {
-                console.error("[Smart Scan] Error:", e);
-            } finally {
-                setIsScanning(false);
             }
+            setIsScanning(false);
         }
 
         // --- HYBRID / KEYWORD SCANNING ---
-        // Pass bypassKeywordScan=true if mode is 'ai_only'
-        // NOW USING allEntries which includes Dynamic Entries for Keyword Matching too
         const result = performWorldInfoScan(
             textToScan, 
             allEntries, 
@@ -142,14 +141,11 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
         rawContent: string,
         currentVariables: Record<string, any>
     ) => {
-        // 1. Variable Engine (Variable Processing Phase)
+        // 1. Variable Engine
         const { updatedVariables, cleanedText, variableLog } = processVariableUpdates(rawContent, currentVariables);
 
-        // 2. Regex / Script Engine (Display Processing Phase)
+        // 2. Regex / Script Engine
         const scripts = card?.extensions?.regex_scripts || [];
-        
-        // CRITICAL: Pass [2] to indicate Output processing logic.
-        // Placement 2 = AI Output.
         const { displayContent, interactiveHtml, diagnosticLog } = processWithRegex(cleanedText, scripts, [2]);
 
         return {
