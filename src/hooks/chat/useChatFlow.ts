@@ -113,85 +113,77 @@ export const useChatFlow = () => {
         state.setLoading(true);
 
         try {
-            // LOOP FOR MANUAL RETRY
-            let retryMedusa = true;
+            const mythicStartTime = Date.now();
+            let historyLog = `User: ${lastUserMsg.content}\nGM/System: ${lastModelMsg.content}`;
             
-            while(retryMedusa) {
-                try {
-                    const mythicStartTime = Date.now();
-                    let historyLog = `User: ${lastUserMsg.content}\nGM/System: ${lastModelMsg.content}`;
-                    
-                    let allEntries: WorldInfoEntry[] = state.card.char_book?.entries || [];
-                    lorebooks.forEach(lb => {
-                        if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
-                    });
+            // Gather Lorebook Data
+            let allEntries: WorldInfoEntry[] = state.card.char_book?.entries || [];
+            lorebooks.forEach(lb => {
+                if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
+            });
 
-                    const activeEntries: WorldInfoEntry[] = []; 
+            // Sử dụng các entry đang active từ store (nếu có) hoặc quét lại
+            // Để đơn giản cho manual trigger, ta dùng runtime active entries từ message cuối nếu có, hoặc rỗng
+            const activeEntries: WorldInfoEntry[] = []; 
 
-                    const medusaResult = await MedusaService.processTurn(
-                        historyLog,
-                        state.card.rpg_data,
-                        apiKey,
-                        activeEntries,
-                        allEntries,
-                        'gemini-flash-lite-latest'
-                    );
+            const medusaResult = await MedusaService.processTurn(
+                historyLog,
+                state.card.rpg_data,
+                apiKey,
+                activeEntries, // Có thể cải thiện bằng cách lấy từ scan result lưu trong message
+                allEntries,
+                'gemini-flash-lite-latest'
+            );
 
-                    if (medusaResult.debugInfo) {
-                        const latency = Date.now() - mythicStartTime;
-                        logger.logMythic(medusaResult.debugInfo.prompt, medusaResult.debugInfo.rawResponse, latency);
-                    }
+            if (medusaResult.debugInfo) {
+                const latency = Date.now() - mythicStartTime;
+                logger.logMythic(medusaResult.debugInfo.prompt, medusaResult.debugInfo.rawResponse, latency);
+            }
 
-                    if (medusaResult.success) {
-                        const updatedCard = { ...state.card, rpg_data: medusaResult.newDb };
-                        state.setSessionData({ card: updatedCard });
-                        
-                        state.updateMessage(lastModelMsg.id, { rpgState: medusaResult.newDb });
+            if (medusaResult.success) {
+                const updatedCard = { ...state.card, rpg_data: medusaResult.newDb };
+                state.setSessionData({ card: updatedCard });
+                
+                // Update state vào tin nhắn cuối để đồng bộ
+                state.updateMessage(lastModelMsg.id, { rpgState: medusaResult.newDb });
 
-                        if (medusaResult.logs && medusaResult.logs.length > 0) {
-                            logger.logSystemMessage('script-success', 'system', `[RPG Re-run]:\n${medusaResult.logs.join('\n')}`);
-                        }
-                        
-                        if (medusaResult.notifications && medusaResult.notifications.length > 0) {
-                            const notificationText = medusaResult.notifications.join('\n');
-                            state.setRpgNotification(notificationText);
-                        } else {
-                            state.setRpgNotification(null);
-                        }
-
-                        const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
-                        state.setGeneratedLorebookEntries(generatedEntries);
-                        if (generatedEntries.length > 0) {
-                            logger.logSystemMessage('state', 'system', `[Live-Link] Synced ${generatedEntries.length} entries from RPG.`);
-                        }
-
-                        showToast('Đã cập nhật trạng thái RPG thành công.', 'success');
-                        retryMedusa = false; // Done
-                    } else {
-                        throw new Error('error' in medusaResult ? medusaResult.error : "Unknown RPG Error");
-                    }
-                } catch (e: any) {
-                    logger.logSystemMessage('error', 'system', `Mythic Engine Manual Error: ${e.message}`);
-                    const decision = await waitForUserDecision(
-                        "Lỗi Mythic Engine (Thủ công)",
-                        "Hệ thống RPG gặp lỗi khi chạy thủ công. Bạn muốn thử lại hay hủy bỏ?",
-                        e
-                    );
-                    if (decision === 'retry') retryMedusa = true;
-                    else retryMedusa = false;
+                if (medusaResult.logs && medusaResult.logs.length > 0) {
+                    logger.logSystemMessage('script-success', 'system', `[RPG Re-run]:\n${medusaResult.logs.join('\n')}`);
                 }
+                
+                // --- NEW: SET PERSISTENT NOTIFICATION ---
+                if (medusaResult.notifications && medusaResult.notifications.length > 0) {
+                    const notificationText = medusaResult.notifications.join('\n');
+                    state.setRpgNotification(notificationText);
+                } else {
+                    state.setRpgNotification(null); // Clear if no new notifications
+                }
+                // ----------------------------------------
+
+                // --- LIVE LINK SYNC ---
+                const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
+                state.setGeneratedLorebookEntries(generatedEntries);
+                if (generatedEntries.length > 0) {
+                    logger.logSystemMessage('state', 'system', `[Live-Link] Synced ${generatedEntries.length} entries from RPG.`);
+                }
+                // ---------------------
+
+                showToast('Đã cập nhật trạng thái RPG thành công.', 'success');
+            } else {
+                throw new Error('error' in medusaResult ? medusaResult.error : "Unknown RPG Error");
             }
 
         } catch (e: any) {
-            // Should not reach here if loop handled correctly, but safety net
-            logger.logSystemMessage('error', 'system', `Final Mythic Error: ${e.message}`);
+            logger.logSystemMessage('error', 'system', `Mythic Engine Manual Error: ${e.message}`);
+            showToast(`Lỗi RPG: ${e.message}`, 'error');
         } finally {
             state.setLoading(false);
         }
 
-    }, [state, lorebooks, logger, showToast, waitForUserDecision]);
+    }, [state, lorebooks, logger, showToast]);
 
     // --- UNIFIED SEND MESSAGE ---
+    // Modified to accept 'options' including 'forcedContent' for Story Mode
     const sendMessage = useCallback(async (text: string, options?: { forcedContent?: string }) => {
         if (!state.card || !state.preset || !text.trim()) return;
 
@@ -203,7 +195,9 @@ export const useChatFlow = () => {
         const ac = new AbortController();
         state.setAbortController(ac);
 
-        // --- SNAPSHOT CREATION ---
+        // --- SNAPSHOT CREATION (Time Machine) ---
+        // Clone current states BEFORE any processing to save in the message
+        // This ensures if we undo/delete this message, we go back to EXACTLY this state.
         const currentVariablesSnapshot = JSON.parse(JSON.stringify(state.variables));
         const currentRpgSnapshot = state.card.rpg_data ? JSON.parse(JSON.stringify(state.card.rpg_data)) : undefined;
         const currentWIRuntimeSnapshot = JSON.parse(JSON.stringify(state.worldInfoRuntime));
@@ -225,7 +219,7 @@ export const useChatFlow = () => {
         state.addMessage(userMsg);
 
         try {
-            // 4. Smart Scan (World Info) - WITH RETRY LOGIC VIA MODAL
+            // 4. Smart Scan (World Info) - WITH RETRY LOGIC
             let scanResult;
             let retryScan = true;
             let forceKeywordMode = false;
@@ -236,6 +230,7 @@ export const useChatFlow = () => {
                 try {
                     const recentHistoryText = state.messages.slice(-3).map(m => m.content).join('\n');
                     
+                    // IMPORTANT: Include the UPCOMING content in scan if available (Story Mode prediction)
                     const textToScan = options?.forcedContent 
                         ? `${recentHistoryText}\n${text}\n${options.forcedContent}`
                         : `${recentHistoryText}\n${text}`;
@@ -246,7 +241,6 @@ export const useChatFlow = () => {
                         ? { ...state.preset, smart_scan_mode: 'keyword' as const } 
                         : state.preset;
 
-                    // This now throws an error if AI fails
                     scanResult = await scanInput(
                         textToScan, 
                         state.worldInfoState, 
@@ -259,7 +253,7 @@ export const useChatFlow = () => {
                         dynamicEntries
                     );
                     
-                    retryScan = false; // Success
+                    retryScan = false;
 
                 } catch (e: any) {
                     logger.logSystemMessage('error', 'system', `Smart Scan Error: ${e.message}`);
@@ -274,12 +268,8 @@ export const useChatFlow = () => {
                         retryScan = true;
                         logger.logSystemMessage('interaction', 'system', 'Người dùng chọn: Thử lại Smart Scan.');
                     } else {
-                        // Ignore implies fallback to keyword or empty
                         retryScan = false;
-                        forceKeywordMode = true; 
-                        
-                        // We need one last run with keyword mode to get a valid result structure if we "Ignore/Fallback"
-                        // Or simply re-enter loop with forceKeywordMode set
+                        forceKeywordMode = true;
                         retryScan = true; 
                         logger.logSystemMessage('warn', 'system', 'Người dùng chọn: Bỏ qua lỗi, chuyển sang quét từ khóa.');
                     }
@@ -290,17 +280,19 @@ export const useChatFlow = () => {
                  scanResult = { activeEntries: [], updatedRuntimeState: state.worldInfoRuntime };
             }
 
-            // Apply new World Info Runtime State
+            // Apply new World Info Runtime State (Cooldowns etc.)
             state.setSessionData({ worldInfoRuntime: scanResult.updatedRuntimeState });
             logger.logWorldInfo(scanResult.activeEntries);
             if (scanResult.smartScanLog) {
                 logger.logSmartScan(scanResult.smartScanLog.fullPrompt, scanResult.smartScanLog.rawResponse, scanResult.smartScanLog.latency);
             }
             
-            // 5. Prepare Prompt
+            // 5. Chuẩn bị Prompt (SKIP if Story Mode to save tokens/time, unless needed later)
+            // Actually, we should only construct prompt if we are hitting the API.
             let fullPrompt = "";
             
             if (!options?.forcedContent) {
+                // Mock effective lorebook list for prompt construction
                 const sessionLorebook = { name: "Session Generated", book: { entries: dynamicEntries } };
                 const effectiveLorebooks = [...lorebooks, sessionLorebook];
 
@@ -328,72 +320,46 @@ export const useChatFlow = () => {
                 logger.logPrompt(constructed.structuredPrompt); 
             }
 
-            // 6. Placeholder AI Message
+            // 6. Tạo tin nhắn AI (Placeholder)
             const aiMsg = createPlaceholderMessage('model');
+            // Attach snapshots to AI msg too
             aiMsg.rpgState = currentRpgSnapshot;
             aiMsg.worldInfoRuntime = scanResult.updatedRuntimeState; 
             
             state.addMessage(aiMsg);
 
-            // 7. Fetch Content
+            // 7. Thực hiện lấy nội dung (API vs Queue)
             let accumulatedText = "";
             
             if (options?.forcedContent) {
+                // STORY MODE PATH: Immediate content, no API call
                 accumulatedText = options.forcedContent;
                 state.updateMessage(aiMsg.id, { content: accumulatedText });
+                // No streaming delay requested by user
             } else {
+                // CHAT MODE PATH: Call API
                 const shouldStream = state.preset.stream_response; 
 
-                // MAIN CHAT GENERATION LOOP FOR ERRORS
-                let retryGeneration = true;
-                while (retryGeneration) {
-                    try {
-                        if (shouldStream) {
-                            const stream = sendChatRequestStream(fullPrompt, state.preset, ac.signal);
-                            let streamText = "";
-                            for await (const chunk of stream) {
-                                if (ac.signal.aborted) break;
-                                streamText += chunk;
-                                state.updateMessage(aiMsg.id, { content: streamText + " ▌" });
-                            }
-                            accumulatedText = streamText;
-                        } else {
-                            state.updateMessage(aiMsg.id, { content: "..." }); 
-                            const result = await sendChatRequest(fullPrompt, state.preset);
-                            if (!ac.signal.aborted) {
-                                accumulatedText = result.response.text || "";
-                                state.updateMessage(aiMsg.id, { content: accumulatedText });
-                            }
-                        }
-                        retryGeneration = false; // Success
-                    } catch (err: any) {
-                        if (ac.signal.aborted) {
-                            retryGeneration = false;
-                            throw err; // Re-throw abort
-                        }
-                        
-                        logger.logSystemMessage('api-error', 'api', err.message);
-                        
-                        const decision = await waitForUserDecision(
-                            "Lỗi Kết Nối AI",
-                            "Không thể nhận phản hồi từ AI. (Lỗi mạng, API Key hoặc Proxy). Bạn muốn thử lại không?",
-                            err
-                        );
-                        
-                        if (decision === 'retry') {
-                            retryGeneration = true;
-                            state.updateMessage(aiMsg.id, { content: "Đang thử lại..." });
-                        } else {
-                            retryGeneration = false;
-                            state.updateMessage(aiMsg.id, { content: "⚠️ (Đã bỏ qua lỗi - Không có nội dung)" });
-                            accumulatedText = ""; // Empty content if ignored
-                        }
+                if (shouldStream) {
+                    const stream = sendChatRequestStream(fullPrompt, state.preset, ac.signal);
+                    for await (const chunk of stream) {
+                        if (ac.signal.aborted) break;
+                        accumulatedText += chunk;
+                        state.updateMessage(aiMsg.id, { content: accumulatedText + " ▌" });
+                    }
+                } else {
+                    state.updateMessage(aiMsg.id, { content: "..." }); 
+                    const result = await sendChatRequest(fullPrompt, state.preset);
+                    if (!ac.signal.aborted) {
+                        accumulatedText = result.response.text || "";
+                        state.updateMessage(aiMsg.id, { content: accumulatedText });
                     }
                 }
             }
 
-            // 8. Post-Processing & Mythic Engine
+            // 8. Xử lý hậu kỳ & Mythic Engine
             if (!ac.signal.aborted) {
+                // Post-process logic (Variables, Regex, HTML)
                 await processAIResponse(accumulatedText, aiMsg.id);
                 logger.logResponse(accumulatedText);
 
@@ -402,115 +368,109 @@ export const useChatFlow = () => {
                     logger.logSystemMessage('state', 'system', 'Mythic Engine: Đang kích hoạt Medusa...');
                     const apiKey = getApiKey();
                     
-                    // We also want user decision here for missing key
-                    let hasKey = !!apiKey;
-                    // Note: If using proxy, apiKey might not be needed depending on setup, but MedusaService handles checks. 
-                    // Let's assume MedusaService throws if config is invalid.
-
-                    let retryMedusa = true;
+                    if (apiKey) {
+                        let retryMedusa = true;
                         
-                    while (retryMedusa) {
-                        try {
-                            const mythicStartTime = Date.now();
-                            let historyLog = `User: ${text}\nGM/System: ${accumulatedText}`;
-                            
-                            if (state.messages.length <= 3) {
-                                const greetingMsg = state.messages.find(m => m.role === 'model');
-                                if (greetingMsg && greetingMsg.content) {
-                                    historyLog = `System (Context/Greeting): ${greetingMsg.content}\n\n${historyLog}`;
+                        while (retryMedusa) {
+                            try {
+                                const mythicStartTime = Date.now();
+                                
+                                // History for RPG: User Input + AI Output (or Story Chunk)
+                                let historyLog = `User: ${text}\nGM/System: ${accumulatedText}`;
+                                
+                                if (state.messages.length <= 3) {
+                                    const greetingMsg = state.messages.find(m => m.role === 'model');
+                                    if (greetingMsg && greetingMsg.content) {
+                                        historyLog = `System (Context/Greeting): ${greetingMsg.content}\n\n${historyLog}`;
+                                    }
                                 }
-                            }
-                            
-                            let allEntries: WorldInfoEntry[] = state.card.char_book?.entries || [];
-                            lorebooks.forEach(lb => {
-                                if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
-                            });
-
-                            const dynamicActiveEntries = scanResult.activeEntries.filter(e => !e.constant);
-
-                            // MedusaService now catches generic errors and returns success:false
-                            // BUT for network/critical errors it might throw. 
-                            // AND if success:false, we might want to prompt user if it's a critical logic failure?
-                            // Actually MedusaService.processTurn catches internal errors and returns them in the result object.
-                            // We should check result.success.
-
-                            const medusaResult = await MedusaService.processTurn(
-                                historyLog,
-                                state.card.rpg_data,
-                                apiKey || 'dummy', // Pass dummy if missing, let service fail if needed
-                                dynamicActiveEntries,
-                                allEntries,
-                                'gemini-flash-lite-latest'
-                            );
-
-                            if (medusaResult.debugInfo) {
-                                const latency = Date.now() - mythicStartTime;
-                                logger.logMythic(medusaResult.debugInfo.prompt, medusaResult.debugInfo.rawResponse, latency);
-                            }
-
-                            if (medusaResult.success) {
-                                const updatedCard = { ...state.card, rpg_data: medusaResult.newDb };
                                 
-                                state.setSessionData({ card: updatedCard });
-                                state.updateMessage(aiMsg.id, { rpgState: medusaResult.newDb });
-                                
-                                if (medusaResult.logs && medusaResult.logs.length > 0) {
-                                    logger.logSystemMessage('script-success', 'system', `[RPG Update]:\n${medusaResult.logs.join('\n')}`);
+                                let allEntries: WorldInfoEntry[] = state.card.char_book?.entries || [];
+                                lorebooks.forEach(lb => {
+                                    if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
+                                });
+
+                                const dynamicActiveEntries = scanResult.activeEntries.filter(e => !e.constant);
+
+                                const medusaResult = await MedusaService.processTurn(
+                                    historyLog,
+                                    state.card.rpg_data,
+                                    apiKey,
+                                    dynamicActiveEntries,
+                                    allEntries,
+                                    'gemini-flash-lite-latest'
+                                );
+
+                                if (medusaResult.debugInfo) {
+                                    const latency = Date.now() - mythicStartTime;
+                                    logger.logMythic(medusaResult.debugInfo.prompt, medusaResult.debugInfo.rawResponse, latency);
                                 }
 
-                                if (medusaResult.notifications && medusaResult.notifications.length > 0) {
-                                    const notificationText = medusaResult.notifications.join('\n');
-                                    state.setRpgNotification(notificationText);
+                                if (medusaResult.success) {
+                                    const updatedCard = { ...state.card, rpg_data: medusaResult.newDb };
+                                    
+                                    state.setSessionData({ card: updatedCard });
+                                    state.updateMessage(aiMsg.id, { rpgState: medusaResult.newDb });
+                                    
+                                    if (medusaResult.logs && medusaResult.logs.length > 0) {
+                                        logger.logSystemMessage('script-success', 'system', `[RPG Update]:\n${medusaResult.logs.join('\n')}`);
+                                    } else {
+                                        logger.logSystemMessage('state', 'system', '[RPG] Không có thay đổi trạng thái.');
+                                    }
+
+                                    if (medusaResult.notifications && medusaResult.notifications.length > 0) {
+                                        const notificationText = medusaResult.notifications.join('\n');
+                                        state.setRpgNotification(notificationText);
+                                    } else {
+                                        state.setRpgNotification(null);
+                                    }
+                                    
+                                    const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
+                                    state.setGeneratedLorebookEntries(generatedEntries);
+                                    if (generatedEntries.length > 0) {
+                                        logger.logSystemMessage('state', 'system', `[Live-Link] Synced ${generatedEntries.length} entries from RPG.`);
+                                    }
+
+                                    retryMedusa = false; // Success
                                 } else {
-                                    state.setRpgNotification(null);
+                                    throw new Error('error' in medusaResult ? medusaResult.error : "Unknown RPG Error");
                                 }
+
+                            } catch (e: any) {
+                                logger.logSystemMessage('error', 'system', `Mythic Engine Error: ${e.message}`);
                                 
-                                const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
-                                state.setGeneratedLorebookEntries(generatedEntries);
-                                if (generatedEntries.length > 0) {
-                                    logger.logSystemMessage('state', 'system', `[Live-Link] Synced ${generatedEntries.length} entries from RPG.`);
+                                const decision = await waitForUserDecision(
+                                    "Lỗi Mythic Engine (RPG)",
+                                    "Hệ thống RPG không thể cập nhật trạng thái thế giới. Bạn muốn thử lại hay bỏ qua (giữ nguyên trạng thái cũ)?",
+                                    e
+                                );
+
+                                if (decision === 'retry') {
+                                    retryMedusa = true;
+                                    logger.logSystemMessage('interaction', 'system', 'Người dùng chọn: Thử lại Mythic Engine.');
+                                } else {
+                                    retryMedusa = false;
+                                    logger.logSystemMessage('warn', 'system', 'Người dùng chọn: Bỏ qua lỗi RPG.');
                                 }
-
-                                retryMedusa = false; // Success
-                            } else {
-                                // Explicitly throw to trigger the catch block below
-                                throw new Error('error' in medusaResult ? medusaResult.error : "Unknown RPG Error");
-                            }
-
-                        } catch (e: any) {
-                            logger.logSystemMessage('error', 'system', `Mythic Engine Error: ${e.message}`);
-                            
-                            const decision = await waitForUserDecision(
-                                "Lỗi Mythic Engine (RPG)",
-                                "Hệ thống RPG không thể cập nhật trạng thái thế giới (Lỗi Phân tích hoặc Kết nối). Bạn muốn thử lại hay bỏ qua?",
-                                e
-                            );
-
-                            if (decision === 'retry') {
-                                retryMedusa = true;
-                                logger.logSystemMessage('interaction', 'system', 'Người dùng chọn: Thử lại Mythic Engine.');
-                            } else {
-                                retryMedusa = false;
-                                logger.logSystemMessage('warn', 'system', 'Người dùng chọn: Bỏ qua lỗi RPG.');
                             }
                         }
+                    } else {
+                        logger.logSystemMessage('warn', 'system', '[RPG] Bỏ qua Medusa vì không tìm thấy API Key.');
                     }
                 }
                 // --------------------------------------------------
 
             } else if (!options?.forcedContent && state.preset.stream_response) {
+                // If aborted during stream, ensure partial content is saved
                 state.updateMessage(aiMsg.id, { content: accumulatedText });
             }
 
         } catch (err: any) {
             if (err.message !== 'Aborted') {
-                // Global catch for unhandled sync errors
                 console.error(err);
-                state.setError(`Lỗi không mong đợi: ${err.message}`);
-                logger.logSystemMessage('api-error', 'system', err.message);
-                
-                // Final safety net modal
-                await waitForUserDecision("Lỗi Nghiêm Trọng", "Một lỗi không mong đợi đã xảy ra trong luồng xử lý.", err);
+                state.setError(`Lỗi: ${err.message}`);
+                state.updateMessage('temp_ai_error', { content: "⚠️ Lỗi: Không thể nhận phản hồi từ AI." });
+                logger.logSystemMessage('api-error', 'api', err.message);
             }
         } finally {
             state.setLoading(false);
@@ -524,6 +484,6 @@ export const useChatFlow = () => {
         interactiveError,
         handleUserDecision,
         manualMythicTrigger,
-        processAIResponse 
+        processAIResponse // Export this so Engine can use it for specific needs
     };
 };
