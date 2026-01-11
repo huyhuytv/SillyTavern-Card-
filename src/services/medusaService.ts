@@ -517,6 +517,19 @@ export const MedusaService = {
             
             const actions = parseCustomActions(rawText);
 
+            // CRITICAL CHANGE: Check for Empty Actions and treat as Error
+            if (actions.length === 0) {
+                return {
+                    success: false,
+                    error: "Cảnh báo: AI không thực hiện bất kỳ cập nhật trạng thái nào (Empty Action).",
+                    logs: ["Action list empty"],
+                    debugInfo: {
+                        prompt: resolvedSystemPrompt,
+                        rawResponse: rawText
+                    }
+                };
+            }
+
             if (actions.length > 0) {
                 const { newDb, notifications, logs } = applyMedusaActions(database, actions);
                 logs.unshift(`[Thinking]: ${thinkContent.substring(0, 200)}...`);
@@ -533,6 +546,8 @@ export const MedusaService = {
                     }
                 };
             } else {
+                // This branch shouldn't be reached if we treat empty as error above, 
+                // but keeping as fallback structure
                 return {
                     success: true,
                     newDb: database,

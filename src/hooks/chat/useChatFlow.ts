@@ -122,15 +122,13 @@ export const useChatFlow = () => {
                 if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
             });
 
-            // Sử dụng các entry đang active từ store (nếu có) hoặc quét lại
-            // Để đơn giản cho manual trigger, ta dùng runtime active entries từ message cuối nếu có, hoặc rỗng
             const activeEntries: WorldInfoEntry[] = []; 
 
             const medusaResult = await MedusaService.processTurn(
                 historyLog,
                 state.card.rpg_data,
                 apiKey,
-                activeEntries, // Có thể cải thiện bằng cách lấy từ scan result lưu trong message
+                activeEntries,
                 allEntries,
                 'gemini-flash-lite-latest'
             );
@@ -270,6 +268,7 @@ export const useChatFlow = () => {
                     } else {
                         retryScan = false;
                         forceKeywordMode = true;
+                        // Important: Need to re-run loop one last time with keyword mode to get a result
                         retryScan = true; 
                         logger.logSystemMessage('warn', 'system', 'Người dùng chọn: Bỏ qua lỗi, chuyển sang quét từ khóa.');
                     }
@@ -441,7 +440,7 @@ export const useChatFlow = () => {
                                 
                                 const decision = await waitForUserDecision(
                                     "Lỗi Mythic Engine (RPG)",
-                                    "Hệ thống RPG không thể cập nhật trạng thái thế giới. Bạn muốn thử lại hay bỏ qua (giữ nguyên trạng thái cũ)?",
+                                    "Hệ thống RPG không thể cập nhật trạng thái thế giới (Có thể do lỗi mạng hoặc AI không trả về dữ liệu). Bạn muốn thử lại hay bỏ qua (giữ nguyên trạng thái cũ)?",
                                     e
                                 );
 

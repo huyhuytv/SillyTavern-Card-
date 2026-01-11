@@ -117,6 +117,8 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
                 }
             } catch (e) {
                 console.error("[Smart Scan] Error:", e);
+                // CRITICAL CHANGE: Re-throw error to be caught by useChatFlow
+                throw e;
             } finally {
                 setIsScanning(false);
             }
