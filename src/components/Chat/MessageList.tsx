@@ -1,5 +1,5 @@
 
-import React, { useRef, useEffect, useState, useLayoutEffect } from 'react';
+import React, { useRef, useEffect, useState, useLayoutEffect, memo } from 'react';
 import type { ChatMessage, TavernHelperScript } from '../../types';
 import { InteractiveHtmlMessage } from '../InteractiveHtmlMessage';
 import { MessageBubble, ThinkingReveal, MessageMenu } from './MessageBubble';
@@ -95,7 +95,7 @@ interface MessageListProps {
     onIframeLoad: (id: string) => void;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({
+const MessageListComponent: React.FC<MessageListProps> = ({
     messages,
     isLoading,
     isImmersive,
@@ -123,6 +123,8 @@ export const MessageList: React.FC<MessageListProps> = ({
 }) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null); 
+    const prevMessagesLengthRef = useRef(messages.length);
+    const lastMessageIdRef = useRef<string | null>(messages.length > 0 ? messages[messages.length - 1].id : null);
     
     const { activePresetName, presets } = usePreset();
     const activePreset = presets.find(p => p.name === activePresetName);
@@ -162,12 +164,23 @@ export const MessageList: React.FC<MessageListProps> = ({
     const displayedMessages = messages.slice(-visibleCount);
     const hasMoreMessages = messages.length > visibleCount;
 
+    // --- SMART SCROLL LOGIC ---
+    // Chỉ cuộn khi số lượng tin nhắn tăng lên HOẶC ID tin nhắn cuối cùng thay đổi
+    // Tránh cuộn khi chỉ có biến số (variables) thay đổi do Smart Scan
     useEffect(() => {
-        if (!editingMessageId) {
+        const isNewMessage = messages.length > prevMessagesLengthRef.current;
+        const currentLastId = messages.length > 0 ? messages[messages.length - 1].id : null;
+        const isLastIdChanged = currentLastId !== lastMessageIdRef.current;
+
+        // Nếu đang edit thì không cuộn, trừ khi là tin mới
+        if ((isNewMessage || isLastIdChanged) && !editingMessageId) {
             setTimeout(() => {
                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }, 100);
         }
+
+        prevMessagesLengthRef.current = messages.length;
+        lastMessageIdRef.current = currentLastId;
     }, [messages, editingMessageId]); 
 
     let lastModelMsgIndex = -1;
@@ -183,6 +196,8 @@ export const MessageList: React.FC<MessageListProps> = ({
         <div 
             ref={containerRef}
             className={`flex-grow p-4 md:p-6 overflow-y-auto custom-scrollbar relative z-10 w-full ${isImmersive ? 'max-w-5xl mx-auto transition-all' : ''}`}
+            // Thêm aria-live để Screen Reader biết có nội dung mới, nhưng 'polite' để không ngắt lời
+            aria-live="polite"
         >
             {hasMoreMessages && (
                 <div className="flex justify-center mb-4">
@@ -310,3 +325,5 @@ export const MessageList: React.FC<MessageListProps> = ({
         </div>
     );
 };
+
+export const MessageList = memo(MessageListComponent);

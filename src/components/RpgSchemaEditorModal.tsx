@@ -3,7 +3,12 @@ import React, { useState, useEffect } from 'react';
 import type { RPGDatabase, RPGTable, RPGColumn } from '../types/rpg';
 import { LabeledInput } from './ui/LabeledInput';
 import { LabeledTextarea } from './ui/LabeledTextarea';
+import { ToggleInput } from './ui/ToggleInput';
+import { SelectInput } from './ui/SelectInput';
 import { getTemplateVH } from '../data/rpgTemplates';
+import { useChatStore } from '../store/chatStore'; // Import Store
+import { syncDatabaseToLorebook } from '../services/medusaService'; // Import Sync Logic
+import { useToast } from './ToastSystem'; // Import Toast
 
 interface RpgSchemaEditorModalProps {
     isOpen: boolean;
@@ -15,11 +20,14 @@ interface RpgSchemaEditorModalProps {
 export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOpen, onClose, database, onSave }) => {
     const [dbState, setDbState] = useState<RPGDatabase>({ version: 2, tables: [] });
     const [activeTableId, setActiveTableId] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'columns' | 'rules'>('columns');
+    const [activeTab, setActiveTab] = useState<'columns' | 'rules' | 'link'>('columns');
+
+    // Hooks for Option A Logic
+    const { setGeneratedLorebookEntries } = useChatStore();
+    const { showToast } = useToast();
 
     useEffect(() => {
         if (isOpen) {
-            // Nếu chưa có DB hoặc version cũ, load template mới
             if (!database || (database.version || 0) < 2) {
                 setDbState(getTemplateVH());
             } else {
@@ -36,7 +44,6 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
 
     const activeTable = dbState.tables.find(t => t.config.id === activeTableId);
 
-    // Helper to update deeply nested config
     const updateTableConfig = (updates: any) => {
         if (!activeTableId) return;
         setDbState(prev => ({
@@ -63,6 +70,16 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
         });
     };
 
+    const handleUpdateLorebookLink = (key: 'enabled' | 'keyColumnId', value: any) => {
+        if (!activeTable) return;
+        updateTableConfig({
+            lorebookLink: {
+                ...(activeTable.config.lorebookLink || { enabled: false, keyColumnId: '' }),
+                [key]: value
+            }
+        });
+    };
+
     const handleAddColumn = () => {
         if (!activeTable) return;
         const newCol: RPGColumn = { id: `col_${Date.now()}`, label: 'Cột Mới', type: 'string' };
@@ -73,7 +90,6 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
         if (!activeTable) return;
         const newCols = [...activeTable.config.columns];
         newCols[index] = { ...newCols[index], ...updates };
-        // Sync ID with Label automatically if user is typing label (UX convenience)
         if (updates.label && !updates.id) {
             newCols[index].id = updates.label.toLowerCase().replace(/[^a-z0-9]/g, '_');
         }
@@ -102,15 +118,34 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
     };
 
     const handleDeleteTable = (id: string) => {
-        // DIRECT DELETE - NO CONFIRMATION
         setDbState(prev => ({ ...prev, tables: prev.tables.filter(t => t.config.id !== id) }));
         if (activeTableId === id) setActiveTableId(null);
     };
     
     const handleResetToTemplate = () => {
-        // DIRECT RESET - NO CONFIRMATION
         setDbState(getTemplateVH());
         setActiveTableId(null);
+    };
+
+    // --- OPTION A IMPLEMENTATION ---
+    const handleSaveAndSync = () => {
+        // 1. Save Structure
+        onSave(dbState);
+
+        // 2. Immediate Sync (Live-Link)
+        try {
+            const generatedEntries = syncDatabaseToLorebook(dbState);
+            setGeneratedLorebookEntries(generatedEntries);
+            
+            if (generatedEntries.length > 0) {
+                showToast(`[Live-Link] Đã đồng bộ ${generatedEntries.length} mục vào Sổ tay!`, 'success');
+            }
+        } catch (e) {
+            console.error("Live-Link Sync Error:", e);
+            showToast("Lỗi đồng bộ Live-Link", 'error');
+        }
+
+        onClose();
     };
 
     if (!isOpen) return null;
@@ -176,11 +211,12 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
                                     <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 h-10">
                                         <button onClick={() => setActiveTab('columns')} className={`px-4 text-xs font-bold rounded transition-colors ${activeTab === 'columns' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cột</button>
                                         <button onClick={() => setActiveTab('rules')} className={`px-4 text-xs font-bold rounded transition-colors ${activeTab === 'rules' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Luật AI</button>
+                                        <button onClick={() => setActiveTab('link')} className={`px-4 text-xs font-bold rounded transition-colors ${activeTab === 'link' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>Live-Link</button>
                                     </div>
                                 </div>
 
                                 <div className="flex-grow overflow-y-auto p-6 custom-scrollbar">
-                                    {activeTab === 'columns' ? (
+                                    {activeTab === 'columns' && (
                                         <div className="space-y-4">
                                             <div className="flex justify-between items-center mb-2">
                                                 <h3 className="text-sm font-bold text-slate-300">Cấu trúc Cột</h3>
@@ -218,7 +254,8 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
                                                 ))}
                                             </div>
                                         </div>
-                                    ) : (
+                                    )}
+                                    {activeTab === 'rules' && (
                                         <div className="space-y-6">
                                             <LabeledTextarea 
                                                 label="Mô tả chung (Description)" 
@@ -248,6 +285,45 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
                                             </div>
                                         </div>
                                     )}
+                                    {activeTab === 'link' && (
+                                        <div className="space-y-6">
+                                            <div className="bg-emerald-900/20 border border-emerald-500/30 p-4 rounded-lg">
+                                                <h4 className="font-bold text-emerald-400 mb-2">Live-Link (Tự động hóa Lorebook)</h4>
+                                                <p className="text-sm text-slate-300">
+                                                    Biến mỗi dòng trong bảng này thành một mục World Info (Sổ tay) động.
+                                                    Dữ liệu sẽ được tự động đồng bộ sau mỗi lượt chat.
+                                                </p>
+                                                <div className="mt-4 bg-black/20 p-2 rounded text-xs text-slate-400 font-mono">
+                                                    Logic: Khi kích hoạt, nội dung bảng này sẽ bị ẩn khỏi Prompt chính để tiết kiệm Token.
+                                                    Thay vào đó, các dòng dữ liệu sẽ trở thành các mục World Info có thể được tìm kiếm (Smart Scan) hoặc kích hoạt bằng từ khóa.
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                <ToggleInput 
+                                                    label="Kích hoạt Live-Link cho bảng này" 
+                                                    checked={activeTable.config.lorebookLink?.enabled || false} 
+                                                    onChange={(v) => handleUpdateLorebookLink('enabled', v)}
+                                                />
+
+                                                <div className={`transition-opacity duration-300 ${!activeTable.config.lorebookLink?.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                                                    <SelectInput 
+                                                        label="Cột Từ khóa (Key Column)"
+                                                        value={activeTable.config.lorebookLink?.keyColumnId || ''}
+                                                        onChange={(e) => handleUpdateLorebookLink('keyColumnId', e.target.value)}
+                                                        options={[
+                                                            { value: '', label: '-- Chọn cột làm từ khóa --' },
+                                                            ...activeTable.config.columns.map(col => ({ value: col.id, label: col.label }))
+                                                        ]}
+                                                        tooltip="Giá trị của cột này sẽ được dùng làm 'Keys' cho mục World Info tương ứng."
+                                                    />
+                                                    <p className="text-xs text-slate-500 mt-1">
+                                                        Ví dụ: Chọn cột "Tên Vật Phẩm". Khi dòng có tên "Kiếm Thần", hệ thống sẽ tạo mục WI với key ["Kiếm Thần"].
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </>
                         ) : (
@@ -258,7 +334,8 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
 
                 <div className="p-4 border-t border-slate-700 bg-slate-800 flex justify-end gap-3">
                     <button onClick={onClose} className="px-4 py-2 text-sm font-bold rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300">Hủy</button>
-                    <button onClick={() => { onSave(dbState); onClose(); }} className="px-6 py-2 text-sm font-bold rounded-lg bg-sky-600 hover:bg-sky-500 text-white">Lưu Cấu Trúc</button>
+                    {/* UPDATED: Handle Save & Sync */}
+                    <button onClick={handleSaveAndSync} className="px-6 py-2 text-sm font-bold rounded-lg bg-sky-600 hover:bg-sky-500 text-white">Lưu Cấu Trúc</button>
                 </div>
             </div>
         </div>

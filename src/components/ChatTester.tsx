@@ -1,6 +1,7 @@
 
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import { useChatEngine } from '../hooks/useChatEngine';
+import { useChatUI } from '../hooks/useChatUI'; // NEW Hook
 import { useCharacter } from '../contexts/CharacterContext';
 import { useUserPersona } from '../contexts/UserPersonaContext';
 import { useLorebook } from '../contexts/LorebookContext';
@@ -10,15 +11,11 @@ import { ChatInput } from './Chat/ChatInput';
 import { ChatLayout } from './Chat/ChatLayout';
 import { VisualLayer } from './Chat/VisualLayer';
 import { DebugPanel } from './Chat/DebugPanel';
-import { ChatModals } from './Chat/ChatModals';
-import { AssistantPanel } from './Chat/AssistantPanel';
-import { GameHUD } from './Chat/GameHUD';
-import { FloatingStatusHUD } from './Chat/FloatingStatusHUD';
 import { Loader } from './Loader';
 import { applyVariableOperation } from '../services/variableEngine'; 
 import { countTotalTurns } from '../hooks/useChatMemory'; 
-import { RpgDashboard } from './Chat/RpgDashboard';
-import { ErrorResolutionModal } from './ErrorResolutionModal'; // IMPORT MODAL
+import { ChatOverlayManager } from './Chat/ChatOverlayManager'; 
+import { RpgNotificationOverlay } from './Chat/RpgNotificationOverlay'; // NEW Import
 
 interface ChatTesterProps {
     sessionId: string;
@@ -26,110 +23,64 @@ interface ChatTesterProps {
 }
 
 export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => {
-    const {
-        messages, isLoading, isSummarizing, error,
-        sendMessage, stopGeneration, 
-        deleteLastTurn, deleteMessage, regenerateLastResponse, editMessage,
-        authorNote, updateAuthorNote,
-        worldInfoState, updateWorldInfoState,
-        worldInfoPinned, updateWorldInfoPinned,
-        worldInfoPlacement, updateWorldInfoPlacement,
-        variables, setVariables,
-        extensionSettings,
-        logs, clearLogs,
-        card, longTermSummaries,
-        visualState, updateVisualState,
-        quickReplies,
-        scriptButtons, handleScriptButtonClick,
-        isInputLocked,
-        preset, changePreset,
-        saveSession,
-        isAutoLooping, setIsAutoLooping,
-        queueLength, 
-        summaryQueue,
-        triggerSmartContext,
-        handleRegenerateSummary,
-        handleRetryFailedTask,
-        resetStore,
-        interactiveError, // NEW: Error State
-        handleUserDecision // NEW: Decision Handler
-    } = useChatEngine(sessionId);
+    // 1. Core Logic Hook
+    const engine = useChatEngine(sessionId);
+    
+    // 2. UI State Hook
+    const ui = useChatUI();
 
+    // 3. Context Data
     const { characters } = useCharacter();
     const { activePersona } = useUserPersona();
     const { lorebooks } = useLorebook();
 
-    const [isImmersive, setIsImmersive] = useState(false);
-    const [isAssistantOpen, setIsAssistantOpen] = useState(false);
-    const [isHUDOpen, setIsHUDOpen] = useState(false);
-    const [isStatusHUDOpen, setIsStatusHUDOpen] = useState(false);
-    const [isRpgDashboardOpen, setIsRpgDashboardOpen] = useState(false);
-    const [isAuthorNoteOpen, setIsAuthorNoteOpen] = useState(false);
-    const [isWorldInfoOpen, setIsWorldInfoOpen] = useState(false);
-    const [isLorebookCreatorOpen, setIsLorebookCreatorOpen] = useState(false);
-    const [lorebookKeyword, setLorebookKeyword] = useState('');
-    
-    const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-    const [editingContent, setEditingContent] = useState('');
-
     const iframeRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
 
-    // CLEANUP: Reset store when leaving chat to prevent stale data flashing
+    // Cleanup on unmount
     useEffect(() => {
         return () => {
-            resetStore();
+            engine.resetStore();
         };
-    }, [resetStore]);
+    }, [engine.resetStore]);
 
-    const handleStartEdit = (msg: any) => {
-        setEditingMessageId(msg.id);
-        setEditingContent(msg.content);
-    };
+    // --- Computed Data ---
+    const characterAvatarUrl = useMemo(() => {
+        if (!engine.card) return null;
+        const charInContext = characters.find(c => c.fileName === engine.card!.fileName);
+        return charInContext?.avatarUrl || null;
+    }, [engine.card, characters]);
 
-    const handleCancelEdit = () => {
-        setEditingMessageId(null);
-        setEditingContent('');
-    };
+    const lastInteractiveMsg = useMemo(() => {
+        const reversed = [...engine.messages].reverse();
+        return reversed.find(m => m.interactiveHtml);
+    }, [engine.messages]);
 
+    const currentTurnCount = useMemo(() => countTotalTurns(engine.messages), [engine.messages]);
+    const isInitializing = engine.isLoading && (!engine.card || !engine.preset);
+
+    // --- Handlers ---
     const handleSaveEdit = () => {
-        if (editingMessageId) {
-            editMessage(editingMessageId, editingContent);
-            handleCancelEdit();
+        if (ui.editingMessageId) {
+            engine.editMessage(ui.editingMessageId, ui.editingContent);
+            ui.cancelEditing();
         }
     };
 
     const handleUpdateVariable = (key: string, value: any) => {
         try {
-            const newVariables = applyVariableOperation(variables, 'set', key, value);
-            setVariables(newVariables);
-            saveSession({ variables: newVariables });
+            const newVariables = applyVariableOperation(engine.variables, 'set', key, value);
+            engine.setVariables(newVariables);
+            engine.saveSession({ variables: newVariables });
         } catch (e) {
             console.error("Failed to update variable via Assistant:", e);
         }
     };
 
-    const handleRewriteLastTurn = (messageId: string, newContent: string) => {
-        editMessage(messageId, newContent);
-    };
-
     const handleIframeLoad = (id: string) => {
+        // Optional: Logic when iframe loads
     };
 
-    const characterAvatarUrl = useMemo(() => {
-        if (!card) return null;
-        const charInContext = characters.find(c => c.fileName === card.fileName);
-        return charInContext?.avatarUrl || null;
-    }, [card, characters]);
-
-    const lastInteractiveMsg = useMemo(() => {
-        const reversed = [...messages].reverse();
-        return reversed.find(m => m.interactiveHtml);
-    }, [messages]);
-
-    const currentTurnCount = useMemo(() => countTotalTurns(messages), [messages]);
-
-    const isInitializing = isLoading && (!card || !preset);
-
+    // --- Render Guards ---
     if (isInitializing) {
         return (
             <div className="flex justify-center items-center h-full">
@@ -138,16 +89,16 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         );
     }
 
-    if (error) {
+    if (engine.error) {
         return (
             <div className="flex flex-col justify-center items-center h-full gap-4 text-red-400">
-                <p className="text-center px-4">Lỗi: {error}</p>
+                <p className="text-center px-4">Lỗi: {engine.error}</p>
                 <button onClick={onBack} className="text-slate-300 underline hover:text-white transition-colors">Quay lại</button>
             </div>
         );
     }
 
-    if (!card || !preset) {
+    if (!engine.card || !engine.preset) {
         return (
             <div className="flex flex-col justify-center items-center h-full gap-4 text-amber-400">
                 <p className="text-center px-4 font-bold text-xl">Dữ liệu không khả dụng</p>
@@ -162,170 +113,145 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         );
     }
 
-    const contextDepth = preset.context_depth || 20;
-    const chunkSize = preset.summarization_chunk_size || 10;
+    const contextDepth = engine.preset.context_depth || 20;
+    const chunkSize = engine.preset.summarization_chunk_size || 10;
 
     return (
-        <ChatLayout isImmersive={isImmersive} globalClass={visualState.globalClass}>
-            <VisualLayer visualState={visualState} isImmersive={isImmersive} />
+        <ChatLayout isImmersive={ui.isImmersive} globalClass={engine.visualState.globalClass}>
+            <VisualLayer visualState={engine.visualState} isImmersive={ui.isImmersive} />
             
+            {/* NEW: Persistent RPG Notification Overlay */}
+            <RpgNotificationOverlay />
+
             <ChatHeader 
-                characterName={card.name}
+                characterName={engine.card.name}
                 onBack={() => {
-                    saveSession({}, true); // Force immediate save on back
+                    engine.saveSession({}, true); 
                     onBack();
                 }}
-                isImmersive={isImmersive}
-                setIsImmersive={setIsImmersive}
-                visualState={visualState}
-                onVisualUpdate={updateVisualState}
-                onToggleHUD={() => setIsHUDOpen(!isHUDOpen)}
-                isHUDOpen={isHUDOpen}
-                onToggleStatusHUD={() => setIsStatusHUDOpen(!isStatusHUDOpen)}
-                isStatusHUDOpen={isStatusHUDOpen}
-                activePresetName={preset.name}
-                onPresetChange={changePreset}
-                onToggleAssistant={() => setIsAssistantOpen(!isAssistantOpen)}
-                isAssistantOpen={isAssistantOpen}
-                hasRpgData={!!card.rpg_data}
-                onToggleRpgDashboard={() => setIsRpgDashboardOpen(!isRpgDashboardOpen)}
-                isRpgDashboardOpen={isRpgDashboardOpen}
+                isImmersive={ui.isImmersive}
+                setIsImmersive={ui.setIsImmersive}
+                visualState={engine.visualState}
+                onVisualUpdate={engine.updateVisualState}
+                
+                onToggleHUD={ui.toggleHUD}
+                isHUDOpen={ui.isHUDOpen}
+                onToggleStatusHUD={ui.toggleStatusHUD}
+                isStatusHUDOpen={ui.isStatusHUDOpen}
+                
+                activePresetName={engine.preset.name}
+                onPresetChange={engine.changePreset}
+                
+                onToggleAssistant={ui.toggleAssistant}
+                isAssistantOpen={ui.isAssistantOpen}
+                
+                hasRpgData={!!engine.card.rpg_data}
+                onToggleRpgDashboard={ui.toggleRpgDashboard}
+                isRpgDashboardOpen={ui.isRpgDashboardOpen}
             />
 
             <MessageList 
-                messages={messages}
-                isLoading={isLoading}
-                isImmersive={isImmersive}
-                characterName={card.name}
+                messages={engine.messages}
+                isLoading={engine.isLoading}
+                isImmersive={ui.isImmersive}
+                characterName={engine.card.name}
                 characterAvatarUrl={characterAvatarUrl}
                 userPersonaName={activePersona?.name || 'User'}
                 characterId={sessionId}
                 sessionId={sessionId}
-                editingMessageId={editingMessageId}
-                editingContent={editingContent}
-                setEditingContent={setEditingContent}
-                onStartEdit={handleStartEdit}
-                onCancelEdit={handleCancelEdit}
+                
+                editingMessageId={ui.editingMessageId}
+                editingContent={ui.editingContent}
+                setEditingContent={ui.setEditingContent}
+                onStartEdit={ui.startEditing}
+                onCancelEdit={ui.cancelEditing}
                 onSaveEdit={handleSaveEdit}
-                regenerateLastResponse={regenerateLastResponse}
-                deleteLastTurn={deleteLastTurn}
-                onDeleteMessage={deleteMessage} 
-                onOpenAuthorNote={() => setIsAuthorNoteOpen(true)}
-                onOpenWorldInfo={() => setIsWorldInfoOpen(true)}
-                scripts={card.extensions?.TavernHelper_scripts || []}
-                variables={variables}
-                extensionSettings={extensionSettings}
+                
+                regenerateLastResponse={engine.regenerateLastResponse}
+                deleteLastTurn={engine.deleteLastTurn}
+                onDeleteMessage={engine.deleteMessage} 
+                onOpenAuthorNote={() => ui.setIsAuthorNoteOpen(true)}
+                onOpenWorldInfo={() => ui.setIsWorldInfoOpen(true)}
+                
+                scripts={engine.card.extensions?.TavernHelper_scripts || []}
+                variables={engine.variables}
+                extensionSettings={engine.extensionSettings}
                 iframeRefs={iframeRefs}
                 onIframeLoad={handleIframeLoad}
             />
 
             <ChatInput
-                onSend={sendMessage}
-                onStop={stopGeneration}
-                isLoading={isLoading}
-                isImmersive={isImmersive}
-                quickReplies={quickReplies}
-                onQuickReplyClick={(qr) => sendMessage(qr.message || qr.label)}
-                scriptButtons={scriptButtons}
-                onScriptButtonClick={handleScriptButtonClick}
-                authorNote={authorNote}
-                onUpdateAuthorNote={updateAuthorNote}
-                isSummarizing={isSummarizing}
-                isInputLocked={isInputLocked}
-                isAutoLooping={isAutoLooping} 
-                onToggleAutoLoop={() => setIsAutoLooping(!isAutoLooping)} 
-                queueLength={queueLength} 
+                onSend={engine.sendMessage}
+                onStop={engine.stopGeneration}
+                isLoading={engine.isLoading}
+                isImmersive={ui.isImmersive}
+                quickReplies={engine.quickReplies}
+                onQuickReplyClick={(qr) => engine.sendMessage(qr.message || qr.label)}
+                scriptButtons={engine.scriptButtons}
+                onScriptButtonClick={engine.handleScriptButtonClick}
+                authorNote={engine.authorNote}
+                onUpdateAuthorNote={engine.updateAuthorNote}
+                isSummarizing={engine.isSummarizing}
+                isInputLocked={engine.isInputLocked}
+                isAutoLooping={engine.isAutoLooping} 
+                onToggleAutoLoop={() => engine.setIsAutoLooping(!engine.isAutoLooping)} 
+                queueLength={engine.queueLength} 
             >
                 <DebugPanel 
-                    logs={logs} 
-                    onClearLogs={clearLogs} 
-                    onInspectState={() => setIsHUDOpen(true)} 
+                    logs={engine.logs} 
+                    onClearLogs={engine.clearLogs} 
+                    onInspectState={() => ui.setIsHUDOpen(true)} 
                     onCopyLogs={() => {}} 
                     copyStatus={false} 
-                    isImmersive={isImmersive}
-                    onLorebookCreatorOpen={() => setIsLorebookCreatorOpen(true)}
+                    isImmersive={ui.isImmersive}
+                    onLorebookCreatorOpen={() => ui.setIsLorebookCreatorOpen(true)}
                     summaryStats={{
                         messageCount: currentTurnCount,
-                        summaryCount: longTermSummaries.length,
+                        summaryCount: engine.longTermSummaries.length,
                         contextDepth: contextDepth,
                         chunkSize: chunkSize,
-                        queueLength: queueLength
+                        queueLength: engine.queueLength
                     }}
-                    longTermSummaries={longTermSummaries}
-                    summaryQueue={summaryQueue}
-                    onForceSummarize={triggerSmartContext}
-                    onRegenerateSummary={handleRegenerateSummary} 
-                    onRetryFailedTask={handleRetryFailedTask}
+                    longTermSummaries={engine.longTermSummaries}
+                    summaryQueue={engine.summaryQueue}
+                    onForceSummarize={engine.triggerSmartContext}
+                    onRegenerateSummary={engine.handleRegenerateSummary} 
+                    onRetryFailedTask={engine.handleRetryFailedTask}
+                    onRetryMythic={engine.handleRetryMythic} 
                 />
             </ChatInput>
 
-            <ChatModals 
-                isAuthorNoteOpen={isAuthorNoteOpen}
-                setIsAuthorNoteOpen={setIsAuthorNoteOpen}
-                authorNote={authorNote}
-                updateAuthorNote={updateAuthorNote}
-                isWorldInfoOpen={isWorldInfoOpen}
-                setIsWorldInfoOpen={setIsWorldInfoOpen}
-                worldInfoEntries={card.char_book?.entries || []}
-                worldInfoState={worldInfoState}
-                worldInfoPinned={worldInfoPinned}
-                worldInfoPlacement={worldInfoPlacement}
-                updateWorldInfoState={updateWorldInfoState}
-                updateWorldInfoPinned={updateWorldInfoPinned}
-                updateWorldInfoPlacement={updateWorldInfoPlacement}
-                isLorebookCreatorOpen={isLorebookCreatorOpen}
-                setIsLorebookCreatorOpen={setIsLorebookCreatorOpen}
-                lorebookKeyword={lorebookKeyword}
-                setLorebookKeyword={setLorebookKeyword}
-                messages={messages}
-                longTermSummaries={longTermSummaries}
-                lorebooks={lorebooks}
-            />
-
-            <AssistantPanel 
-                isOpen={isAssistantOpen}
-                onClose={() => setIsAssistantOpen(false)}
-                gameHistory={messages}
-                card={card}
-                variables={variables}
-                logs={logs}
-                onUpdateVariable={handleUpdateVariable}
-                onRewriteMessage={handleRewriteLastTurn}
-            />
-
-            <GameHUD 
-                variables={variables}
-                isOpen={isHUDOpen}
-                onClose={() => setIsHUDOpen(false)}
-            />
-
-            <RpgDashboard 
-                data={card.rpg_data}
-                isOpen={isRpgDashboardOpen}
-                onClose={() => setIsRpgDashboardOpen(false)}
-            />
-
-            <FloatingStatusHUD 
+            <ChatOverlayManager
                 ref={(el) => { if(el) iframeRefs.current['hud'] = el; }}
-                isOpen={isStatusHUDOpen}
-                onClose={() => setIsStatusHUDOpen(false)}
-                htmlContent={lastInteractiveMsg?.interactiveHtml || ''}
-                scripts={card.extensions?.TavernHelper_scripts || []}
-                originalRawContent={lastInteractiveMsg?.originalRawContent || ''}
-                variables={variables}
-                extensionSettings={extensionSettings}
-                characterName={card.name}
-                userPersonaName={activePersona?.name || 'User'}
-                characterId={sessionId}
-                sessionId={sessionId}
-                characterAvatarUrl={characterAvatarUrl}
-            />
-
-            {/* Error Handling Modal */}
-            <ErrorResolutionModal 
-                errorState={interactiveError}
-                onRetry={() => handleUserDecision('retry')}
-                onIgnore={() => handleUserDecision('ignore')}
+                uiState={ui}
+                data={{
+                    card: engine.card,
+                    messages: engine.messages,
+                    longTermSummaries: engine.longTermSummaries,
+                    lorebooks,
+                    authorNote: engine.authorNote,
+                    worldInfoState: engine.worldInfoState,
+                    worldInfoPinned: engine.worldInfoPinned,
+                    worldInfoPlacement: engine.worldInfoPlacement,
+                    variables: engine.variables,
+                    logs: engine.logs,
+                    lastInteractiveMsg,
+                    characterAvatarUrl,
+                    userPersonaName: activePersona?.name || 'User',
+                    sessionId,
+                    extensionSettings: engine.extensionSettings,
+                    interactiveError: engine.interactiveError,
+                    generatedLorebookEntries: engine.generatedLorebookEntries // NEW
+                }}
+                actions={{
+                    updateAuthorNote: engine.updateAuthorNote,
+                    updateWorldInfoState: engine.updateWorldInfoState,
+                    updateWorldInfoPinned: engine.updateWorldInfoPinned,
+                    updateWorldInfoPlacement: engine.updateWorldInfoPlacement,
+                    handleUpdateVariable,
+                    handleRewriteLastTurn: engine.editMessage,
+                    handleUserDecision: engine.handleUserDecision
+                }}
             />
         </ChatLayout>
     );

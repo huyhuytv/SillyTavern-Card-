@@ -32,7 +32,8 @@ interface DebugPanelProps {
     summaryQueue?: SummaryQueueItem[];
     onForceSummarize?: () => void;
     onRegenerateSummary?: (index: number) => Promise<void>; 
-    onRetryFailedTask?: () => Promise<void>; // NEW: Retry Function
+    onRetryFailedTask?: () => Promise<void>; 
+    onRetryMythic?: () => Promise<void>; // NEW: Manual Mythic Trigger
 }
 
 const PromptBlock: React.FC<{ section: PromptSection }> = ({ section }) => {
@@ -368,7 +369,7 @@ const parseMythicPrompt = (fullText: string): PromptSection[] => {
     return sections;
 };
 
-const MythicLogView: React.FC<{ logs: string[] }> = ({ logs }) => {
+const MythicLogView: React.FC<{ logs: string[], onRetry?: () => void }> = ({ logs, onRetry }) => {
     return (
         <div className="space-y-4">
             {logs.length === 0 ? (
@@ -384,11 +385,21 @@ const MythicLogView: React.FC<{ logs: string[] }> = ({ logs }) => {
 
                     // Parse the huge prompt into sections
                     const structuredPrompt = parseMythicPrompt(parsedLog.fullPrompt);
+                    const isLatest = idx === 0;
 
                     return (
-                        <div key={idx} className="bg-slate-900/30 border border-rose-500/20 rounded-lg p-3">
+                        <div key={idx} className="bg-slate-900/30 border border-rose-500/20 rounded-lg p-3 relative group">
                             <div className="flex justify-between items-center mb-2 border-b border-rose-500/20 pb-2">
                                 <span className="text-xs font-bold text-rose-400">Medusa Cycle #{logs.length - idx} <span className="text-slate-500 font-normal">({parsedLog.latency}ms)</span></span>
+                                {isLatest && onRetry && (
+                                    <button 
+                                        onClick={onRetry}
+                                        className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white shadow-lg transition-colors"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" /></svg>
+                                        Tạo lại (Re-run)
+                                    </button>
+                                )}
                             </div>
                             
                             <details className="mb-2 group">
@@ -682,7 +693,8 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
     summaryQueue, // Receive Queue
     onForceSummarize,
     onRegenerateSummary,
-    onRetryFailedTask // Receive Retry Handler
+    onRetryFailedTask, // Receive Retry Handler
+    onRetryMythic // NEW: Retry Mythic
 }) => {
     const [isExpanded, setIsExpanded] = useState(false);
 
@@ -786,7 +798,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                         <h3 className="text-xs font-bold text-rose-400 uppercase tracking-wider mb-2 border-b border-rose-500/20 pb-1 flex items-center gap-2">
                             <span>8. Nhật ký Mythic Engine (RPG)</span>
                         </h3>
-                        <MythicLogView logs={logs.mythicLog} />
+                        <MythicLogView logs={logs.mythicLog} onRetry={onRetryMythic} />
                     </div>
 
                 </div>

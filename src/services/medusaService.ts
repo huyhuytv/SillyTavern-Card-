@@ -4,8 +4,7 @@ import type { RPGDatabase, MedusaAction, MedusaResult } from '../types/rpg';
 import type { WorldInfoEntry } from '../types';
 import { parseLooseJson } from '../utils';
 
-// --- CONFIGURATION ---
-
+// ... (Existing DEFAULT_MEDUSA_PROMPT - No change needed here) ...
 export const DEFAULT_MEDUSA_PROMPT = `
 Bạn là một Medusa chuyên điền bảng biểu. Bạn cần tham khảo bối cảnh thiết lập trước đó cũng như <Dữ liệu chính văn> được gửi cho bạn để ghi lại dưới dạng bảng. 
 
@@ -109,16 +108,11 @@ LUẬT CHUNG:
 
 // --- HELPER FUNCTIONS ---
 
-/**
- * Tạo chuỗi Schema: Mô tả cấu trúc bảng, các cột và luật lệ.
- */
 const getDatabaseSchema = (db: RPGDatabase): string => {
     let output = "";
     
     db.tables.forEach((table, tableIndex) => {
         const { config } = table;
-        
-        // Header: [Index:TableName]
         output += `### [${tableIndex}:${config.name}]\n`;
         output += `  DESC: ${config.description || 'N/A'}\n`;
         
@@ -129,7 +123,6 @@ const getDatabaseSchema = (db: RPGDatabase): string => {
             if (config.aiRules.delete) output += `  [Điều kiện Xóa]: ${config.aiRules.delete}\n`;
         }
 
-        // Schema Columns: [0] Label (Type), [1] Label (Type)...
         const schemaStr = config.columns.map((c, colIdx) => `["${colIdx}"] ${c.label} (${c.type})`).join(', ');
         output += `  [Mô tả cột (Schema)]: ${schemaStr}\n`;
         output += "\n";
@@ -138,9 +131,6 @@ const getDatabaseSchema = (db: RPGDatabase): string => {
     return output;
 };
 
-/**
- * Tạo chuỗi Data: Chỉ chứa dữ liệu các dòng hiện tại.
- */
 const getDatabaseData = (db: RPGDatabase): string => {
     let output = "";
     
@@ -154,9 +144,6 @@ const getDatabaseData = (db: RPGDatabase): string => {
             output += `    (Trống - Cần khởi tạo)\n`;
         } else {
             data.rows.forEach((row, rowIdx) => {
-                // Row[0] luôn là UUID, bỏ qua khi hiển thị cho AI để tránh rối.
-                // AI chỉ cần quan tâm Row Index (0, 1, 2...) để update/delete.
-                // Map giá trị vào colIndex tương ứng: Row[1] -> col "0", Row[2] -> col "1"
                 const values = row.slice(1).map((v, i) => `"${i}":${JSON.stringify(v)}`).join(', ');
                 output += `    Row ${rowIdx}: { ${values} }\n`;
             });
@@ -167,59 +154,42 @@ const getDatabaseData = (db: RPGDatabase): string => {
     return output;
 };
 
-/**
- * Replace macros in prompt with actual data
- */
 const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog: string, lorebookContext: string): string => {
     const schemaStr = getDatabaseSchema(db);
     const dataStr = getDatabaseData(db);
     const globalRules = db.globalRules || "";
     
-    // Simple last user input extraction (last line starting with User:)
     const lastUserLineMatch = historyLog.match(/User: (.*)$/m);
     const lastUserInput = lastUserLineMatch ? lastUserLineMatch[1] : "";
 
     return prompt
         .replace('{{rpg_schema}}', schemaStr)
         .replace('{{rpg_data}}', dataStr)
-        .replace('{{rpg_lorebook}}', lorebookContext) // Inject Hybrid Context
+        .replace('{{rpg_lorebook}}', lorebookContext)
         .replace('{{global_rules}}', globalRules)
         .replace('{{chat_history}}', historyLog)
         .replace('{{last_user_input}}', lastUserInput);
 };
 
-// --- PARSER LOGIC (Lexical Parsing for Robustness) ---
-
-/**
- * Parses the AI response string to extract commands using lexical analysis (Bracket Counting).
- * This replaces the fragile Regex-only approach to handle nested JSON correctly.
- */
 const parseCustomActions = (rawText: string): MedusaAction[] => {
     const actions: MedusaAction[] = [];
-    
-    // 1. Extract <tableEdit> block
     const editBlockMatch = rawText.match(/<tableEdit>([\s\S]*?)<\/tableEdit>/);
     if (!editBlockMatch) return [];
     let content = editBlockMatch[1];
     
-    // 2. Unwrap HTML comments and Clean Markdown
-    // BUG FIX: Instead of removing content inside comments, we only remove the markers.
-    // This allows AI to wrap valid code in comments (as per instructions) without it being deleted.
     content = content
         .replace(/<!--/g, '')
         .replace(/-->/g, '')
-        .replace(/```[a-z]*\n?/gi, '') // Remove start code fence
-        .replace(/```/g, '') // Remove end code fence
+        .replace(/```[a-z]*\n?/gi, '')
+        .replace(/```/g, '')
         .trim();
 
-    // 3. Helper: Lexical Scanner to find balanced JSON object {...}
     const extractJson = (str: string, startPos: number): { json: any, endPos: number } | null => {
         let depth = 0;
         let inString = false;
         let quoteChar = '';
         let jsonStart = -1;
 
-        // Find the first opening brace '{'
         for (let i = startPos; i < str.length; i++) {
             if (str[i] === '{') {
                 jsonStart = i;
@@ -228,12 +198,10 @@ const parseCustomActions = (rawText: string): MedusaAction[] => {
         }
         if (jsonStart === -1) return null;
 
-        // Iterate to find matching closing brace
         for (let i = jsonStart; i < str.length; i++) {
             const char = str[i];
             
             if (inString) {
-                // If in string, only look for closing quote that isn't escaped
                 if (char === quoteChar && str[i - 1] !== '\\') {
                     inString = false;
                 }
@@ -246,11 +214,8 @@ const parseCustomActions = (rawText: string): MedusaAction[] => {
                 } else if (char === '}') {
                     depth--;
                     if (depth === 0) {
-                        // Found valid JSON string block
                         const jsonStr = str.substring(jsonStart, i + 1);
                         try {
-                            // Use robust parser from utils (supports JSON5 features like single quotes)
-                            // This fixes the issue with apostrophes in content
                             return { json: parseLooseJson(jsonStr), endPos: i + 1 };
                         } catch (e) {
                             console.warn("Medusa JSON Parse Error:", jsonStr, e);
@@ -263,7 +228,6 @@ const parseCustomActions = (rawText: string): MedusaAction[] => {
         return null;
     };
 
-    // 4. Scan for commands
     const commandPattern = /(insertRow|updateRow|deleteRow)\s*\(/g;
     let match;
 
@@ -271,10 +235,8 @@ const parseCustomActions = (rawText: string): MedusaAction[] => {
         const command = match[1];
         let currentPos = commandPattern.lastIndex;
         
-        // Helper: Extract next number (Argument 1, etc.)
         const getNextNumber = (): number | null => {
             const sub = content.substring(currentPos);
-            // Match number followed by comma OR closing parenthesis
             const numMatch = sub.match(/^\s*(\d+)\s*(,|(?=\)))/);
             if (numMatch) {
                 currentPos += numMatch[0].length;
@@ -283,25 +245,21 @@ const parseCustomActions = (rawText: string): MedusaAction[] => {
             return null;
         };
 
-        // All commands start with tableIndex
         const tableIndex = getNextNumber();
         if (tableIndex === null) continue;
 
         if (command === 'deleteRow') {
-            // deleteRow(tableIdx, rowIdx)
             const rowIndex = getNextNumber();
             if (rowIndex !== null) {
                 actions.push({ type: 'DELETE', tableIndex, rowIndex });
             }
         } else if (command === 'insertRow') {
-            // insertRow(tableIdx, {json})
             const result = extractJson(content, currentPos);
             if (result) {
                 actions.push({ type: 'INSERT', tableIndex, data: result.json });
                 currentPos = result.endPos;
             }
         } else if (command === 'updateRow') {
-            // updateRow(tableIdx, rowIdx, {json})
             const rowIndex = getNextNumber();
             if (rowIndex !== null) {
                 const result = extractJson(content, currentPos);
@@ -316,10 +274,6 @@ const parseCustomActions = (rawText: string): MedusaAction[] => {
     return actions;
 };
 
-/**
- * Thực thi các hành động lên bản sao Database.
- * Cần mapping từ Index (AI hiểu) -> ID (Code hiểu).
- */
 const applyMedusaActions = (
     currentDb: RPGDatabase, 
     actions: MedusaAction[]
@@ -331,7 +285,6 @@ const applyMedusaActions = (
 
     actions.forEach(action => {
         try {
-            // MAP TABLE INDEX -> TABLE OBJECT
             if (typeof action.tableIndex !== 'number') return;
             const table = newDb.tables[action.tableIndex];
             
@@ -350,12 +303,16 @@ const applyMedusaActions = (
                         break;
                     }
 
-                    // Map Column Indices ("0", "1") -> Actual Array Positions
-                    // Lưu ý: row[0] là UUID, nên colIndex "0" từ AI ứng với row[1]
                     Object.entries(action.data).forEach(([colIdxStr, val]) => {
                         const colIdx = parseInt(colIdxStr);
                         if (!isNaN(colIdx) && colIdx >= 0 && colIdx < table.config.columns.length) {
-                            row[colIdx + 1] = val; // +1 để nhảy qua UUID
+                            const oldValue = row[colIdx + 1]; 
+                            row[colIdx + 1] = val; 
+                            
+                            const colName = table.config.columns[colIdx].label;
+                            if (oldValue !== val && !colName.toLowerCase().includes('thời gian') && !colName.toLowerCase().includes('date')) {
+                                notifications.push(`${table.config.name} (${colName}): ${oldValue} ➝ ${val}`);
+                            }
                         }
                     });
                     
@@ -366,26 +323,27 @@ const applyMedusaActions = (
                 case 'INSERT': {
                     if (!action.data) break;
 
-                    // Tạo dòng mới
                     const newId = `row_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-                    const newRow = new Array(table.config.columns.length + 1).fill(""); // +1 cho ID
+                    const newRow = new Array(table.config.columns.length + 1).fill(""); 
                     newRow[0] = newId;
 
-                    // Fill dữ liệu từ Col Index
+                    let primaryValue = "";
+
                     Object.entries(action.data).forEach(([colIdxStr, val]) => {
                         const colIdx = parseInt(colIdxStr);
                         if (!isNaN(colIdx) && colIdx >= 0 && colIdx < table.config.columns.length) {
                             newRow[colIdx + 1] = val;
+                            if (colIdx === 0) primaryValue = String(val); 
                         }
                     });
 
                     table.data.rows.push(newRow);
                     logs.push(`INSERT ${table.config.name} -> ID: ${newId}`);
                     
-                    // Simple notification heuristic
-                    if (table.config.name.toLowerCase().includes('túi') || table.config.name.toLowerCase().includes('item')) {
-                        const itemName = newRow[1]; // Giả sử cột đầu tiên là tên
-                        if (itemName) notifications.push(`Nhận được: ${itemName}`);
+                    if (primaryValue) {
+                        notifications.push(`Mới: ${primaryValue} (${table.config.name})`);
+                    } else {
+                        notifications.push(`Cập nhật mới trong bảng: ${table.config.name}`);
                     }
                     break;
                 }
@@ -397,9 +355,11 @@ const applyMedusaActions = (
                         const deletedRow = table.data.rows.splice(action.rowIndex, 1);
                         logs.push(`DELETE ${table.config.name} (Row ${action.rowIndex})`);
                         
-                        if (table.config.name.toLowerCase().includes('túi')) {
-                             const itemName = deletedRow[0][1];
-                             if (itemName) notifications.push(`Đã dùng/vứt bỏ: ${itemName}`);
+                        const deletedName = deletedRow[0][1];
+                        if (deletedName) {
+                            notifications.push(`Đã xóa: ${deletedName} (${table.config.name})`);
+                        } else {
+                            notifications.push(`Đã xóa một mục khỏi: ${table.config.name}`);
                         }
                     }
                     break;
@@ -414,6 +374,65 @@ const applyMedusaActions = (
     return { newDb, notifications, logs };
 };
 
+// --- LIVE LINK LOGIC (NEW) ---
+
+/**
+ * Generates temporary Lorebook entries based on database content.
+ * Follows the rules:
+ * 1. Checks `lorebookLink.enabled`.
+ * 2. Formats content as "Label: Value | Label: Value".
+ * 3. Uses Smart Naming: "[Mythic] <KeyWord>".
+ */
+export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
+    const entries: WorldInfoEntry[] = [];
+
+    db.tables.forEach(table => {
+        const linkConfig = table.config.lorebookLink;
+        if (!linkConfig || !linkConfig.enabled || !linkConfig.keyColumnId) return;
+
+        // Find index of the key column
+        const keyColIndex = table.config.columns.findIndex(c => c.id === linkConfig.keyColumnId);
+        if (keyColIndex === -1) return;
+
+        table.data.rows.forEach(row => {
+            const rowId = row[0]; // UUID
+            // Get Key Value (e.g. "Excalibur")
+            const keyValue = row[keyColIndex + 1]; 
+            
+            if (!keyValue) return; // Skip rows without key value
+
+            // Format Content: Option A (Full Info)
+            const contentParts = table.config.columns.map((col, idx) => {
+                const val = row[idx + 1];
+                if (val === null || val === undefined || val === '') return null;
+                return `${col.label}: ${val}`;
+            }).filter(Boolean);
+
+            const fullContent = contentParts.join(' | ');
+
+            // Create Entry
+            const entry: WorldInfoEntry = {
+                uid: `mythic_${table.config.id}_${rowId}`,
+                keys: [String(keyValue)], // The main key
+                secondary_keys: [],
+                // Smart Naming (Option 3)
+                comment: `[Mythic] ${keyValue} (${table.config.name})`,
+                content: fullContent,
+                constant: false,
+                selective: true,
+                enabled: true,
+                position: 'before_char', // Default placement
+                use_regex: false,
+                insertion_order: 100 // High priority?
+            };
+
+            entries.push(entry);
+        });
+    });
+
+    return entries;
+};
+
 // --- MAIN SERVICE ---
 
 export const MedusaService = {
@@ -421,38 +440,32 @@ export const MedusaService = {
         historyLog: string,
         database: RPGDatabase,
         apiKey: string,
-        activeChatEntries: WorldInfoEntry[], // New argument
-        allAvailableEntries: WorldInfoEntry[], // New argument
+        activeChatEntries: WorldInfoEntry[], 
+        allAvailableEntries: WorldInfoEntry[],
         defaultModelId: string = 'gemini-2.5-pro'
-    ): Promise<MedusaResult> => { // Explicit Return Type
+    ): Promise<MedusaResult> => { 
         const ai = new GoogleGenAI({ apiKey });
         
-        // 1. Determine Model
         const targetModel = database.settings?.modelId || defaultModelId;
 
-        // 2. Prepare Hybrid Context
         const pinnedUids = database.settings?.pinnedLorebookUids || [];
         const uniqueEntriesMap = new Map<string, WorldInfoEntry>();
 
-        // A. Add Pinned Entries
         pinnedUids.forEach(uid => {
             const entry = allAvailableEntries.find(e => e.uid === uid);
             if (entry) uniqueEntriesMap.set(uid, entry);
         });
 
-        // B. Add Active Entries (Scan Result)
         activeChatEntries.forEach(entry => {
             if (entry.uid) uniqueEntriesMap.set(entry.uid, entry);
         });
 
-        // Format to Markdown
         let lorebookContext = "";
         uniqueEntriesMap.forEach(entry => {
             lorebookContext += `### [Lore: ${entry.comment || 'Untitled'}]\n${entry.content}\n\n`;
         });
         if (!lorebookContext) lorebookContext = "(Không có dữ liệu tham khảo)";
 
-        // 3. Construct System Prompt
         const rawSystemPrompt = database.settings?.customSystemPrompt || DEFAULT_MEDUSA_PROMPT;
         const resolvedSystemPrompt = resolveMedusaMacros(rawSystemPrompt, database, historyLog, lorebookContext);
 
@@ -462,13 +475,11 @@ export const MedusaService = {
                 contents: resolvedSystemPrompt, 
                 config: {
                     temperature: 0.1,
-                    // Không dùng responseMimeType: "application/json" vì output là text chứa thẻ XML
                 }
             });
 
             const rawText = response.text || "";
             
-            // Extract Logic (Think & Check) for logging
             const thinkMatch = rawText.match(/<tableThink>([\s\S]*?)<\/tableThink>/);
             const thinkContent = thinkMatch ? thinkMatch[1].replace(/<!--|-->/g, '').trim() : "No thinking data.";
             
@@ -476,7 +487,6 @@ export const MedusaService = {
 
             if (actions.length > 0) {
                 const { newDb, notifications, logs } = applyMedusaActions(database, actions);
-                // Prepend thinking logic to logs
                 logs.unshift(`[Thinking]: ${thinkContent.substring(0, 200)}...`);
                 
                 return {

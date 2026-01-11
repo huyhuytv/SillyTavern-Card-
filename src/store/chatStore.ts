@@ -1,9 +1,10 @@
+
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { 
     ChatMessage, CharacterCard, SillyTavernPreset, UserPersona, 
     VisualState, WorldInfoRuntimeStats, SystemLogEntry, ChatTurnLog, 
-    QuickReply, ScriptButton, SummaryQueueItem 
+    QuickReply, ScriptButton, SummaryQueueItem, WorldInfoEntry
 } from '../types';
 
 interface ChatState {
@@ -27,6 +28,11 @@ interface ChatState {
     lastStateBlock: string;
     initialDiagnosticLog: string;
 
+    // NEW: Persistent RPG Notification
+    rpgNotification: string | null;
+    // NEW: Generated Lorebook Entries
+    generatedLorebookEntries: WorldInfoEntry[];
+
     visualState: VisualState;
     quickReplies: QuickReply[];
     scriptButtons: ScriptButton[];
@@ -36,7 +42,7 @@ interface ChatState {
         systemLog: SystemLogEntry[];
         worldInfoLog: string[];
         smartScanLog: string[];
-        mythicLog: string[]; // NEW: Mythic Engine Log
+        mythicLog: string[];
     };
     
     isLoading: boolean;
@@ -45,7 +51,6 @@ interface ChatState {
     isAutoLooping: boolean;
     error: string | null;
     
-    // NEW: Abort Controller for Stop Generation
     abortController: AbortController | null;
 }
 
@@ -72,6 +77,11 @@ interface ChatActions {
     setQuickReplies: (replies: QuickReply[]) => void;
     setScriptButtons: (buttons: ScriptButton[]) => void;
     
+    // NEW: Action to set RPG Notification
+    setRpgNotification: (content: string | null) => void;
+    // NEW: Set Generated Lorebook Entries
+    setGeneratedLorebookEntries: (entries: WorldInfoEntry[]) => void;
+    
     setLoading: (loading: boolean) => void;
     setError: (error: string | null) => void;
     setAbortController: (ac: AbortController | null) => void;
@@ -79,7 +89,6 @@ interface ChatActions {
     clearLogs: () => void;
     resetStore: () => void;
 
-    // --- RPG ACTIONS ---
     updateRpgCell: (tableId: string, rowIndex: number, colIndex: number, value: any) => void;
     addRpgRow: (tableId: string) => void;
     deleteRpgRow: (tableId: string, rowIndex: number) => void;
@@ -90,7 +99,7 @@ const initialState: Omit<ChatState, 'abortController'> = {
     messages: [], variables: {}, extensionSettings: {}, worldInfoRuntime: {},
     longTermSummaries: [], summaryQueue: [], worldInfoState: {}, 
     worldInfoPinned: {}, worldInfoPlacement: {}, authorNote: '',
-    lastStateBlock: '', initialDiagnosticLog: '',
+    lastStateBlock: '', initialDiagnosticLog: '', rpgNotification: null, generatedLorebookEntries: [],
     visualState: {}, quickReplies: [], scriptButtons: [],
     logs: { turns: [], systemLog: [], worldInfoLog: [], smartScanLog: [], mythicLog: [] },
     isLoading: false, isSummarizing: false, isInputLocked: false, isAutoLooping: false, error: null
@@ -133,6 +142,9 @@ export const useChatStore = create<ChatState & ChatActions>()(
         setQuickReplies: (replies) => set((state) => { state.quickReplies = replies; }),
         setScriptButtons: (buttons) => set((state) => { state.scriptButtons = buttons; }),
         
+        setRpgNotification: (content) => set((state) => { state.rpgNotification = content; }),
+        setGeneratedLorebookEntries: (entries) => set((state) => { state.generatedLorebookEntries = entries; }),
+        
         setLoading: (loading) => set((state) => { state.isLoading = loading; }),
         setError: (error) => set((state) => { state.error = error; }),
         setAbortController: (ac) => set((state) => { state.abortController = ac; }),
@@ -140,12 +152,10 @@ export const useChatStore = create<ChatState & ChatActions>()(
         clearLogs: () => set((state) => { state.logs = { turns: [], systemLog: [], worldInfoLog: [], smartScanLog: [], mythicLog: [] }; }),
         resetStore: () => set((state) => { Object.assign(state, initialState); state.abortController = null; }),
 
-        // --- RPG ACTIONS IMPLEMENTATION ---
         updateRpgCell: (tableId, rowIndex, colIndex, value) => set((state) => {
             if (!state.card?.rpg_data) return;
             const table = state.card.rpg_data.tables.find(t => t.config.id === tableId);
             if (table && table.data.rows[rowIndex]) {
-                // colIndex maps to array index + 1 (index 0 is UUID)
                 table.data.rows[rowIndex][colIndex + 1] = value;
                 state.card.rpg_data.lastUpdated = Date.now();
             }

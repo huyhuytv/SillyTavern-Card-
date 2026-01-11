@@ -16,8 +16,8 @@ export const useChatEngine = (sessionId: string | null) => {
     const store = useChatStore();
     const logger = useChatLogger();
     const { saveSession, changePreset } = useChatSession(sessionId);
-    // Destructure new error handling props
-    const { sendMessage, stopGeneration, interactiveError, handleUserDecision } = useChatFlow(); 
+    // Destructure new error handling props and manual trigger
+    const { sendMessage, stopGeneration, interactiveError, handleUserDecision, manualMythicTrigger } = useChatFlow(); 
     const { 
         isSummarizing, 
         triggerSmartContext, 
@@ -125,6 +125,7 @@ export const useChatEngine = (sessionId: string | null) => {
         handleScriptButtonClick,
         executeSlashCommands,
         handleUserDecision, // Export
+        handleRetryMythic: manualMythicTrigger, // NEW: Manual Mythic Trigger
         
         // Specific Setters
         setIsAutoLooping,

@@ -1,12 +1,33 @@
 
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import { CharacterEditor } from './CharacterEditor';
 import { AnalysisPane } from './AnalysisPane';
 import { useCharacter } from '../contexts/CharacterContext';
-import type { CharacterInContext } from '../types';
+import type { CharacterInContext, CharacterCard } from '../types';
 import { Loader } from './Loader';
 import { CharacterBookFullScreenView } from './CharacterBookFullScreenView';
-import type { WorldInfoEntry, CharacterCard } from '../types';
+import type { WorldInfoEntry } from '../types';
+import { useToast } from './ToastSystem';
+
+const NEW_CHARACTER_ID = '__NEW_CHARACTER__';
+
+const DEFAULT_EMPTY_CARD: CharacterCard = {
+    name: "",
+    description: "",
+    personality: "",
+    first_mes: "",
+    mes_example: "",
+    scenario: "",
+    system_prompt: "",
+    post_history_instructions: "",
+    tags: [],
+    creator: "",
+    character_version: "",
+    alternate_greetings: [],
+    extensions: {},
+    spec: "chara_card_v3",
+    spec_version: "3.0"
+};
 
 export const CharacterTab: React.FC = () => {
   const {
@@ -17,16 +38,23 @@ export const CharacterTab: React.FC = () => {
     loadCharacter,
     deleteActiveCharacter,
     updateActiveCharacter,
+    createNewCharacter,
     setActiveCharacterFileName,
     setAvatarForActiveCharacter,
   } = useCharacter();
 
   const [isLorebookMode, setIsLorebookMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  const activeCharacter = activeCharacterFileName
-    ? characters.find(c => c.fileName === activeCharacterFileName)
-    : null;
+  const { showToast } = useToast();
+
+  // --- Draft State for New Character ---
+  const [draftCard, setDraftCard] = useState<CharacterCard>(DEFAULT_EMPTY_CARD);
+  const [draftAvatarUrl, setDraftAvatarUrl] = useState<string | null>(null);
+  const [draftAvatarFile, setDraftAvatarFile] = useState<File | null>(null);
+
+  const activeCharacter = activeCharacterFileName === NEW_CHARACTER_ID 
+      ? { card: draftCard, fileName: 'New Character', avatarUrl: draftAvatarUrl, avatarFile: draftAvatarFile }
+      : (activeCharacterFileName ? characters.find(c => c.fileName === activeCharacterFileName) : null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -35,23 +63,50 @@ export const CharacterTab: React.FC = () => {
     }
   };
 
-  const handleSetAvatar = (character: CharacterInContext) => (url: string | null, file: File | null) => {
-    setAvatarForActiveCharacter(character.fileName, url, file);
+  const handleSetAvatar = (url: string | null, file: File | null) => {
+      if (activeCharacterFileName === NEW_CHARACTER_ID) {
+          if (draftAvatarUrl) URL.revokeObjectURL(draftAvatarUrl);
+          setDraftAvatarUrl(url);
+          setDraftAvatarFile(file);
+      } else if (activeCharacterFileName) {
+          setAvatarForActiveCharacter(activeCharacterFileName, url, file);
+      }
   };
   
   const handleLorebookSave = (updatedEntries: WorldInfoEntry[]) => {
       if (!activeCharacter) return;
       
-      // Create a deep copy of the card to modify
       const newCard = JSON.parse(JSON.stringify(activeCharacter.card));
-      
-      if (!newCard.char_book) {
-          newCard.char_book = { entries: [] };
-      }
+      if (!newCard.char_book) newCard.char_book = { entries: [] };
       newCard.char_book.entries = updatedEntries;
       
-      updateActiveCharacter(newCard);
+      if (activeCharacterFileName === NEW_CHARACTER_ID) {
+          setDraftCard(newCard);
+      } else {
+          updateActiveCharacter(newCard);
+      }
       setIsLorebookMode(false);
+  };
+
+  const startCreatingNew = () => {
+      setDraftCard(JSON.parse(JSON.stringify(DEFAULT_EMPTY_CARD)));
+      if (draftAvatarUrl) URL.revokeObjectURL(draftAvatarUrl);
+      setDraftAvatarUrl(null);
+      setDraftAvatarFile(null);
+      setActiveCharacterFileName(NEW_CHARACTER_ID);
+  };
+
+  const saveNewCharacter = async () => {
+      if (!draftCard.name.trim()) {
+          showToast("Tên nhân vật không được để trống!", "error");
+          return;
+      }
+      try {
+          await createNewCharacter(draftCard, draftAvatarFile);
+          showToast("Đã tạo nhân vật thành công!", "success");
+      } catch (e) {
+          showToast(`Lỗi tạo nhân vật: ${e instanceof Error ? e.message : String(e)}`, "error");
+      }
   };
 
   if (isLoading && characters.length === 0) {
@@ -64,7 +119,6 @@ export const CharacterTab: React.FC = () => {
 
   // --- RENDER LOGIC ---
 
-  // 1. Full Screen Lorebook Mode (Exclusive View)
   if (isLorebookMode && activeCharacter) {
       return (
           <CharacterBookFullScreenView 
@@ -75,14 +129,13 @@ export const CharacterTab: React.FC = () => {
       );
   }
 
-  // 2. Standard Character Editor Layout
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
       {/* Left Panel: Character List and Actions */}
-      <div className="md:col-span-1 bg-slate-800/50 p-4 rounded-xl flex flex-col gap-4">
-        <div>
-          <h3 className="text-xl font-bold text-slate-200 mb-4">Nhân vật</h3>
-          <div className="flex flex-col gap-2">
+      <div className="md:col-span-1 bg-slate-800/50 p-4 rounded-xl flex flex-col gap-4 max-h-[calc(100vh-120px)]">
+        <div className="flex-grow overflow-hidden flex flex-col">
+          <h3 className="text-xl font-bold text-slate-200 mb-4 flex-shrink-0">Nhân vật</h3>
+          <div className="flex-grow overflow-y-auto custom-scrollbar flex flex-col gap-2 pr-2">
             {characters.length === 0 ? (
                 <p className="text-slate-500 text-sm italic text-center py-4">Chưa có nhân vật nào được tải.</p>
             ) : (
@@ -90,20 +143,39 @@ export const CharacterTab: React.FC = () => {
                   <button
                     key={char.fileName}
                     onClick={() => setActiveCharacterFileName(char.fileName)}
-                    className={`w-full text-left p-3 rounded-lg transition-colors text-sm font-medium truncate ${
+                    className={`w-full text-left p-3 rounded-lg transition-colors text-sm font-medium flex items-center gap-3 ${
                       activeCharacterFileName === char.fileName
                         ? 'bg-sky-600/30 ring-2 ring-sky-500 text-white'
                         : 'bg-slate-700/50 hover:bg-slate-700 text-slate-300'
                     }`}
                   >
-                    {char.fileName}
+                    <div className="w-8 h-8 rounded-full bg-slate-800 flex-shrink-0 overflow-hidden border border-slate-600">
+                        {char.avatarUrl ? (
+                            <img src={char.avatarUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center text-xs text-slate-500">?</div>
+                        )}
+                    </div>
+                    <span className="truncate">{char.card.name || char.fileName}</span>
                   </button>
                 ))
             )}
           </div>
+          
+          {/* Create New Button pinned to bottom of list */}
+          <button
+            onClick={startCreatingNew}
+            className={`w-full text-left p-3 mt-2 rounded-lg transition-all text-sm font-bold flex items-center justify-center gap-2 border border-dashed ${
+                activeCharacterFileName === NEW_CHARACTER_ID
+                ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500 ring-1 ring-emerald-500'
+                : 'bg-slate-800/50 text-slate-400 border-slate-600 hover:bg-slate-700 hover:text-emerald-400 hover:border-emerald-500'
+            }`}
+          >
+            <span className="text-lg font-normal">+</span> Tạo nhân vật mới
+          </button>
         </div>
 
-        <div className="mt-auto space-y-2">
+        <div className="mt-auto space-y-2 flex-shrink-0 pt-4 border-t border-slate-700">
           {error && <p className="text-red-400 text-xs p-2 bg-red-900/30 rounded">{error}</p>}
           <input
             ref={fileInputRef}
@@ -116,14 +188,15 @@ export const CharacterTab: React.FC = () => {
             onClick={() => fileInputRef.current?.click()}
             className="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
           >
-            Tải lên nhân vật
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+            Tải lên từ file
           </button>
           <button
             onClick={deleteActiveCharacter}
-            disabled={!activeCharacter}
+            disabled={!activeCharacter || activeCharacterFileName === NEW_CHARACTER_ID}
             className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 text-sm rounded-lg transition-colors duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed"
           >
-            Xóa
+            Xóa nhân vật
           </button>
         </div>
       </div>
@@ -135,19 +208,21 @@ export const CharacterTab: React.FC = () => {
             <div className="lg:col-span-2">
               <CharacterEditor 
                   card={activeCharacter.card} 
-                  onUpdate={updateActiveCharacter} 
+                  onUpdate={activeCharacterFileName === NEW_CHARACTER_ID ? setDraftCard : updateActiveCharacter} 
                   onOpenLorebook={() => setIsLorebookMode(true)}
               />
             </div>
             <div className="lg:col-span-1">
               <AnalysisPane
                 card={activeCharacter.card}
-                onUpdate={updateActiveCharacter}
+                onUpdate={activeCharacterFileName === NEW_CHARACTER_ID ? setDraftCard : updateActiveCharacter}
                 fileName={activeCharacter.fileName}
                 avatarUrl={activeCharacter.avatarUrl}
                 avatarFile={activeCharacter.avatarFile}
-                setAvatarUrl={(url) => handleSetAvatar(activeCharacter)(url, activeCharacter.avatarFile)}
-                setAvatarFile={(file) => handleSetAvatar(activeCharacter)(activeCharacter.avatarUrl, file)}
+                setAvatarUrl={(url) => handleSetAvatar(url, activeCharacter.avatarFile)}
+                setAvatarFile={(file) => handleSetAvatar(activeCharacter.avatarUrl, file)}
+                isNewCharacter={activeCharacterFileName === NEW_CHARACTER_ID}
+                onSaveNew={saveNewCharacter}
               />
             </div>
           </div>
@@ -155,7 +230,7 @@ export const CharacterTab: React.FC = () => {
           <div className="flex items-center justify-center h-full bg-slate-800/30 rounded-xl border-2 border-dashed border-slate-700 min-h-[60vh]">
             <div className="text-center text-slate-500">
               <p className="font-semibold">Chọn một nhân vật để chỉnh sửa</p>
-              <p className="text-sm mt-1">Hoặc tải lên một nhân vật mới từ bảng điều khiển bên trái.</p>
+              <p className="text-sm mt-1">Hoặc tải lên / tạo mới từ bảng điều khiển bên trái.</p>
             </div>
           </div>
         )}

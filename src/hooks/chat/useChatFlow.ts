@@ -7,7 +7,7 @@ import { sendChatRequestStream, sendChatRequest } from '../../services/geminiSer
 import { useLorebook } from '../../contexts/LorebookContext';
 import { useChatLogger } from '../useChatLogger';
 import { useWorldSystem } from '../useWorldSystem';
-import { MedusaService } from '../../services/medusaService'; 
+import { MedusaService, syncDatabaseToLorebook } from '../../services/medusaService'; 
 import { getApiKey } from '../../services/settingsService';
 import { useToast } from '../../components/ToastSystem';
 import type { WorldInfoEntry, InteractiveErrorState } from '../../types';
@@ -66,6 +66,121 @@ export const useChatFlow = () => {
             logger.logSystemMessage('interaction', 'system', 'Người dùng đã dừng quá trình tạo.');
         }
     }, [state, logger]);
+
+    // --- MANUAL MYTHIC TRIGGER ---
+    const manualMythicTrigger = useCallback(async () => {
+        if (!state.card || !state.card.rpg_data) {
+            showToast('Không tìm thấy dữ liệu RPG để xử lý.', 'warning');
+            return;
+        }
+
+        const msgs = state.messages;
+        if (msgs.length < 2) {
+            showToast('Lịch sử trò chuyện chưa đủ để phân tích.', 'warning');
+            return;
+        }
+
+        // Tìm lượt hội thoại cuối cùng (Model + User ngay trước đó)
+        let lastModelMsg = null;
+        let lastUserMsg = null;
+
+        for (let i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i].role === 'model') {
+                lastModelMsg = msgs[i];
+                // Tìm User ngay trước đó
+                for (let j = i - 1; j >= 0; j--) {
+                    if (msgs[j].role === 'user') {
+                        lastUserMsg = msgs[j];
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+
+        if (!lastModelMsg || !lastUserMsg) {
+            showToast('Không tìm thấy ngữ cảnh hợp lệ (User + AI) để chạy lại RPG.', 'warning');
+            return;
+        }
+
+        const apiKey = getApiKey();
+        if (!apiKey) {
+            showToast('Chưa cấu hình API Key.', 'error');
+            return;
+        }
+
+        logger.logSystemMessage('interaction', 'system', 'Đang buộc chạy lại Mythic Engine...');
+        state.setLoading(true);
+
+        try {
+            const mythicStartTime = Date.now();
+            let historyLog = `User: ${lastUserMsg.content}\nGM/System: ${lastModelMsg.content}`;
+            
+            // Gather Lorebook Data
+            let allEntries: WorldInfoEntry[] = state.card.char_book?.entries || [];
+            lorebooks.forEach(lb => {
+                if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
+            });
+
+            // Sử dụng các entry đang active từ store (nếu có) hoặc quét lại
+            // Để đơn giản cho manual trigger, ta dùng runtime active entries từ message cuối nếu có, hoặc rỗng
+            const activeEntries: WorldInfoEntry[] = []; 
+
+            const medusaResult = await MedusaService.processTurn(
+                historyLog,
+                state.card.rpg_data,
+                apiKey,
+                activeEntries, // Có thể cải thiện bằng cách lấy từ scan result lưu trong message
+                allEntries,
+                'gemini-flash-lite-latest'
+            );
+
+            if (medusaResult.debugInfo) {
+                const latency = Date.now() - mythicStartTime;
+                logger.logMythic(medusaResult.debugInfo.prompt, medusaResult.debugInfo.rawResponse, latency);
+            }
+
+            if (medusaResult.success) {
+                const updatedCard = { ...state.card, rpg_data: medusaResult.newDb };
+                state.setSessionData({ card: updatedCard });
+                
+                // Update state vào tin nhắn cuối để đồng bộ
+                state.updateMessage(lastModelMsg.id, { rpgState: medusaResult.newDb });
+
+                if (medusaResult.logs && medusaResult.logs.length > 0) {
+                    logger.logSystemMessage('script-success', 'system', `[RPG Re-run]:\n${medusaResult.logs.join('\n')}`);
+                }
+                
+                // --- NEW: SET PERSISTENT NOTIFICATION ---
+                if (medusaResult.notifications && medusaResult.notifications.length > 0) {
+                    const notificationText = medusaResult.notifications.join('\n');
+                    state.setRpgNotification(notificationText);
+                } else {
+                    state.setRpgNotification(null); // Clear if no new notifications
+                }
+                // ----------------------------------------
+
+                // --- LIVE LINK SYNC ---
+                const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
+                state.setGeneratedLorebookEntries(generatedEntries);
+                if (generatedEntries.length > 0) {
+                    logger.logSystemMessage('state', 'system', `[Live-Link] Synced ${generatedEntries.length} entries from RPG.`);
+                }
+                // ---------------------
+
+                showToast('Đã cập nhật trạng thái RPG thành công.', 'success');
+            } else {
+                throw new Error('error' in medusaResult ? medusaResult.error : "Unknown RPG Error");
+            }
+
+        } catch (e: any) {
+            logger.logSystemMessage('error', 'system', `Mythic Engine Manual Error: ${e.message}`);
+            showToast(`Lỗi RPG: ${e.message}`, 'error');
+        } finally {
+            state.setLoading(false);
+        }
+
+    }, [state, lorebooks, logger, showToast]);
 
     const sendMessage = useCallback(async (text: string) => {
         if (!state.card || !state.preset || !text.trim()) return;
@@ -162,7 +277,27 @@ export const useChatFlow = () => {
             state.setSessionData({ worldInfoRuntime: scanResult.updatedRuntimeState });
             
             // 5. Chuẩn bị Prompt
-            const { baseSections } = prepareChat(state.card, state.preset, lorebooks, state.persona);
+            // NOTE: We pass generated entries implicitly? No, prepareChat needs them.
+            // But generated entries are in session state, not card. 
+            // Wait, we need to pass activeEntriesOverride which includes generated entries if they are scanned.
+            // scanInput automatically includes card entries. But generated entries are in ChatSession.
+            // We need to inject generated entries into scanInput?
+            // Actually, the simplest way for now is to rely on next turn scanning them if they exist in card.
+            // BUT here generated entries are ephemeral.
+            // Let's modify prepareChat to accept generated entries.
+            // HOWEVER, generated entries are just WorldInfoEntry. We can append them to card.char_book.entries temporarily for the scan?
+            // BETTER: pass them as activeEntriesOverride if they were selected by scan.
+            // Scan logic uses `allEntries`. We need to merge `generatedLorebookEntries` into `allEntries` before scanning.
+            // This requires modifying `scanInput` usage or `useWorldSystem`.
+            
+            // FIX: Merging generated entries for prompt construction
+            const generatedEntries = state.generatedLorebookEntries || [];
+            // We'll handle this in promptManager by passing them via lorebooks arg or similar?
+            // Actually, constructChatPrompt takes `lorebooks`. We can mock a lorebook.
+            const sessionLorebook = { name: "Session Generated", book: { entries: generatedEntries } };
+            const effectiveLorebooks = [...lorebooks, sessionLorebook];
+
+            const { baseSections } = prepareChat(state.card, state.preset, effectiveLorebooks, state.persona);
             logger.logPrompt(baseSections); 
 
             const { fullPrompt, structuredPrompt } = await constructChatPrompt(
@@ -174,7 +309,7 @@ export const useChatFlow = () => {
                 state.preset.summarization_chunk_size || 10,
                 state.variables, 
                 state.lastStateBlock, 
-                lorebooks,
+                effectiveLorebooks, // Pass effective lorebooks
                 state.preset.context_mode || 'standard',
                 state.persona?.name || 'User',
                 state.worldInfoState,
@@ -276,11 +411,22 @@ export const useChatFlow = () => {
                                         logger.logSystemMessage('state', 'system', '[RPG] Không có thay đổi trạng thái.');
                                     }
 
+                                    // --- NEW: SET PERSISTENT NOTIFICATION ---
                                     if (medusaResult.notifications && medusaResult.notifications.length > 0) {
-                                        medusaResult.notifications.forEach(note => {
-                                            showToast(note, 'info');
-                                        });
+                                        const notificationText = medusaResult.notifications.join('\n');
+                                        state.setRpgNotification(notificationText);
+                                    } else {
+                                        state.setRpgNotification(null);
                                     }
+                                    
+                                    // --- LIVE LINK SYNC ---
+                                    const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
+                                    state.setGeneratedLorebookEntries(generatedEntries);
+                                    if (generatedEntries.length > 0) {
+                                        logger.logSystemMessage('state', 'system', `[Live-Link] Synced ${generatedEntries.length} entries from RPG.`);
+                                    }
+                                    // ---------------------
+
                                     retryMedusa = false; // Success
                                 } else {
                                     throw new Error('error' in medusaResult ? medusaResult.error : "Unknown RPG Error");
@@ -325,12 +471,13 @@ export const useChatFlow = () => {
             state.setLoading(false);
             state.setAbortController(null);
         }
-    }, [state, lorebooks, createPlaceholderMessage, processAIResponse, logger, scanInput, showToast, waitForUserDecision]); // Dependencies updated
+    }, [state, lorebooks, createPlaceholderMessage, processAIResponse, logger, scanInput, showToast, waitForUserDecision]); 
 
     return { 
         sendMessage, 
         stopGeneration,
         interactiveError,
-        handleUserDecision 
+        handleUserDecision,
+        manualMythicTrigger // Exported
     };
 };

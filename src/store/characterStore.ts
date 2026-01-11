@@ -20,6 +20,7 @@ interface CharacterActions {
   loadCharacter: (file: File) => Promise<void>;
   deleteActiveCharacter: () => Promise<void>;
   updateActiveCharacter: (card: CharacterCard) => Promise<void>;
+  createNewCharacter: (card: CharacterCard, avatarFile: File | null) => Promise<string>;
   setActiveCharacterFileName: (name: string | null) => void;
   setAvatarForActiveCharacter: (fileName: string, url: string | null, file: File | null) => Promise<void>;
 }
@@ -126,6 +127,36 @@ export const useCharacterStore = create<CharacterState & CharacterActions>()(
       } catch (err) {
         set((state) => { state.error = err instanceof Error ? err.message : 'Unknown error importing character'; });
       }
+    },
+
+    createNewCharacter: async (card: CharacterCard, avatarFile: File | null) => {
+        set((state) => { state.error = ''; });
+        try {
+            // Sanitize filename
+            const safeName = card.name.trim().replace(/[^a-z0-9\u00C0-\u017F\s-]/gi, '_');
+            const extension = avatarFile ? '.png' : '.json';
+            const fileName = `${safeName || 'New_Character'}${extension}`;
+
+            let avatarUrl: string | null = null;
+            if (avatarFile) {
+                avatarUrl = URL.createObjectURL(avatarFile);
+            }
+
+            const character: CharacterInContext = { card, fileName, avatarUrl, avatarFile };
+            const storable = await dbService.characterToStorable(character);
+            
+            await dbService.saveCharacter(storable);
+
+            set((state) => {
+                state.characters.push(character);
+                state.activeCharacterFileName = fileName;
+            });
+            return fileName;
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Failed to create character';
+            set((state) => { state.error = msg; });
+            throw new Error(msg);
+        }
     },
 
     deleteActiveCharacter: async () => {

@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, memo } from 'react';
 import type { ChatMessage } from '../../types';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -125,7 +125,7 @@ interface MessageBubbleProps {
     isImmersive: boolean;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ 
+const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ 
     message, 
     avatarUrl, 
     isEditing, 
@@ -324,3 +324,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         </div>
     );
 };
+
+// MEMOIZATION
+// Chỉ re-render khi nội dung thực sự thay đổi
+export const MessageBubble = memo(MessageBubbleComponent, (prev, next) => {
+    return (
+        prev.message.content === next.message.content &&
+        prev.message.role === next.message.role &&
+        prev.message.id === next.message.id &&
+        prev.isEditing === next.isEditing &&
+        prev.editingContent === next.editingContent &&
+        prev.avatarUrl === next.avatarUrl &&
+        prev.isImmersive === next.isImmersive
+        // Không so sánh menuActions vì nó là function được tạo mới mỗi lần render cha
+    );
+});

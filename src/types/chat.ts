@@ -2,6 +2,7 @@
 // --- PERSISTENCE DATA (Saved to DB) ---
 
 import type { VisualState, WorldInfoRuntimeStats, SummaryQueueItem } from './app';
+import type { WorldInfoEntry } from './character';
 import type { RPGDatabase } from './rpg';
 
 export interface ChatMessage {
@@ -45,6 +46,10 @@ export interface ChatSession {
     // --- MYTHIC ENGINE STATE ---
     rpgState?: RPGDatabase; // Stores the current state of RPG tables
     // -------------------------
+
+    // --- LIVE LINK (Generated Lore) ---
+    generatedLorebookEntries?: WorldInfoEntry[]; // Entries created by Mythic Engine for this session
+    // ----------------------------------
 
     // Meta
     lastMessageSnippet?: string;

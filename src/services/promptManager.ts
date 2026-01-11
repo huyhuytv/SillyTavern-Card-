@@ -72,6 +72,7 @@ const getMessageIndexFromTurns = (messages: ChatMessage[], turnsToSkip: number):
 
 /**
  * Helper: Format RPG Database to Markdown Table string
+ * NOTE: Excludes tables that have Live-Link enabled.
  */
 const formatRpgData = (rpgData: any): string => {
     if (!rpgData || !rpgData.tables || !Array.isArray(rpgData.tables)) return '';
@@ -82,7 +83,10 @@ const formatRpgData = (rpgData: any): string => {
         // Skip tables with no columns or missing config
         if (!table.config || !table.config.columns || table.config.columns.length === 0) continue;
         
-        // Skip empty tables to save tokens (Optional logic, can be changed if schema is needed empty)
+        // Skip linked tables to avoid token duplication (Data is injected via World Info)
+        if (table.config.lorebookLink?.enabled) continue;
+
+        // Skip empty tables to save tokens
         if (!table.data || !table.data.rows || table.data.rows.length === 0) continue;
         
         output += `### ${table.config.name}\n`;
@@ -169,9 +173,6 @@ const processEjsTemplate = async (
         });
 
         if (!entry) {
-            // Silently fail or log warning based on preference. 
-            // For complex cards, silent failure on optional WI is often preferred to avoid error spam.
-            // console.warn(`[EJS] getwi failed: Entry '${entryKey}' not found.`);
             return '';
         }
 
@@ -279,9 +280,6 @@ export function prepareChat(
     worldInfoPlacement?: Record<string, 'before' | 'after' | undefined>
 ): { baseSections: PromptSection[] } {
     
-    // We perform the sorting/filtering here to ensure consistent state
-    // But we won't render the content until constructChatPrompt
-    
     const sections: PromptSection[] = (preset.prompts || [])
         .filter(p => p.enabled === true && p.content)
         .map((p, index) => {
@@ -335,10 +333,6 @@ export async function constructChatPrompt(
     ].filter(Boolean).join('\n\n');
 
     // --- 1. Process World Info (Render -> Filter -> Format) ---
-    // IMPORTANT: World Info must be processed BEFORE variables formatting.
-    // Why? Because some World Info entries (like Preprocessing scripts) might EXECUTE code that updates variables.
-    // If we format variables first, we send stale data to the AI.
-    
     const { before, after } = getActiveWorldInfoEntries(card, worldInfoState, activeEntriesOverride, worldInfoPlacement);
     const wiFormat = preset?.wi_format || '[{{keys}}: {{content}}]';
 
@@ -474,25 +468,35 @@ export async function constructChatPrompt(
     // Tầng 1: Ngữ cảnh Tức thời (Lượt gần nhất)
     const lastTurnList: string[] = [];
     
-    // FIXED: Use full 'history' (everything before current input) instead of 'currentPageMessages'
-    // to ensure {{last_turn}} always has content even if context window is full/summarized.
     const contextForLastTurn = history; 
+    let lastModelIndex = -1;
 
-    if (contextForLastTurn.length > 0) {
-        // Simplified logic to get the most recent exchange
-        const lastUserIndex = contextForLastTurn.map(m => m.role).lastIndexOf('user');
-        // If user found, take from there. If not, just take last 2.
-        const relevantMsgs = lastUserIndex !== -1 
-            ? contextForLastTurn.slice(lastUserIndex) 
-            : contextForLastTurn.slice(-2);
+    // 1. Tìm tin nhắn AI (Model) cuối cùng trong lịch sử
+    for (let i = contextForLastTurn.length - 1; i >= 0; i--) {
+        if (contextForLastTurn[i].role === 'model') {
+            lastModelIndex = i;
+            break;
+        }
+    }
+
+    if (lastModelIndex !== -1) {
+        // 2. Tìm điểm bắt đầu của lượt này (User message liền trước Model đó)
+        let startOfTurnIndex = lastModelIndex;
+        
+        for (let i = lastModelIndex - 1; i >= 0; i--) {
+            const role = contextForLastTurn[i].role;
+            if (role === 'user') {
+                startOfTurnIndex = i;
+                if (i > 0 && contextForLastTurn[i-1].role === 'model') break;
+            } else if (role === 'model') {
+                break;
+            }
+        }
+
+        const relevantMsgs = contextForLastTurn.slice(startOfTurnIndex, lastModelIndex + 1);
         
         relevantMsgs.forEach(msg => {
              const rawText = getMessageContent(msg);
-             
-             // --- RAW CONTENT MODIFICATION ---
-             // We DO NOT clean the last turn content.
-             // This preserves <thinking>, <UpdateVariable>, HTML, and Chain of Thought for the AI to see.
-             // This consumes more tokens but allows CoT continuation and logic retention.
              const content = replaceHistoryMacros(rawText);
              
              if (content.trim()) {
@@ -503,17 +507,16 @@ export async function constructChatPrompt(
     } else {
         lastTurnList.push("Chưa có lượt nào gần đây.");
     }
+
     const lastTurnString = lastTurnList.join('\n');
     
     // --- 4. Assemble & Render Prompt Sections ---
     
     const resolvedSections: PromptSection[] = [];
     
-    // Use SEQUENTIAL LOOP to ensure variable updates propagate correctly between prompts
     for (const section of baseSections) {
         let content = section.content;
         
-        // Inject Lists into subSections if macros present (for Debug Panel visualization)
         let subSections: string[] | undefined = undefined;
         const addToSubSections = (list: string[]) => {
             if (!subSections) subSections = [];
@@ -528,9 +531,7 @@ export async function constructChatPrompt(
         if (content.includes('{{current_page_history}}')) addToSubSections(currentPageHistoryList);
         if (content.includes('{{last_turn}}')) addToSubSections(lastTurnList);
 
-        // Macro Replacement - Order Matters: Randoms -> Vars SET -> Vars GET -> Text
-        
-        // 1. RANDOM/ROLL (Highest Priority for nested macros inside variables)
+        // Macro Replacement
         const rollHandler = (_: string, countStr: string, sidesStr: string, modStr: string) => {
             const count = countStr ? parseInt(countStr, 10) : 1; 
             const sides = parseInt(sidesStr, 10);
@@ -546,9 +547,6 @@ export async function constructChatPrompt(
                              return args[Math.floor(Math.random() * args.length)].trim();
                          });
 
-        // 2. VARIABLES SETTERS (CRITICAL: Prioritize SET before GET to propagate state)
-        // We update the local 'variables' reference so subsequent replacement logic sees the new value.
-        
         content = content.replace(/{{setglobalvar::([^:]+)::(.*?)}}/gi, (_, key, val) => {
             variables = applyVariableOperation(variables, 'set', 'globals.' + key, val);
             return ''; 
@@ -559,7 +557,6 @@ export async function constructChatPrompt(
             return ''; 
         });
 
-        // 3. VARIABLES GETTERS
         content = content.replace(/{{getvar::([^}]+)}}/gi, (_, path) => {
             const val = get(variables, path);
             return val !== undefined ? String(val) : '';
@@ -570,7 +567,6 @@ export async function constructChatPrompt(
             return val !== undefined ? String(val) : '';
         });
 
-        // 4. STANDARD REPLACEMENTS
         content = content
             .replace(/{{worldInfo_before}}/g, worldInfoBeforeString)
             .replace(/{{worldInfo_after}}/g, worldInfoAfterString)
@@ -599,7 +595,6 @@ export async function constructChatPrompt(
             .replace(/{{scenario}}/g, card.scenario)
             .replace(/{{mes_example}}/g, card.mes_example);
 
-        // Async EJS Processing for the section itself
         content = await processEjsTemplate(content, variables, card, lorebooks);
         content = content.trim();
         

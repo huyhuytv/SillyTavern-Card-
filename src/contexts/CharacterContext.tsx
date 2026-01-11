@@ -12,6 +12,7 @@ interface CharacterContextType {
   loadCharacter: (file: File) => Promise<void>;
   deleteActiveCharacter: () => Promise<void>;
   updateActiveCharacter: (card: CharacterCard) => Promise<void>;
+  createNewCharacter: (card: CharacterCard, avatarFile: File | null) => Promise<string>;
   setActiveCharacterFileName: (name: string | null) => void;
   setAvatarForActiveCharacter: (fileName: string, url: string | null, file: File | null) => void;
   reloadCharacters: () => Promise<void>;
@@ -45,10 +46,6 @@ export const CharacterProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 // Update character to remove invalid lorebooks
                 const newCard = { ...character.card, attached_lorebooks: valid.length > 0 ? valid : undefined };
                 store.updateActiveCharacter(newCard); // Only works if active? No, we need a general update.
-                // NOTE: The original sync logic was a bit aggressive. 
-                // For this refactor, we rely on the store's robustness.
-                // Implementing precise background sync for non-active characters requires a store action `updateCharacterByFileName`.
-                // For now, we skip this deep background sync to prevent infinite loops in the shim.
             }
         }
     });
@@ -69,6 +66,7 @@ export const useCharacter = (): CharacterContextType => {
     loadCharacter: store.loadCharacter,
     deleteActiveCharacter: store.deleteActiveCharacter,
     updateActiveCharacter: store.updateActiveCharacter,
+    createNewCharacter: store.createNewCharacter,
     setActiveCharacterFileName: store.setActiveCharacterFileName,
     setAvatarForActiveCharacter: store.setAvatarForActiveCharacter,
     reloadCharacters: store.reloadCharacters,

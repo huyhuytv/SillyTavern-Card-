@@ -158,6 +158,50 @@ const LEGACY_DATA_SOURCE = {
       "preventRecursion": true
     },
     "orderNo": 10
+  },
+  "sheet_summary_log": {
+    "uid": "sheet_summary_log",
+    "name": "Nhật ký tổng kết",
+    "sourceData": {
+      "note": "Ghi lại tóm tắt các sự kiện quan trọng sau mỗi phiên hoặc sự kiện lớn. (5 cột dữ liệu)",
+      "initNode": "Khởi tạo bảng nhật ký.",
+      "deleteNode": "Xóa khi dòng nhập sai.",
+      "updateNode": "Cập nhật lại kết quả nếu có thay đổi.",
+      "insertNode": "Thêm dòng mới sau mỗi sự kiện then chốt, trận chiến lớn hoặc kết thúc một ngày/phiên."
+    },
+    "content": [
+      [null, "Thời gian/Phiên", "Sự kiện then chốt", "Kết quả/Hậu quả", "Thay đổi trạng thái", "Ghi chú"]
+    ],
+    "exportConfig": {
+      "enabled": true,
+      "entryName": "Nhật ký tổng kết",
+      "entryType": "keyword",
+      "keywords": "tổng kết, lịch sử, nhật ký",
+      "preventRecursion": true
+    },
+    "orderNo": 11
+  },
+  "sheet_plot_outline": {
+    "uid": "sheet_plot_outline",
+    "name": "Đại cương cốt truyện",
+    "sourceData": {
+      "note": "Kế hoạch phát triển cốt truyện và các giai đoạn chính. (3 cột dữ liệu)",
+      "initNode": "Khởi tạo đại cương ban đầu của câu chuyện.",
+      "deleteNode": "Xóa các nhánh cốt truyện đã bị hủy bỏ.",
+      "updateNode": "Cập nhật khi hướng đi cốt truyện thay đổi hoặc hoàn thành một giai đoạn.",
+      "insertNode": "Thêm giai đoạn mới khi cốt truyện mở rộng."
+    },
+    "content": [
+      [null, "Giai đoạn/Chương", "Mục tiêu chính", "Tình tiết dự kiến"]
+    ],
+    "exportConfig": {
+      "enabled": true,
+      "entryName": "Đại cương",
+      "entryType": "keyword",
+      "keywords": "cốt truyện, đại cương, kế hoạch",
+      "preventRecursion": true
+    },
+    "orderNo": 12
   }
 };
 

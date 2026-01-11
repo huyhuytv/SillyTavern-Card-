@@ -20,6 +20,7 @@ export const useChatSession = (sessionId: string | null) => {
         variables,
         worldInfoState,
         worldInfoRuntime,
+        generatedLorebookEntries, // Track this
         isLoading
     } = useChatStore();
 
@@ -101,6 +102,7 @@ export const useChatSession = (sessionId: string | null) => {
                     worldInfoPinned: session.worldInfoPinned || {},
                     worldInfoPlacement: session.worldInfoPlacement || {},
                     initialDiagnosticLog: session.initialDiagnosticLog || '',
+                    generatedLorebookEntries: session.generatedLorebookEntries || [], // Hydrate generated entries
                 });
 
                 // Hydrate WI State
@@ -179,6 +181,10 @@ export const useChatSession = (sessionId: string | null) => {
                 rpgState: state.card.rpg_data,
                 // ---------------------
 
+                // --- SAVE GENERATED LOREBOOK ---
+                generatedLorebookEntries: state.generatedLorebookEntries,
+                // ------------------------------
+
                 lastMessageSnippet: truncateText(lastMessageContent, 50),
                 lastUpdated: Date.now(),
                 initialDiagnosticLog: state.initialDiagnosticLog,
@@ -208,6 +214,7 @@ export const useChatSession = (sessionId: string | null) => {
         variables, 
         worldInfoState, 
         worldInfoRuntime,
+        generatedLorebookEntries, // Trigger save when links update
         useChatStore.getState().card, // Thêm dependency này để trigger khi Medusa update card
         saveSession
     ]);

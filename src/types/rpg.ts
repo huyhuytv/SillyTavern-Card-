@@ -30,6 +30,12 @@ export interface RPGExportConfig {
     injectIntoWorldbook?: boolean; // Có bơm vào Worldbook ảo không?
 }
 
+// NEW: Cấu hình liên kết Lorebook
+export interface LorebookLinkConfig {
+    enabled: boolean;
+    keyColumnId: string; // ID của cột dùng làm Từ khóa (Key)
+}
+
 export interface RPGTableConfig {
     id: string;           // ID bảng (ví dụ: 'inventory')
     name: string;         // Tên hiển thị
@@ -39,6 +45,9 @@ export interface RPGTableConfig {
     
     export: RPGExportConfig; // Cấu hình xuất dữ liệu sang Chat
     
+    // Cấu hình liên kết Lorebook (Live-Link)
+    lorebookLink?: LorebookLinkConfig;
+
     // Luật vận hành cho Medusa (Core Logic)
     aiRules?: {
         update?: string; // Khi nào cập nhật?

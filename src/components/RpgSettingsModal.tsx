@@ -8,6 +8,7 @@ import { LabeledTextarea } from './ui/LabeledTextarea';
 import { ToggleInput } from './ui/ToggleInput';
 import { SelectInput } from './ui/SelectInput';
 import { DEFAULT_MEDUSA_PROMPT } from '../services/medusaService';
+import { parseLooseJson } from '../utils';
 
 interface RpgSettingsModalProps {
     isOpen: boolean;
@@ -129,6 +130,7 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
         customSystemPrompt: DEFAULT_MEDUSA_PROMPT,
         pinnedLorebookUids: []
     });
+    const [jsonInput, setJsonInput] = useState(''); // State for Paste Import
     const promptInputRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -141,6 +143,7 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                 triggerKeywords: database.settings?.triggerKeywords || [],
                 pinnedLorebookUids: database.settings?.pinnedLorebookUids || []
             });
+            setJsonInput(''); // Reset input
         }
     }, [isOpen, database]);
 
@@ -188,7 +191,30 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
         URL.revokeObjectURL(url);
     };
 
-    const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Helper: Merge Tables
+    const performMerge = (importedDb: RPGDatabase) => {
+        const mergedDb = { ...database };
+        const currentTables = [...mergedDb.tables];
+
+        importedDb.tables.forEach(importedTable => {
+            // Check if table with same ID exists
+            const existingIndex = currentTables.findIndex(t => t.config.id === importedTable.config.id);
+            
+            if (existingIndex !== -1) {
+                // UPDATE existing
+                currentTables[existingIndex] = importedTable;
+            } else {
+                // ADD new
+                currentTables.push(importedTable);
+            }
+        });
+
+        mergedDb.tables = currentTables;
+        mergedDb.lastUpdated = Date.now();
+        onSave(mergedDb);
+    };
+
+    const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
@@ -198,29 +224,66 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                 const jsonContent = JSON.parse(ev.target?.result as string);
                 let importedDb: RPGDatabase;
 
-                // Check 1: Is it standard Mythic V2?
                 if (jsonContent.tables && Array.isArray(jsonContent.tables)) {
                     importedDb = jsonContent;
-                } 
-                // Check 2: Is it legacy ChatSheets?
-                else {
+                } else {
                     try {
                         importedDb = convertLegacyToV2(jsonContent);
-                        console.log("Converted legacy format to V2:", importedDb);
                     } catch (conversionError) {
-                        throw new Error("Không nhận diện được định dạng file (Không phải Mythic V2 hoặc ChatSheets hợp lệ).");
+                        throw new Error("Không nhận diện được định dạng file.");
                     }
                 }
                 
-                // DIRECTLY SAVE AND CLOSE WITHOUT CONFIRMATION
-                onSave(importedDb);
+                performMerge(importedDb);
                 onClose();
-                
             } catch (err) {
                 alert("Lỗi nhập file: " + (err instanceof Error ? err.message : String(err)));
             }
         };
         reader.readAsText(file);
+    };
+
+    const handleImportText = () => {
+        if (!jsonInput.trim()) return;
+        try {
+            const rawData = parseLooseJson(jsonInput);
+            let tablesToMerge: RPGTable[] = [];
+
+            // Case 1: Full Database Structure
+            if (rawData.tables && Array.isArray(rawData.tables)) {
+                tablesToMerge = rawData.tables;
+            }
+            // Case 2: Single Table Structure ({ config: ..., data: ... })
+            else if (rawData.config && rawData.config.id) {
+                // Ensure data exists, default to empty rows if missing
+                const tableData = rawData.data || { rows: [] };
+                tablesToMerge = [{ config: rawData.config, data: tableData }];
+            }
+            // Case 3: Legacy Format (ChatSheets)
+            else {
+                try {
+                    const legacyDb = convertLegacyToV2(rawData);
+                    tablesToMerge = legacyDb.tables;
+                } catch (e) {
+                    throw new Error("Không nhận diện được cấu trúc JSON (Không phải Database, Single Table, hay Legacy).");
+                }
+            }
+
+            // Create a temporary DB object to reuse the merge logic
+            const tempDb: RPGDatabase = {
+                version: 2,
+                tables: tablesToMerge,
+                lastUpdated: Date.now()
+            };
+
+            performMerge(tempDb);
+            alert(`Đã nhập thành công ${tablesToMerge.length} bảng dữ liệu!`);
+            setJsonInput('');
+            // Optional: Close modal or stay open for more edits? Let's stay open for convenience in text mode.
+            
+        } catch (e) {
+            alert("Lỗi nhập văn bản: " + (e instanceof Error ? e.message : String(e)));
+        }
     };
 
     const togglePinnedLorebook = (uid: string) => {
@@ -405,53 +468,82 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                         </div>
                     )}
 
-                    {/* TAB D: DATA */}
+                    {/* TAB D: DATA (UPDATED) */}
                     {activeTab === 'data' && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full items-center">
+                        <div className="flex flex-col gap-8 h-full">
                             
-                            {/* EXPORT */}
-                            <div className="bg-slate-800/50 border border-slate-700 p-6 rounded-xl text-center h-full flex flex-col justify-center hover:border-emerald-500/50 transition-colors">
-                                <div className="text-4xl mb-4">📤</div>
-                                <h3 className="text-lg font-bold text-emerald-400 mb-2">Xuất Dữ liệu (Export)</h3>
-                                <p className="text-sm text-slate-400 mb-6">Lưu trữ hoặc chia sẻ hệ thống RPG của bạn.</p>
-                                
-                                <div className="space-y-3">
+                            {/* SECTION 1: FILE OPERATIONS */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                {/* EXPORT */}
+                                <div className="bg-slate-800/50 border border-slate-700 p-6 rounded-xl text-center flex flex-col justify-center hover:border-emerald-500/50 transition-colors">
+                                    <div className="text-4xl mb-4">📤</div>
+                                    <h3 className="text-lg font-bold text-emerald-400 mb-2">Xuất Dữ liệu (File)</h3>
+                                    <p className="text-sm text-slate-400 mb-6">Lưu trữ hoặc chia sẻ hệ thống RPG.</p>
+                                    
+                                    <div className="space-y-3">
+                                        <button 
+                                            onClick={() => handleExport('full')}
+                                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-lg"
+                                        >
+                                            Xuất Trọn gói (Full Save)
+                                        </button>
+                                        <button 
+                                            onClick={() => handleExport('schema')}
+                                            className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-emerald-300 font-bold rounded-lg border border-slate-600"
+                                        >
+                                            Chỉ Xuất Cấu trúc
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* IMPORT */}
+                                <div className="bg-slate-800/50 border border-slate-700 p-6 rounded-xl text-center flex flex-col justify-center hover:border-sky-500/50 transition-colors">
+                                    <div className="text-4xl mb-4">📥</div>
+                                    <h3 className="text-lg font-bold text-sky-400 mb-2">Nhập Dữ liệu (File)</h3>
+                                    <p className="text-sm text-slate-400 mb-6">Chế độ GỘP: Giữ cũ, thêm mới.</p>
+                                    
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef} 
+                                        className="hidden" 
+                                        accept=".json" 
+                                        onChange={handleImportFile}
+                                    />
                                     <button 
-                                        onClick={() => handleExport('full')}
-                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-lg"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="w-full py-8 border-2 border-dashed border-slate-600 hover:border-sky-500 rounded-xl text-slate-400 hover:text-sky-400 transition-all flex flex-col items-center justify-center gap-2"
                                     >
-                                        Xuất Trọn gói (Full Save)
-                                    </button>
-                                    <button 
-                                        onClick={() => handleExport('schema')}
-                                        className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-emerald-300 font-bold rounded-lg border border-slate-600"
-                                    >
-                                        Chỉ Xuất Cấu trúc (Schema Template)
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                                        <span>Chọn file JSON để tải lên</span>
                                     </button>
                                 </div>
                             </div>
 
-                            {/* IMPORT */}
-                            <div className="bg-slate-800/50 border border-slate-700 p-6 rounded-xl text-center h-full flex flex-col justify-center hover:border-sky-500/50 transition-colors">
-                                <div className="text-4xl mb-4">📥</div>
-                                <h3 className="text-lg font-bold text-sky-400 mb-2">Nhập Dữ liệu (Import)</h3>
-                                <p className="text-sm text-slate-400 mb-6">Khôi phục từ file save hoặc tải template mới.</p>
-                                
-                                <input 
-                                    type="file" 
-                                    ref={fileInputRef} 
-                                    className="hidden" 
-                                    accept=".json" 
-                                    onChange={handleImport}
-                                />
-                                <button 
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="w-full py-10 border-2 border-dashed border-slate-600 hover:border-sky-500 rounded-xl text-slate-400 hover:text-sky-400 transition-all flex flex-col items-center justify-center gap-2"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                                    <span>Chọn file JSON để tải lên</span>
-                                </button>
-                                <p className="text-xs text-red-400 mt-4 italic">Lưu ý: Dữ liệu hiện tại sẽ bị thay thế hoàn toàn.</p>
+                            {/* SECTION 2: PASTE IMPORT (NEW) */}
+                            <div className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <span className="text-xl">📋</span>
+                                    <h3 className="text-lg font-bold text-indigo-400">Nhập nhanh từ văn bản (JSON)</h3>
+                                </div>
+                                <div className="space-y-3">
+                                    <textarea
+                                        value={jsonInput}
+                                        onChange={(e) => setJsonInput(e.target.value)}
+                                        placeholder="Dán mã JSON (Database đầy đủ hoặc Bảng đơn lẻ) vào đây..."
+                                        rows={4}
+                                        className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 font-mono text-xs text-slate-300 focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                    <div className="flex justify-between items-center">
+                                        <p className="text-xs text-slate-500 italic">Hỗ trợ JSON lỏng lẻo (có comment, dấu phẩy thừa). Chế độ: GỘP (Merge).</p>
+                                        <button 
+                                            onClick={handleImportText}
+                                            disabled={!jsonInput.trim()}
+                                            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                            Nhập Ngay
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
 
                         </div>

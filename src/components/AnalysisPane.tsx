@@ -13,6 +13,10 @@ interface AnalysisPaneProps {
   avatarFile: File | null;
   setAvatarUrl: (url: string | null) => void;
   setAvatarFile: (file: File | null) => void;
+  
+  // New Props for Creation Mode
+  isNewCharacter?: boolean;
+  onSaveNew?: () => void;
 }
 
 const estimateTokens = (text: string = ''): number => {
@@ -20,7 +24,17 @@ const estimateTokens = (text: string = ''): number => {
     return Math.ceil(text.length / 4);
 };
 
-export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, fileName, avatarUrl, avatarFile, setAvatarUrl, setAvatarFile }) => {
+export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ 
+    card, 
+    onUpdate, 
+    fileName, 
+    avatarUrl, 
+    avatarFile, 
+    setAvatarUrl, 
+    setAvatarFile, 
+    isNewCharacter = false, 
+    onSaveNew 
+}) => {
     const [isExporting, setIsExporting] = useState<boolean>(false);
     const [error, setError] = useState<string>('');
     const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -35,13 +49,10 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
       // Deep copy to avoid mutating state
       const completeCard = JSON.parse(JSON.stringify(characterCard)) as CharacterCard;
       
-      // The new logic is much simpler: all relevant entries are already in char_book.
-      // We check and remove the book if it has no entries.
       if (completeCard.char_book && completeCard.char_book.entries.length === 0) {
           delete completeCard.char_book;
       }
       
-      // Still good practice to remove the attached_lorebooks field for older cards.
       delete completeCard.attached_lorebooks;
 
       return completeCard;
@@ -131,19 +142,19 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
             </div>
 
             <div className="flex-shrink-0 space-y-4 pt-6 border-t border-slate-700">
-                <h3 className="text-xl font-bold text-sky-400">Xuất Thẻ</h3>
+                <h3 className="text-xl font-bold text-sky-400">{isNewCharacter ? "Tạo Avatar" : "Xuất Thẻ"}</h3>
                 <div className="flex items-center gap-4">
-                    <div className="w-24 h-24 bg-slate-900 rounded-lg flex-shrink-0 overflow-hidden">
+                    <div className="w-24 h-24 bg-slate-900 rounded-lg flex-shrink-0 overflow-hidden relative group">
                        {avatarUrl ? (
                            <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
                        ) : (
-                           <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs text-center p-2">Chưa có avatar</div>
+                           <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs text-center p-2 border border-slate-700">Chưa có avatar</div>
                        )}
                     </div>
                     <div className="flex-grow">
                         <input type="file" accept="image/png,image/jpeg" onChange={handleAvatarUpload} className="sr-only" ref={avatarInputRef} />
                         <button onClick={() => avatarInputRef.current?.click()} className="w-full text-sm bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 px-3 rounded-lg transition-colors duration-200">
-                            Tải lên Avatar mới
+                            {avatarUrl ? "Thay đổi Avatar" : "Tải lên Avatar"}
                         </button>
                         <p className="text-xs text-slate-500 mt-2">Tải lên tệp .png hoặc .jpeg để dùng làm avatar cho thẻ.</p>
                     </div>
@@ -151,14 +162,26 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({ card, onUpdate, file
                 
                 {error && <p className="text-red-400 bg-red-900/50 p-3 rounded-lg text-sm">{error}</p>}
 
-                <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => handleExportClick('json')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
-                        Xuất ra JSON
+                {isNewCharacter ? (
+                    <button 
+                        onClick={onSaveNew} 
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-lg transition-all duration-200 shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                        Lưu Nhân Vật Mới
                     </button>
-                    <button onClick={() => handleExportClick('png')} disabled={!avatarFile || isExporting} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
-                        {isExporting ? <Loader message="" /> : 'Xuất ra PNG'}
-                    </button>
-                </div>
+                ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                        <button onClick={() => handleExportClick('json')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                            Xuất ra JSON
+                        </button>
+                        <button onClick={() => handleExportClick('png')} disabled={!avatarFile || isExporting} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                            {isExporting ? <Loader message="" /> : 'Xuất ra PNG'}
+                        </button>
+                    </div>
+                )}
             </div>
 
             <ExportModal
