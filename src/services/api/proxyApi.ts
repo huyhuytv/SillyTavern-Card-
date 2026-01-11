@@ -40,11 +40,13 @@ export const callProxy = async (
 };
 
 // Fix: Added callOpenAIProxyTask for non-chat completions (e.g. translation, scanning)
+// Update: Added maxTokens parameter to prevent truncation
 export const callOpenAIProxyTask = async (
     prompt: string,
     model: string,
     protocol: string,
-    safetySettings: any[]
+    safetySettings: any[],
+    maxTokens: number = 16384 // Default safe value increased
 ): Promise<string> => {
     const proxyUrl = getProxyUrl();
     const proxyPassword = getProxyPassword();
@@ -55,7 +57,7 @@ export const callOpenAIProxyTask = async (
         model: model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.1,
-        max_tokens: 4096,
+        max_tokens: maxTokens, // Use the dynamic value
         stream: false
     };
 

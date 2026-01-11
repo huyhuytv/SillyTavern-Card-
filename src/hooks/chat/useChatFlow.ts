@@ -124,13 +124,17 @@ export const useChatFlow = () => {
 
             const activeEntries: WorldInfoEntry[] = []; 
 
+            // Get Max Tokens from Preset
+            const maxTokens = Number(state.preset?.max_tokens) || 16384;
+
             const medusaResult = await MedusaService.processTurn(
                 historyLog,
                 state.card.rpg_data,
                 apiKey,
                 activeEntries,
                 allEntries,
-                'gemini-flash-lite-latest'
+                'gemini-flash-lite-latest',
+                maxTokens
             );
 
             if (medusaResult.debugInfo) {
@@ -391,13 +395,17 @@ export const useChatFlow = () => {
 
                                 const dynamicActiveEntries = scanResult.activeEntries.filter(e => !e.constant);
 
+                                // Get Max Tokens from Preset
+                                const maxTokens = Number(state.preset?.max_tokens) || 16384;
+
                                 const medusaResult = await MedusaService.processTurn(
                                     historyLog,
                                     state.card.rpg_data,
                                     apiKey,
                                     dynamicActiveEntries,
                                     allEntries,
-                                    'gemini-flash-lite-latest'
+                                    'gemini-flash-lite-latest',
+                                    maxTokens
                                 );
 
                                 if (medusaResult.debugInfo) {

@@ -458,7 +458,8 @@ export const MedusaService = {
         apiKey: string,
         activeChatEntries: WorldInfoEntry[], 
         allAvailableEntries: WorldInfoEntry[],
-        defaultModelId: string = 'gemini-2.5-pro'
+        defaultModelId: string = 'gemini-2.5-pro',
+        maxTokens: number = 8192 // New optional parameter
     ): Promise<MedusaResult> => { 
         
         const connection = getConnectionSettings();
@@ -496,7 +497,8 @@ export const MedusaService = {
                     resolvedSystemPrompt,
                     targetModel,
                     connection.proxy_protocol,
-                    safetySettings
+                    safetySettings,
+                    maxTokens
                 );
             } else {
                 // DIRECT GEMINI ROUTE
@@ -506,7 +508,8 @@ export const MedusaService = {
                     contents: resolvedSystemPrompt, 
                     config: {
                         temperature: 0.1,
-                        safetySettings
+                        safetySettings,
+                        maxOutputTokens: maxTokens // Apply here too for good measure
                     }
                 });
                 rawText = response.text || "";
