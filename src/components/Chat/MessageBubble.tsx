@@ -325,8 +325,19 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
     );
 };
 
+// Hàm so sánh menuActions (tránh re-render khi function reference thay đổi nhưng giá trị không đổi)
+const compareMenuActions = (prev: MessageMenuAction[], next: MessageMenuAction[]) => {
+    if (prev.length !== next.length) return false;
+    for (let i = 0; i < prev.length; i++) {
+        if (prev[i].label !== next[i].label || prev[i].disabled !== next[i].disabled) {
+            return false;
+        }
+    }
+    return true;
+};
+
 // MEMOIZATION
-// Chỉ re-render khi nội dung thực sự thay đổi
+// Chỉ re-render khi nội dung hoặc trạng thái nút menu thay đổi
 export const MessageBubble = memo(MessageBubbleComponent, (prev, next) => {
     return (
         prev.message.content === next.message.content &&
@@ -335,7 +346,7 @@ export const MessageBubble = memo(MessageBubbleComponent, (prev, next) => {
         prev.isEditing === next.isEditing &&
         prev.editingContent === next.editingContent &&
         prev.avatarUrl === next.avatarUrl &&
-        prev.isImmersive === next.isImmersive
-        // Không so sánh menuActions vì nó là function được tạo mới mỗi lần render cha
+        prev.isImmersive === next.isImmersive &&
+        compareMenuActions(prev.menuActions, next.menuActions) // SO SÁNH MENU ĐỂ CẬP NHẬT TRẠNG THÁI NÚT
     );
 });

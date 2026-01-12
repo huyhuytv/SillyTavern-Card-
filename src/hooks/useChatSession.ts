@@ -22,6 +22,7 @@ export const useChatSession = (sessionId: string | null) => {
         worldInfoRuntime,
         generatedLorebookEntries, // Track this
         storyQueue, // NEW: Track story queue
+        logs, // NEW: Track logs to save them
         isLoading
     } = useChatStore();
 
@@ -105,6 +106,15 @@ export const useChatSession = (sessionId: string | null) => {
                     worldInfoPlacement: session.worldInfoPlacement || {},
                     initialDiagnosticLog: session.initialDiagnosticLog || '',
                     generatedLorebookEntries: session.generatedLorebookEntries || [], // Hydrate generated entries
+                    
+                    // --- HYDRATE LOGS ---
+                    logs: session.logs || { 
+                        turns: [], 
+                        systemLog: [], 
+                        worldInfoLog: [], 
+                        smartScanLog: [], 
+                        mythicLog: [] 
+                    },
                 });
 
                 // Hydrate WI State
@@ -189,6 +199,10 @@ export const useChatSession = (sessionId: string | null) => {
                 generatedLorebookEntries: state.generatedLorebookEntries,
                 // ------------------------------
 
+                // --- SAVE LOGS ---
+                logs: state.logs,
+                // ----------------
+
                 lastMessageSnippet: truncateText(lastMessageContent, 50),
                 lastUpdated: Date.now(),
                 initialDiagnosticLog: state.initialDiagnosticLog,
@@ -209,9 +223,7 @@ export const useChatSession = (sessionId: string | null) => {
         // Chúng ta muốn lưu ngay cả khi đang loading (để lưu tin nhắn User vừa gửi).
         if (!sessionId || !isHydratedRef.current) return;
 
-        // Lưu khi có thay đổi quan trọng, bao gồm cả khi rpg_data thay đổi (thông qua setSessionData({ card }))
-        // Vì useChatStore.getState().card thay đổi, và saveSession lấy state trực tiếp, nên nó sẽ bắt được.
-        // Tuy nhiên, để useEffect này trigger khi card thay đổi, ta cần thêm dependency.
+        // Lưu khi có thay đổi quan trọng
         saveSession();
     }, [
         messages, 
@@ -220,6 +232,7 @@ export const useChatSession = (sessionId: string | null) => {
         worldInfoRuntime,
         generatedLorebookEntries, // Trigger save when links update
         storyQueue, // Trigger save when queue changes
+        logs, // NEW: Trigger save when logs change
         useChatStore.getState().card, // Thêm dependency này để trigger khi Medusa update card
         saveSession
     ]);

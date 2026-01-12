@@ -1,7 +1,7 @@
 
 // --- PERSISTENCE DATA (Saved to DB) ---
 
-import type { VisualState, WorldInfoRuntimeStats, SummaryQueueItem } from './app';
+import type { VisualState, WorldInfoRuntimeStats, SummaryQueueItem, ChatTurnLog, SystemLogEntry } from './app';
 import type { WorldInfoEntry } from './character';
 import type { RPGDatabase } from './rpg';
 
@@ -53,6 +53,16 @@ export interface ChatSession {
     // --- LIVE LINK (Generated Lore) ---
     generatedLorebookEntries?: WorldInfoEntry[]; // Entries created by Mythic Engine for this session
     // ----------------------------------
+
+    // --- LOGS PERSISTENCE (NEW) ---
+    logs?: {
+        turns: ChatTurnLog[];
+        systemLog: SystemLogEntry[];
+        worldInfoLog: string[];
+        smartScanLog: string[];
+        mythicLog: string[];
+    };
+    // -----------------------------
 
     // Meta
     lastMessageSnippet?: string;
