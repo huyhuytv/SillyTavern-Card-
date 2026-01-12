@@ -131,6 +131,8 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
         pinnedLorebookUids: []
     });
     const [jsonInput, setJsonInput] = useState(''); // State for Paste Import
+    const [importMode, setImportMode] = useState<'merge' | 'overwrite'>('merge'); // NEW: Import Mode
+    
     const promptInputRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -144,6 +146,7 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                 pinnedLorebookUids: database.settings?.pinnedLorebookUids || []
             });
             setJsonInput(''); // Reset input
+            setImportMode('merge'); // Reset to default
         }
     }, [isOpen, database]);
 
@@ -234,7 +237,17 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                     }
                 }
                 
-                performMerge(importedDb);
+                // Logic xử lý Mode
+                if (importMode === 'overwrite') {
+                    // Ghi đè: Thay thế hoàn toàn dữ liệu
+                    importedDb.lastUpdated = Date.now();
+                    onSave(importedDb);
+                    // Không cần thông báo xác nhận theo yêu cầu
+                } else {
+                    // Gộp: Logic cũ
+                    performMerge(importedDb);
+                }
+                
                 onClose();
             } catch (err) {
                 alert("Lỗi nhập file: " + (err instanceof Error ? err.message : String(err)));
@@ -269,17 +282,30 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                 }
             }
 
-            // Create a temporary DB object to reuse the merge logic
-            const tempDb: RPGDatabase = {
-                version: 2,
-                tables: tablesToMerge,
-                lastUpdated: Date.now()
-            };
+            if (importMode === 'overwrite') {
+                // Ghi đè
+                const newDb: RPGDatabase = {
+                    version: 2,
+                    tables: tablesToMerge,
+                    globalRules: (rawData as RPGDatabase).globalRules || "Hệ thống RPG Tự động.",
+                    settings: (rawData as RPGDatabase).settings,
+                    lastUpdated: Date.now()
+                };
+                onSave(newDb);
+                // Không thông báo xác nhận
+                alert(`Đã ghi đè dữ liệu thành công (${tablesToMerge.length} bảng).`);
+            } else {
+                // Gộp
+                const tempDb: RPGDatabase = {
+                    version: 2,
+                    tables: tablesToMerge,
+                    lastUpdated: Date.now()
+                };
+                performMerge(tempDb);
+                alert(`Đã gộp thành công ${tablesToMerge.length} bảng dữ liệu!`);
+            }
 
-            performMerge(tempDb);
-            alert(`Đã nhập thành công ${tablesToMerge.length} bảng dữ liệu!`);
             setJsonInput('');
-            // Optional: Close modal or stay open for more edits? Let's stay open for convenience in text mode.
             
         } catch (e) {
             alert("Lỗi nhập văn bản: " + (e instanceof Error ? e.message : String(e)));
@@ -500,7 +526,31 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                                 <div className="bg-slate-800/50 border border-slate-700 p-6 rounded-xl text-center flex flex-col justify-center hover:border-sky-500/50 transition-colors">
                                     <div className="text-4xl mb-4">📥</div>
                                     <h3 className="text-lg font-bold text-sky-400 mb-2">Nhập Dữ liệu (File)</h3>
-                                    <p className="text-sm text-slate-400 mb-6">Chế độ GỘP: Giữ cũ, thêm mới.</p>
+                                    
+                                    <div className="flex justify-center gap-4 mb-4">
+                                        <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300 hover:text-white">
+                                            <input 
+                                                type="radio" 
+                                                checked={importMode === 'merge'} 
+                                                onChange={() => setImportMode('merge')} 
+                                                className="accent-sky-500"
+                                            />
+                                            <span>Gộp (Merge)</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300 hover:text-white">
+                                            <input 
+                                                type="radio" 
+                                                checked={importMode === 'overwrite'} 
+                                                onChange={() => setImportMode('overwrite')} 
+                                                className="accent-red-500"
+                                            />
+                                            <span className={importMode === 'overwrite' ? 'text-red-400' : ''}>Ghi đè (Overwrite)</span>
+                                        </label>
+                                    </div>
+
+                                    <p className="text-xs text-slate-500 mb-6">
+                                        {importMode === 'merge' ? 'Giữ dữ liệu cũ, thêm dữ liệu mới.' : 'Xóa toàn bộ dữ liệu cũ và thay thế bằng dữ liệu mới.'}
+                                    </p>
                                     
                                     <input 
                                         type="file" 
@@ -534,7 +584,17 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                                         className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 font-mono text-xs text-slate-300 focus:ring-2 focus:ring-indigo-500"
                                     />
                                     <div className="flex justify-between items-center">
-                                        <p className="text-xs text-slate-500 italic">Hỗ trợ JSON lỏng lẻo (có comment, dấu phẩy thừa). Chế độ: GỘP (Merge).</p>
+                                        <div className="flex items-center gap-4">
+                                            <p className="text-xs text-slate-500 italic">Hỗ trợ JSON lỏng lẻo.</p>
+                                            <div className="flex gap-2">
+                                                <label className="flex items-center gap-1 cursor-pointer text-xs text-slate-400">
+                                                    <input type="radio" checked={importMode === 'merge'} onChange={() => setImportMode('merge')} className="accent-indigo-500"/> Merge
+                                                </label>
+                                                <label className="flex items-center gap-1 cursor-pointer text-xs text-slate-400">
+                                                    <input type="radio" checked={importMode === 'overwrite'} onChange={() => setImportMode('overwrite')} className="accent-red-500"/> Overwrite
+                                                </label>
+                                            </div>
+                                        </div>
                                         <button 
                                             onClick={handleImportText}
                                             disabled={!jsonInput.trim()}

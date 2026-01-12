@@ -166,7 +166,8 @@ export const useChatFlow = () => {
                 const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
                 state.setGeneratedLorebookEntries(generatedEntries);
                 if (generatedEntries.length > 0) {
-                    logger.logSystemMessage('state', 'system', `[Live-Link] Synced ${generatedEntries.length} entries from RPG.`);
+                    const names = generatedEntries.map(e => e.keys[0]).join(', ');
+                    logger.logSystemMessage('state', 'system', `[Live-Link] Đồng bộ ${generatedEntries.length} mục: ${names}`);
                 }
                 // ---------------------
 
@@ -435,7 +436,8 @@ export const useChatFlow = () => {
                                     const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
                                     state.setGeneratedLorebookEntries(generatedEntries);
                                     if (generatedEntries.length > 0) {
-                                        logger.logSystemMessage('state', 'system', `[Live-Link] Synced ${generatedEntries.length} entries from RPG.`);
+                                        const names = generatedEntries.map(e => e.keys[0]).join(', ');
+                                        logger.logSystemMessage('state', 'system', `[Live-Link] Đồng bộ ${generatedEntries.length} mục: ${names}`);
                                     }
 
                                     retryMedusa = false; // Success

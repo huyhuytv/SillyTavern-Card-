@@ -19,6 +19,9 @@ export const RpgSection: React.FC<RpgSectionProps> = ({ card, onUpdate }) => {
     const rpgData = card.rpg_data;
     const hasData = !!rpgData;
 
+    const tableCount = rpgData?.tables?.length || 0;
+    const liveLinkCount = rpgData?.tables?.filter(t => t.config.lorebookLink?.enabled).length || 0;
+
     const handleToggle = (enabled: boolean) => {
         if (enabled) {
             // Nếu bật và chưa có dữ liệu, nạp Template VH
@@ -47,7 +50,7 @@ export const RpgSection: React.FC<RpgSectionProps> = ({ card, onUpdate }) => {
                         <h4 className="font-bold text-slate-200">Kích hoạt Mythic Engine</h4>
                         <p className="text-xs text-slate-400 mt-1">
                             {hasData 
-                                ? `Đang hoạt động. (${rpgData?.tables?.length || 0} bảng dữ liệu).` 
+                                ? `Đang hoạt động. (${tableCount} bảng, ${liveLinkCount} Live-Link).` 
                                 : "Chưa kích hoạt. Bật để nạp Template chuẩn (VH)."}
                         </p>
                     </div>
