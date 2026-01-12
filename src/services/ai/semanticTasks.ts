@@ -1,5 +1,7 @@
 
 import { callGeminiDirect } from '../api/geminiApi';
+import { callOpenAIProxyTask } from '../api/proxyApi';
+import { getConnectionSettings, getProxyForTools } from '../settingsService';
 import type { ChatMessage, Lorebook } from '../../types';
 import { cleanMessageContent } from '../promptManager';
 import { parseLooseJson } from '../../utils';
@@ -17,8 +19,19 @@ export async function summarizeHistory(historySlice: ChatMessage[], cardName: st
         ? customPrompt.replace('{{chat_history_slice}}', historyText)
         : `Tóm tắt ngắn gọn diễn biến chính của đoạn hội thoại sau:\n\n${historyText}`;
 
-    const response = await callGeminiDirect('gemini-3-flash-preview', prompt, { temp: 0.3 } as any, safetySettings);
-    return response.text?.trim() || "";
+    let responseText = "";
+
+    if (getProxyForTools()) {
+        const conn = getConnectionSettings();
+        // Ưu tiên dùng model Tool, nếu không có thì dùng model Chat, cuối cùng fallback về Flash
+        const targetModel = conn.proxy_tool_model || conn.proxy_model || 'gemini-3-flash-preview';
+        responseText = await callOpenAIProxyTask(prompt, targetModel, conn.proxy_protocol, safetySettings);
+    } else {
+        const response = await callGeminiDirect('gemini-3-flash-preview', prompt, { temp: 0.3 } as any, safetySettings);
+        responseText = response.text || "";
+    }
+
+    return responseText.trim();
 }
 
 // Fix: Updated signature to handle extra context from ChatModals
@@ -30,8 +43,20 @@ export async function generateLorebookEntry(
 ): Promise<string> {
     const cardName = lorebooks.length > 0 ? lorebooks[0].name : "Character";
     const prompt = `Dựa trên lịch sử hội thoại, hãy viết một mục từ điển (Lorebook) chi tiết cho từ khóa "${keyword}".\n\nNhân vật: ${cardName}`;
-    const response = await callGeminiDirect('gemini-3-pro-preview', prompt, { temp: 0.7 } as any, safetySettings);
-    return response.text?.trim() || "";
+    
+    let responseText = "";
+
+    if (getProxyForTools()) {
+        const conn = getConnectionSettings();
+        // Tạo nội dung cần model thông minh hơn một chút
+        const targetModel = conn.proxy_model || conn.proxy_tool_model || 'gemini-3-pro-preview';
+        responseText = await callOpenAIProxyTask(prompt, targetModel, conn.proxy_protocol, safetySettings);
+    } else {
+        const response = await callGeminiDirect('gemini-3-pro-preview', prompt, { temp: 0.7 } as any, safetySettings);
+        responseText = response.text || "";
+    }
+
+    return responseText.trim();
 }
 
 // Fix: Updated signature to match hook usage in useWorldSystem
@@ -51,8 +76,17 @@ export async function scanWorldInfoWithAI(
         .replace('{{input}}', input)
         .replace('{{state}}', state);
 
-    const response = await callGeminiDirect(model || 'gemini-3-flash-preview', prompt, { temp: 0 } as any, safetySettings);
-    let rawResponse = response.text || '[]';
+    let rawResponse = "";
+
+    if (getProxyForTools()) {
+        const conn = getConnectionSettings();
+        // Smart Scan cần tốc độ, ưu tiên tool model
+        const targetModel = conn.proxy_tool_model || conn.proxy_model || model || 'gemini-3-flash-preview';
+        rawResponse = await callOpenAIProxyTask(prompt, targetModel, conn.proxy_protocol, safetySettings);
+    } else {
+        const response = await callGeminiDirect(model || 'gemini-3-flash-preview', prompt, { temp: 0 } as any, safetySettings);
+        rawResponse = response.text || '[]';
+    }
     
     // --- BƯỚC LÀM SẠCH QUAN TRỌNG ---
     // Loại bỏ các thẻ markdown code block (```json ... ``` hoặc ``` ... ```)
