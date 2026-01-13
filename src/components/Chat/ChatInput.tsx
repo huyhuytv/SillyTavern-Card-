@@ -6,7 +6,7 @@ import { truncateText } from '../../utils';
 
 interface ChatInputProps {
     onSend: (text: string) => void;
-    onStop: () => void; // NEW: Receive stop action from parent
+    onStop: () => void; // Receive stop action from parent
     isLoading: boolean;
     isImmersive: boolean;
     quickReplies: QuickReply[];
@@ -25,7 +25,7 @@ interface ChatInputProps {
     isStoryMode?: boolean;
     storyQueueLength?: number;
     onNextStoryChunk?: () => void;
-    onCancelStoryMode?: () => void; // NEW
+    onCancelStoryMode?: () => void;
 }
 
 const AVAILABLE_COMMANDS = [
@@ -105,6 +105,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         
         // Handle STOP Action
         if (isLoading) {
+            // FIX: Nếu đang Auto Loop, CHỈ tắt cờ AutoLoop.
+            // Điều này cho phép tin nhắn hiện tại hoàn thành (Soft Stop).
+            // Nếu người dùng bấm thêm lần nữa (khi isAutoLooping đã false), nó sẽ rơi xuống onStop() ở dưới để Abort ngay.
+            if (isAutoLooping && onToggleAutoLoop) {
+                onToggleAutoLoop();
+                return;
+            }
+            
+            // Nếu là chat thường hoặc đã tắt Loop, thì gọi hàm Stop của engine (Abort)
             onStop();
             return;
         }
@@ -334,8 +343,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                         )}
                     </button>
 
-                    {/* Auto Loop Toggle Button */}
-                    {onToggleAutoLoop && !isInputLocked && !isSummarizing && !isLoading && (
+                    {/* Auto Loop Toggle Button - FIX: Allow viewing/toggling even when loading */}
+                    {onToggleAutoLoop && !isInputLocked && !isSummarizing && (
                         <button
                             type="button"
                             onClick={onToggleAutoLoop}

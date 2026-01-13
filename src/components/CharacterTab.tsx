@@ -3,10 +3,9 @@ import React, { useRef, useState, useMemo } from 'react';
 import { CharacterEditor } from './CharacterEditor';
 import { AnalysisPane } from './AnalysisPane';
 import { useCharacter } from '../contexts/CharacterContext';
-import type { CharacterInContext, CharacterCard } from '../types';
+import type { CharacterInContext, CharacterCard, WorldInfoEntry } from '../types';
 import { Loader } from './Loader';
 import { CharacterBookFullScreenView } from './CharacterBookFullScreenView';
-import type { WorldInfoEntry } from '../types';
 import { useToast } from './ToastSystem';
 
 const NEW_CHARACTER_ID = '__NEW_CHARACTER__';
@@ -73,12 +72,16 @@ export const CharacterTab: React.FC = () => {
       }
   };
   
-  const handleLorebookSave = (updatedEntries: WorldInfoEntry[]) => {
+  // Updated: Handle saving both entries AND attached books
+  const handleLorebookSave = (updatedEntries: WorldInfoEntry[], attachedBooks?: string[]) => {
       if (!activeCharacter) return;
       
       const newCard = JSON.parse(JSON.stringify(activeCharacter.card));
       if (!newCard.char_book) newCard.char_book = { entries: [] };
       newCard.char_book.entries = updatedEntries;
+      
+      // Update attached list
+      newCard.attached_lorebooks = attachedBooks;
       
       if (activeCharacterFileName === NEW_CHARACTER_ID) {
           setDraftCard(newCard);
@@ -123,6 +126,7 @@ export const CharacterTab: React.FC = () => {
       return (
           <CharacterBookFullScreenView 
               initialEntries={activeCharacter.card.char_book?.entries || []}
+              initialAttached={activeCharacter.card.attached_lorebooks || []}
               onSave={handleLorebookSave}
               onClose={() => setIsLorebookMode(false)}
           />

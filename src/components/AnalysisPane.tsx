@@ -1,9 +1,10 @@
 
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import type { CharacterCard } from '../types';
+import type { CharacterCard, Lorebook, WorldInfoEntry } from '../types';
 import { exportToPng, buildExportObject } from '../services/cardExporter';
 import { Loader } from './Loader';
 import { ExportModal } from './ExportModal';
+import { useLorebook } from '../contexts/LorebookContext'; // Import Hook
 
 interface AnalysisPaneProps {
   card: CharacterCard;
@@ -35,6 +36,7 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({
     isNewCharacter = false, 
     onSaveNew 
 }) => {
+    const { lorebooks } = useLorebook(); // Access global store
     const [isExporting, setIsExporting] = useState<boolean>(false);
     const [error, setError] = useState<string>('');
     const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -43,20 +45,44 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [exportType, setExportType] = useState<'json' | 'png'>('json');
 
-    const assembleCompleteCard = useCallback((characterCard: CharacterCard): CharacterCard => {
-      if (!characterCard) return characterCard;
-
-      // Deep copy to avoid mutating state
-      const completeCard = JSON.parse(JSON.stringify(characterCard)) as CharacterCard;
+    // Function to embed linked lorebooks into the card before export
+    const prepareCardForExport = useCallback((originalCard: CharacterCard): CharacterCard => {
+      // Deep copy
+      const exportCard = JSON.parse(JSON.stringify(originalCard)) as CharacterCard;
       
-      if (completeCard.char_book && completeCard.char_book.entries.length === 0) {
-          delete completeCard.char_book;
+      // OPTION A: Embed Attached Lorebooks
+      if (exportCard.attached_lorebooks && exportCard.attached_lorebooks.length > 0) {
+          const attachedNames = exportCard.attached_lorebooks;
+          const mergedEntries: WorldInfoEntry[] = [...(exportCard.char_book?.entries || [])];
+          
+          attachedNames.forEach(name => {
+              const book = lorebooks.find(b => b.name === name);
+              if (book && book.book.entries) {
+                  // Clone entries to avoid mutation and add source tag
+                  const entriesToAdd = JSON.parse(JSON.stringify(book.book.entries));
+                  entriesToAdd.forEach((e: any) => {
+                      e.source_lorebook = name; // Tag source
+                      if (!e.uid) e.uid = `embed_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
+                  });
+                  mergedEntries.push(...entriesToAdd);
+              }
+          });
+
+          // Update card
+          if (!exportCard.char_book) exportCard.char_book = { entries: [] };
+          exportCard.char_book.entries = mergedEntries;
+          
+          // Clear attached list so recipient doesn't look for missing files
+          delete exportCard.attached_lorebooks;
       }
-      
-      delete completeCard.attached_lorebooks;
 
-      return completeCard;
-    }, []);
+      // Cleanup empty book
+      if (exportCard.char_book && exportCard.char_book.entries.length === 0) {
+          delete exportCard.char_book;
+      }
+
+      return exportCard;
+    }, [lorebooks]);
 
 
     const tokenCounts = useMemo(() => {
@@ -76,8 +102,9 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({
 
     // Executes the export after name confirmation
     const performExport = async (finalFileName: string) => {
+        const cardToExport = prepareCardForExport(card); // Use the prepared card
+
         if (exportType === 'json') {
-            const cardToExport = assembleCompleteCard(card);
             const exportObject = buildExportObject(cardToExport);
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObject, null, 2));
             const downloadAnchorNode = document.createElement('a');
@@ -91,7 +118,6 @@ export const AnalysisPane: React.FC<AnalysisPaneProps> = ({
             setIsExporting(true);
             setError('');
             try {
-                const cardToExport = assembleCompleteCard(card);
                 await exportToPng(cardToExport, avatarFile, finalFileName);
             } catch (e) {
                 setError(e instanceof Error ? `Lỗi xuất PNG: ${e.message}` : 'Đã xảy ra lỗi không xác định khi xuất tệp PNG.');
