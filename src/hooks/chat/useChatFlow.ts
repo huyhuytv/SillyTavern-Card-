@@ -240,9 +240,20 @@ export const useChatFlow = () => {
                         
                     const historyList = state.messages.map(m => m.content).slice(-3);
 
-                    const effectivePreset = forceKeywordMode 
+                    // --- STORY MODE LOGIC INJECTION ---
+                    // If we are in Story Mode (forcedContent is present), FORCE Keyword Only mode.
+                    // This bypasses AI Smart Scan for speed and efficiency during story injection.
+                    const isStoryModeChunk = !!options?.forcedContent;
+                    const shouldUseKeywordMode = isStoryModeChunk || forceKeywordMode;
+
+                    const effectivePreset = shouldUseKeywordMode 
                         ? { ...state.preset, smart_scan_mode: 'keyword' as const } 
                         : state.preset;
+
+                    if (isStoryModeChunk) {
+                        // Optional: Log intent to console/system log for debugging
+                        // logger.logSystemMessage('log', 'system', 'Story Mode detected: Using Keyword Scan.');
+                    }
 
                     scanResult = await scanInput(
                         textToScan, 
