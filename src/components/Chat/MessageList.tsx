@@ -237,77 +237,86 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                     },
                 ];
 
-                if (msg.interactiveHtml) {
-                    let finalHtml = msg.interactiveHtml;
-                    let thinkingContent: string | null = null;
-
-                    const thinkingMatch = finalHtml.match(/<thinking>([\s\S]*?)<\/thinking>/i);
-                    
-                    if (thinkingMatch) {
-                        thinkingContent = thinkingMatch[1].trim();
-                        finalHtml = finalHtml.replace(thinkingMatch[0], '');
-                    }
-
-                    return (
-                        <div key={msg.id} className="my-4 relative group">
-                            {/* Actions Overlay */}
-                            <div className="absolute top-0 right-0 z-20 flex items-center gap-2 p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none group-hover:pointer-events-auto">
-                                {/* STANDALONE TTS BUTTON FOR IFRAMES */}
-                                {ttsEnabled && (
-                                    <StandaloneTTSButton 
-                                        rawContent={msg.originalRawContent || msg.interactiveHtml} 
-                                        voice={ttsVoice}
-                                        provider={ttsProvider}
-                                        nativeVoice={ttsNativeVoice}
-                                        rate={ttsRate}
-                                        pitch={ttsPitch}
-                                    />
-                                )}
-                                
-                                <div className="bg-slate-800/90 rounded-full shadow-md backdrop-blur-sm border border-slate-600/50">
-                                    <MessageMenu actions={menuActions} isUser={false} />
-                                </div>
-                            </div>
-
-                            {thinkingContent && (
-                                <div className="mb-2">
-                                    <ThinkingReveal content={thinkingContent} />
-                                </div>
-                            )}
-                            <InteractiveHtmlMessage 
-                              ref={(el) => { iframeRefs.current[msg.id] = el; }}
-                              htmlContent={finalHtml} 
-                              scripts={scripts}
-                              originalContent={msg.originalRawContent || ''}
-                              initialData={variables}
-                              extensionSettings={extensionSettings} 
-                              onLoad={() => onIframeLoad(msg.id)}
-                              characterName={characterName}
-                              userPersonaName={userPersonaName}
-                              characterId={characterId} 
-                              chatId={sessionId}
-                              chatHistory={messages}
-                              userAvatarUrl={characterAvatarUrl || undefined}
-                            />
-                        </div>
-                    );
-                }
-                
-                if (!msg.content.trim() && editingMessageId !== msg.id) return null;
+                // Check for empty message
+                if (!msg.content.trim() && !msg.interactiveHtml && editingMessageId !== msg.id) return null;
 
                 return (
-                    <MessageBubble 
-                        key={msg.id} 
-                        message={msg} 
-                        avatarUrl={characterAvatarUrl}
-                        isEditing={editingMessageId === msg.id}
-                        editingContent={editingContent}
-                        onContentChange={setEditingContent}
-                        onSave={onSaveEdit}
-                        onCancel={onCancelEdit}
-                        menuActions={menuActions}
-                        isImmersive={isImmersive}
-                    />
+                    <div key={msg.id} className="group relative flex flex-col gap-2 my-4">
+                        {/* 1. Text Bubble Part */}
+                        {(msg.content.trim() || editingMessageId === msg.id) && (
+                            <MessageBubble 
+                                message={msg} 
+                                avatarUrl={characterAvatarUrl}
+                                isEditing={editingMessageId === msg.id}
+                                editingContent={editingContent}
+                                onContentChange={setEditingContent}
+                                onSave={onSaveEdit}
+                                onCancel={onCancelEdit}
+                                menuActions={menuActions}
+                                isImmersive={isImmersive}
+                            />
+                        )}
+
+                        {/* 2. Interactive HTML Part */}
+                        {msg.interactiveHtml && (
+                            <div className="relative w-full">
+                                {/* If message has ONLY HTML (no text), show overlay actions */}
+                                {(!msg.content.trim() && editingMessageId !== msg.id) && (
+                                    <div className="absolute top-0 right-0 z-20 flex items-center gap-2 p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none group-hover:pointer-events-auto">
+                                        {ttsEnabled && (
+                                            <StandaloneTTSButton 
+                                                rawContent={msg.originalRawContent || msg.interactiveHtml} 
+                                                voice={ttsVoice}
+                                                provider={ttsProvider}
+                                                nativeVoice={ttsNativeVoice}
+                                                rate={ttsRate}
+                                                pitch={ttsPitch}
+                                            />
+                                        )}
+                                        <div className="bg-slate-800/90 rounded-full shadow-md backdrop-blur-sm border border-slate-600/50">
+                                            <MessageMenu actions={menuActions} isUser={false} />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Thinking Reveal inside HTML Logic (if extraction needed) */}
+                                {(() => {
+                                    let finalHtml = msg.interactiveHtml;
+                                    let thinkingContent: string | null = null;
+                                    const thinkingMatch = finalHtml.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+                                    if (thinkingMatch) {
+                                        thinkingContent = thinkingMatch[1].trim();
+                                        finalHtml = finalHtml.replace(thinkingMatch[0], '');
+                                    }
+                                    
+                                    return (
+                                        <>
+                                            {thinkingContent && (
+                                                <div className="mb-2">
+                                                    <ThinkingReveal content={thinkingContent} />
+                                                </div>
+                                            )}
+                                            <InteractiveHtmlMessage 
+                                              ref={(el) => { iframeRefs.current[msg.id] = el; }}
+                                              htmlContent={finalHtml} 
+                                              scripts={scripts}
+                                              originalContent={msg.originalRawContent || ''}
+                                              initialData={variables}
+                                              extensionSettings={extensionSettings} 
+                                              onLoad={() => onIframeLoad(msg.id)}
+                                              characterName={characterName}
+                                              userPersonaName={userPersonaName}
+                                              characterId={characterId} 
+                                              chatId={sessionId}
+                                              chatHistory={messages}
+                                              userAvatarUrl={characterAvatarUrl || undefined}
+                                            />
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                        )}
+                    </div>
                 );
             })}
             

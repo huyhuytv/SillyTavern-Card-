@@ -1,6 +1,9 @@
+
 import React, { useState, useMemo } from 'react';
 import type { RPGDatabase, RPGTable } from '../../types/rpg';
 import { useChatStore } from '../../store/chatStore';
+import { useCharacter } from '../../contexts/CharacterContext'; // Need to fetch source card
+import { useToast } from '../ToastSystem';
 import { RpgRow } from './RpgTableComponents';
 
 interface RpgDashboardProps {
@@ -82,12 +85,33 @@ const InteractiveTableView: React.FC<{ table: RPGTable }> = ({ table }) => {
 
 export const RpgDashboard: React.FC<RpgDashboardProps> = ({ data, isOpen, onClose }) => {
     const [activeTabId, setActiveTabId] = useState<string | null>(null);
+    
+    // Store Actions
+    const { reloadRpgConfig, card } = useChatStore();
+    const { characters } = useCharacter();
+    const { showToast } = useToast();
 
     useMemo(() => {
         if (isOpen && !activeTabId && data?.tables?.length) {
             setActiveTabId(data.tables[0].config.id);
         }
     }, [isOpen, data]);
+
+    const handleReloadConfig = () => {
+        if (!card) return;
+        
+        // Find the source character from the global context using fileName
+        const sourceChar = characters.find(c => c.fileName === card.fileName);
+        
+        if (!sourceChar || !sourceChar.card.rpg_data) {
+            showToast("Không tìm thấy dữ liệu RPG gốc trong Thẻ nhân vật.", "error");
+            return;
+        }
+
+        // Execute Reload
+        reloadRpgConfig(sourceChar.card.rpg_data);
+        showToast("Đã đồng bộ cấu hình từ thẻ gốc thành công!", "success");
+    };
 
     if (!isOpen || !data) return null;
 
@@ -104,13 +128,27 @@ export const RpgDashboard: React.FC<RpgDashboardProps> = ({ data, isOpen, onClos
                         Live Editor • Update: {data.lastUpdated ? new Date(data.lastUpdated).toLocaleTimeString() : 'N/A'}
                     </p>
                 </div>
-                <button 
-                    onClick={onClose} 
-                    className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full transition-colors"
-                    aria-label="Đóng bảng điều khiển RPG"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
+                <div className="flex items-center gap-2">
+                    {/* NEW RELOAD BUTTON */}
+                    <button
+                        onClick={handleReloadConfig}
+                        className="px-3 py-1.5 text-xs font-bold bg-amber-600/20 text-amber-400 hover:bg-amber-600 hover:text-white border border-amber-500/30 rounded transition-colors flex items-center gap-1"
+                        title="Nạp lại cấu hình (Cột, Luật, Live-Link) từ Thẻ gốc nhưng giữ nguyên Dữ liệu chơi."
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                        </svg>
+                        Đồng bộ Cấu hình gốc
+                    </button>
+
+                    <button 
+                        onClick={onClose} 
+                        className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full transition-colors"
+                        aria-label="Đóng bảng điều khiển RPG"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
             </div>
 
             <div className="flex-grow flex overflow-hidden">

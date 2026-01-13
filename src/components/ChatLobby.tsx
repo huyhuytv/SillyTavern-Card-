@@ -377,30 +377,29 @@ export const ChatLobby: React.FC<ChatLobbyProps> = ({ onSessionSelect }) => {
         const initialMessages: ChatMessage[] = [];
         let messageIdCounter = 0;
 
-        if (displayContent.trim()) {
-            initialMessages.push({
-                id: `msg-start-${Date.now()}-${messageIdCounter++}`,
-                role: 'model',
-                content: displayContent,
-                originalRawContent: processedGreetingRaw
-            });
-        }
+        // MERGE LOGIC: Combine Text and HTML into ONE message if both exist
+        const startMsg: ChatMessage = {
+            id: `msg-start-${Date.now()}`,
+            role: 'model',
+            content: displayContent.trim() ? displayContent : '',
+            originalRawContent: processedGreetingRaw,
+            timestamp: Date.now()
+        };
 
         if (interactiveHtml) {
-            initialMessages.push({
-                id: `msg-start-${Date.now()}-${messageIdCounter++}`,
-                role: 'model',
-                content: '', 
-                interactiveHtml: interactiveHtml,
-                originalRawContent: processedGreetingRaw
-            });
+            startMsg.interactiveHtml = interactiveHtml;
         }
         
-        if (initialMessages.length === 0 && processedGreetingRaw) {
+        // Only push if there is actual content (text or html)
+        if (startMsg.content || startMsg.interactiveHtml) {
+            initialMessages.push(startMsg);
+        } else if (processedGreetingRaw) {
+            // Fallback for raw text if everything else is empty
             initialMessages.push({
-                id: `msg-start-${Date.now()}-${messageIdCounter++}`,
+                id: `msg-start-${Date.now()}`,
                 role: 'model',
-                content: processedGreetingRaw
+                content: processedGreetingRaw,
+                timestamp: Date.now()
             });
         }
 

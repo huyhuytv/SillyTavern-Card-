@@ -517,16 +517,19 @@ const SummariesView: React.FC<{
     const [regeneratingIndices, setRegeneratingIndices] = useState<Set<number>>(new Set());
     const [isRetrying, setIsRetrying] = useState(false);
     
-    const totalMessages = stats?.messageCount || 0;
+    const totalMessages = stats?.messageCount || 0; // Đã là "Active Turns" (Số lượt còn lại trong bộ nhớ)
     const summaryCount = stats?.summaryCount || 0;
-    const chunkSize = stats?.chunkSize || 10;
     const contextDepth = stats?.contextDepth || 20;
     const queueLength = stats?.queueLength || 0;
 
-    const processedTurns = summaryCount * chunkSize;
-    const unsummarizedCount = Math.max(0, totalMessages - processedTurns);
-    const progressPercent = Math.min(100, Math.floor((unsummarizedCount / contextDepth) * 100));
+    // Logic cũ (Bị sai)
+    // const processedTurns = summaryCount * chunkSize; 
+    // const unsummarizedCount = Math.max(0, totalMessages - processedTurns);
+
+    // Logic mới: totalMessages được lấy từ useChatMemory (đã cắt) nên nó CHÍNH LÀ unsummarizedCount
+    const unsummarizedCount = totalMessages;
     
+    const progressPercent = Math.min(100, Math.floor((unsummarizedCount / contextDepth) * 100));
     const canForce = unsummarizedCount >= contextDepth;
     const isBusy = queueLength > 0;
 
@@ -574,7 +577,7 @@ const SummariesView: React.FC<{
                             <p className="text-lg font-mono text-sky-400 font-bold">{summaryCount} <span className="text-xs text-slate-500 font-normal">gói</span></p>
                         </div>
                         <div>
-                            <p className="text-[10px] text-slate-400 uppercase font-bold">Lượt Mới (Chờ)</p>
+                            <p className="text-[10px] text-slate-400 uppercase font-bold">Lượt Mới (Trong Bộ Nhớ)</p>
                             <p className={`text-lg font-mono font-bold ${canForce ? 'text-amber-400 animate-pulse' : 'text-slate-300'}`}>
                                 ~{unsummarizedCount} <span className="text-xs text-slate-500 font-normal">/ {contextDepth} lượt</span>
                             </p>

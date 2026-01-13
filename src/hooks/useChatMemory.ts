@@ -19,33 +19,51 @@ export const useChatMemory = () => {
 
     const triggerSummarization = useCallback(async () => {
         // Kiểm tra điều kiện tối thiểu để tóm tắt
-        // Sử dụng chunk_size từ preset (mặc định 10) để quyết định cắt bao nhiêu tin nhắn
+        // Sử dụng chunk_size từ preset (mặc định 10) để quyết định cắt bao nhiêu LƯỢT (Turns)
         const chunkSize = preset?.summarization_chunk_size || 10;
         
-        // Chỉ tóm tắt nếu số lượng tin nhắn ít nhất gấp đôi chunk size (để còn lại ngữ cảnh sau khi cắt)
-        if (!card || messages.length < (chunkSize * 2)) return;
+        // 1. Tính toán điểm cắt dựa trên số LƯỢT (Model Responses)
+        // Thay vì cắt mù quáng messages.slice(0, chunkSize), ta tìm vị trí của tin nhắn Model thứ N
+        let cutIndex = -1;
+        let turnCounter = 0;
+
+        for (let i = 0; i < messages.length; i++) {
+            if (messages[i].role === 'model') {
+                turnCounter++;
+                if (turnCounter === chunkSize) {
+                    // Cắt ngay sau tin nhắn Model thứ N
+                    cutIndex = i + 1;
+                    break;
+                }
+            }
+        }
+
+        // Nếu chưa đủ số lượt cần thiết thì không làm gì cả
+        if (cutIndex === -1 || cutIndex >= messages.length) return;
 
         setIsSummarizing(true);
-        dispatchSystemLog('log', 'system', `Đang thực hiện tóm tắt ngữ cảnh (Gói ${chunkSize} lượt)...`);
+        dispatchSystemLog('log', 'system', `Đang thực hiện tóm tắt ngữ cảnh (${chunkSize} lượt / ${cutIndex} tin nhắn)...`);
 
         try {
-            // Cắt đúng số lượng tin nhắn theo cấu hình
-            const chunk = messages.slice(0, chunkSize);
-            const summary = await summarizeHistory(chunk, card.name);
+            // Cắt đúng số lượng tin nhắn tương ứng với số lượt
+            const chunk = messages.slice(0, cutIndex);
+            
+            // Gửi đi tóm tắt
+            const summary = await summarizeHistory(chunk, card?.name || 'Character');
             
             if (summary) {
                 const newSummaries = [...longTermSummaries, summary];
                 
                 // Cập nhật Store: Thêm tóm tắt mới VÀ cắt bỏ tin nhắn cũ khỏi lịch sử
                 // Điều này rất quan trọng để giải phóng bộ nhớ (Context Window)
-                const remainingMessages = messages.slice(chunkSize);
+                const remainingMessages = messages.slice(cutIndex);
                 
                 setSessionData({ 
                     longTermSummaries: newSummaries,
                     messages: remainingMessages 
                 });
                 
-                dispatchSystemLog('script-success', 'system', 'Tóm tắt thành công & Đã giải phóng bộ nhớ.');
+                dispatchSystemLog('script-success', 'system', `Tóm tắt thành công. Đã chuyển ${chunkSize} lượt vào bộ nhớ dài hạn.`);
             }
         } catch (e) {
             dispatchSystemLog('error', 'system', `Lỗi tóm tắt dữ liệu: ${e instanceof Error ? e.message : String(e)}`);

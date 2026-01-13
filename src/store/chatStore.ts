@@ -4,7 +4,7 @@ import { immer } from 'zustand/middleware/immer';
 import type { 
     ChatMessage, CharacterCard, SillyTavernPreset, UserPersona, 
     VisualState, WorldInfoRuntimeStats, SystemLogEntry, ChatTurnLog, 
-    QuickReply, ScriptButton, SummaryQueueItem, WorldInfoEntry
+    QuickReply, ScriptButton, SummaryQueueItem, WorldInfoEntry, RPGDatabase
 } from '../types';
 // IMPORT SYNC LOGIC
 import { syncDatabaseToLorebook } from '../services/medusaService'; 
@@ -100,6 +100,9 @@ interface ChatActions {
     updateRpgCell: (tableId: string, rowIndex: number, colIndex: number, value: any) => void;
     addRpgRow: (tableId: string) => void;
     deleteRpgRow: (tableId: string, rowIndex: number) => void;
+    
+    // NEW: Reload RPG Config from Template
+    reloadRpgConfig: (templateDb: RPGDatabase) => void;
 }
 
 const initialState: Omit<ChatState, 'abortController'> = {
@@ -210,6 +213,51 @@ export const useChatStore = create<ChatState & ChatActions>()(
                 } catch(e) {
                     console.error("Sync error in deleteRpgRow", e);
                 }
+            }
+        }),
+
+        reloadRpgConfig: (templateDb) => set((state) => {
+            if (!state.card) return;
+            
+            // 1. Deep Clone Template (Structure)
+            const newDb = JSON.parse(JSON.stringify(templateDb)) as RPGDatabase;
+            const currentDb = state.card.rpg_data;
+
+            // 2. Inject existing Data (Rows) into new Structure
+            if (currentDb) {
+                newDb.tables.forEach(newTable => {
+                    // Find matching table in current session by ID
+                    const oldTable = currentDb.tables.find(t => t.config.id === newTable.config.id);
+                    if (oldTable) {
+                        // Preserve Rows
+                        newTable.data.rows = oldTable.data.rows;
+                    } else {
+                        // If table is new in template, it starts empty (which is correct)
+                        newTable.data.rows = [];
+                    }
+                });
+            } else {
+                // If no current DB, just use template as is (initialized empty)
+            }
+
+            // 3. Update State
+            state.card.rpg_data = newDb;
+            newDb.lastUpdated = Date.now();
+
+            // 4. Force Live-Link Sync immediately
+            try {
+                const generatedEntries = syncDatabaseToLorebook(newDb);
+                state.generatedLorebookEntries = generatedEntries;
+                
+                // Log success
+                state.logs.systemLog.unshift({
+                    level: 'state',
+                    source: 'system',
+                    message: `[RPG Config Reload] Đã đồng bộ cấu trúc từ thẻ gốc. Dữ liệu hàng được giữ nguyên. Đã tạo ${generatedEntries.length} mục Live-Link.`,
+                    timestamp: Date.now()
+                });
+            } catch(e) {
+                console.error("Sync error in reloadRpgConfig", e);
             }
         }),
     }))
