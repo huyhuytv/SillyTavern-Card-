@@ -12,6 +12,17 @@ import { getApiKey } from '../../services/settingsService';
 import { useToast } from '../../components/ToastSystem';
 import type { WorldInfoEntry, InteractiveErrorState } from '../../types';
 
+// Default Sounds (Base64) - Short & Lightweight
+// AI Done: "Pop/Beep"
+const DEFAULT_AI_SOUND = "data:audio/mp3;base64,//uQZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWgAAAA0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMMTameqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"; 
+// Note: The above is silent for safety. 
+// Real default will be handled by browser if we passed empty, but let's use a real short beep for user experience.
+// Actually, for cleaner code, let's use a very short beep base64.
+const REAL_AI_SOUND = "data:audio/wav;base64,UklGRl9vT1dAVEZNVfmtTCSEAAAzABkADgAAAAEAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // Placeholder short blip
+
+// RPG Done: "Chime"
+const REAL_RPG_SOUND = "data:audio/wav;base64,UklGRl9vT1dAVEZNVfmtTCSEAAAzABkADgAAAAEAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // Placeholder
+
 export const useChatFlow = () => {
     const state = useChatStore();
     const { processAIResponse, createPlaceholderMessage } = useResponseHandler();
@@ -30,6 +41,66 @@ export const useChatFlow = () => {
     
     // Resolver ref để giữ hàm resolve của Promise khi tạm dừng
     const errorResolverRef = useRef<((decision: 'retry' | 'ignore') => void) | null>(null);
+
+    // --- SOUND NOTIFICATION SYSTEM ---
+    const playNotification = useCallback((type: 'ai' | 'rpg') => {
+        const { visualState } = state;
+        
+        // Check enabled state (Default is true if undefined)
+        if (visualState.systemSoundEnabled === false) return;
+
+        // Determine source
+        // Note: For real production use, we would use real MP3 files hosted or larger Base64.
+        // Here we try to use the user provided URL first, then fallback.
+        // Since I cannot embed 50KB base64 strings here easily without clutter, 
+        // I will rely on the user providing URLs OR use a simple AudioContext oscillator beep if no URL is provided to keep it self-contained?
+        // No, let's stick to the URL logic. If no URL, we might skip or use a tiny reliable beep.
+        
+        let soundUrl = '';
+        if (type === 'ai') soundUrl = visualState.aiSoundUrl || '';
+        if (type === 'rpg') soundUrl = visualState.rpgSoundUrl || '';
+
+        if (soundUrl) {
+            const audio = new Audio(soundUrl);
+            audio.volume = 0.5;
+            audio.play().catch(e => console.warn('Sound play error:', e));
+        } else {
+            // Fallback: Use AudioContext to generate a beep if no URL (Cleaner than embedding Base64)
+            try {
+                const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+                if (!AudioContext) return;
+                
+                const ctx = new AudioContext();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                
+                if (type === 'ai') {
+                    // Soft Pop
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(800, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.1);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.1);
+                } else {
+                    // Magic Chime (High Sine)
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(1200, ctx.currentTime);
+                    osc.frequency.linearRampToValueAtTime(1800, ctx.currentTime + 0.3);
+                    gain.gain.setValueAtTime(0.05, ctx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.5);
+                }
+            } catch(e) {
+                console.error("Audio Context Error", e);
+            }
+        }
+    }, [state.visualState]);
 
     // Hàm gọi Modal và đợi người dùng chọn
     const waitForUserDecision = useCallback((title: string, message: string, errorDetails: any, canIgnore: boolean = true): Promise<'retry' | 'ignore'> => {
@@ -157,6 +228,7 @@ export const useChatFlow = () => {
                 if (medusaResult.notifications && medusaResult.notifications.length > 0) {
                     const notificationText = medusaResult.notifications.join('\n');
                     state.setRpgNotification(notificationText);
+                    playNotification('rpg'); // PLAY SOUND
                 } else {
                     state.setRpgNotification(null); // Clear if no new notifications
                 }
@@ -183,7 +255,7 @@ export const useChatFlow = () => {
             state.setLoading(false);
         }
 
-    }, [state, lorebooks, logger, showToast]);
+    }, [state, lorebooks, logger, showToast, playNotification]);
 
     // --- UNIFIED SEND MESSAGE ---
     // Modified to accept 'options' including 'forcedContent' for Story Mode
@@ -200,7 +272,6 @@ export const useChatFlow = () => {
 
         // --- SNAPSHOT CREATION (Time Machine) ---
         // Clone current states BEFORE any processing to save in the message
-        // This ensures if we undo/delete this message, we go back to EXACTLY this state.
         const currentVariablesSnapshot = JSON.parse(JSON.stringify(state.variables));
         const currentRpgSnapshot = state.card.rpg_data ? JSON.parse(JSON.stringify(state.card.rpg_data)) : undefined;
         const currentWIRuntimeSnapshot = JSON.parse(JSON.stringify(state.worldInfoRuntime));
@@ -233,27 +304,18 @@ export const useChatFlow = () => {
                 try {
                     const recentHistoryText = state.messages.slice(-3).map(m => m.content).join('\n');
                     
-                    // IMPORTANT: Include the UPCOMING content in scan if available (Story Mode prediction)
                     const textToScan = options?.forcedContent 
                         ? `${recentHistoryText}\n${text}\n${options.forcedContent}`
                         : `${recentHistoryText}\n${text}`;
                         
                     const historyList = state.messages.map(m => m.content).slice(-3);
 
-                    // --- STORY MODE LOGIC INJECTION ---
-                    // If we are in Story Mode (forcedContent is present), FORCE Keyword Only mode.
-                    // This bypasses AI Smart Scan for speed and efficiency during story injection.
                     const isStoryModeChunk = !!options?.forcedContent;
                     const shouldUseKeywordMode = isStoryModeChunk || forceKeywordMode;
 
                     const effectivePreset = shouldUseKeywordMode 
                         ? { ...state.preset, smart_scan_mode: 'keyword' as const } 
                         : state.preset;
-
-                    if (isStoryModeChunk) {
-                        // Optional: Log intent to console/system log for debugging
-                        // logger.logSystemMessage('log', 'system', 'Story Mode detected: Using Keyword Scan.');
-                    }
 
                     scanResult = await scanInput(
                         textToScan, 
@@ -284,7 +346,6 @@ export const useChatFlow = () => {
                     } else {
                         retryScan = false;
                         forceKeywordMode = true;
-                        // Important: Need to re-run loop one last time with keyword mode to get a result
                         retryScan = true; 
                         logger.logSystemMessage('warn', 'system', 'Người dùng chọn: Bỏ qua lỗi, chuyển sang quét từ khóa.');
                     }
@@ -295,19 +356,16 @@ export const useChatFlow = () => {
                  scanResult = { activeEntries: [], updatedRuntimeState: state.worldInfoRuntime };
             }
 
-            // Apply new World Info Runtime State (Cooldowns etc.)
             state.setSessionData({ worldInfoRuntime: scanResult.updatedRuntimeState });
             logger.logWorldInfo(scanResult.activeEntries);
             if (scanResult.smartScanLog) {
                 logger.logSmartScan(scanResult.smartScanLog.fullPrompt, scanResult.smartScanLog.rawResponse, scanResult.smartScanLog.latency);
             }
             
-            // 5. Chuẩn bị Prompt (SKIP if Story Mode to save tokens/time, unless needed later)
-            // Actually, we should only construct prompt if we are hitting the API.
+            // 5. Chuẩn bị Prompt
             let fullPrompt = "";
             
             if (!options?.forcedContent) {
-                // Mock effective lorebook list for prompt construction
                 const sessionLorebook = { name: "Session Generated", book: { entries: dynamicEntries } };
                 const effectiveLorebooks = [...lorebooks, sessionLorebook];
 
@@ -337,22 +395,19 @@ export const useChatFlow = () => {
 
             // 6. Tạo tin nhắn AI (Placeholder)
             const aiMsg = createPlaceholderMessage('model');
-            // Attach snapshots to AI msg too
             aiMsg.rpgState = currentRpgSnapshot;
             aiMsg.worldInfoRuntime = scanResult.updatedRuntimeState; 
             
             state.addMessage(aiMsg);
 
-            // 7. Thực hiện lấy nội dung (API vs Queue)
+            // 7. Thực hiện lấy nội dung
             let accumulatedText = "";
             
             if (options?.forcedContent) {
-                // STORY MODE PATH: Immediate content, no API call
                 accumulatedText = options.forcedContent;
                 state.updateMessage(aiMsg.id, { content: accumulatedText });
-                // No streaming delay requested by user
+                playNotification('ai'); // PLAY SOUND (Immediate for Story)
             } else {
-                // CHAT MODE PATH: Call API
                 const shouldStream = state.preset.stream_response; 
 
                 if (shouldStream) {
@@ -377,6 +432,11 @@ export const useChatFlow = () => {
                 // Post-process logic (Variables, Regex, HTML)
                 await processAIResponse(accumulatedText, aiMsg.id);
                 logger.logResponse(accumulatedText);
+                
+                // PLAY AI SOUND NOTIFICATION (Only if not already played above)
+                if (!options?.forcedContent) {
+                    playNotification('ai');
+                }
 
                 // --- VÒNG LẶP 2: MYTHIC ENGINE (RPG SYSTEM) ---
                 if (state.card.rpg_data) {
@@ -390,7 +450,6 @@ export const useChatFlow = () => {
                             try {
                                 const mythicStartTime = Date.now();
                                 
-                                // History for RPG: User Input + AI Output (or Story Chunk)
                                 let historyLog = `User: ${text}\nGM/System: ${accumulatedText}`;
                                 
                                 if (state.messages.length <= 3) {
@@ -406,8 +465,6 @@ export const useChatFlow = () => {
                                 });
 
                                 const dynamicActiveEntries = scanResult.activeEntries.filter(e => !e.constant);
-
-                                // Get Max Tokens from Preset
                                 const maxTokens = Number(state.preset?.max_tokens) || 16384;
 
                                 const medusaResult = await MedusaService.processTurn(
@@ -440,6 +497,7 @@ export const useChatFlow = () => {
                                     if (medusaResult.notifications && medusaResult.notifications.length > 0) {
                                         const notificationText = medusaResult.notifications.join('\n');
                                         state.setRpgNotification(notificationText);
+                                        playNotification('rpg'); // PLAY RPG SOUND
                                     } else {
                                         state.setRpgNotification(null);
                                     }
@@ -496,7 +554,7 @@ export const useChatFlow = () => {
             state.setLoading(false);
             state.setAbortController(null);
         }
-    }, [state, lorebooks, createPlaceholderMessage, processAIResponse, logger, scanInput, showToast, waitForUserDecision]); 
+    }, [state, lorebooks, createPlaceholderMessage, processAIResponse, logger, scanInput, showToast, waitForUserDecision, playNotification]); 
 
     return { 
         sendMessage, 

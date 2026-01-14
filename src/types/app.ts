@@ -56,6 +56,10 @@ export interface VisualState {
     musicUrl?: string;
     ambientSoundUrl?: string;
     globalClass?: string;
+    // Sound Notifications
+    systemSoundEnabled?: boolean; // Mặc định true
+    aiSoundUrl?: string; // Custom URL cho AI
+    rpgSoundUrl?: string; // Custom URL cho RPG
 }
 
 // NEW: Trạng thái lỗi tương tác cho Modal

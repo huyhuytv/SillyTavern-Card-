@@ -11,7 +11,7 @@ interface ChatHeaderProps {
     isImmersive: boolean;
     setIsImmersive: (value: boolean) => void;
     visualState: VisualState;
-    onVisualUpdate: (type: 'bg' | 'music' | 'sound' | 'class', value: string) => void;
+    onVisualUpdate: (type: string, value: any) => void; // Updated signature to accept string key
     onToggleHUD?: () => void;
     isHUDOpen?: boolean;
     onToggleStatusHUD?: () => void;
@@ -30,7 +30,7 @@ const VisualSettingsModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
     visualState: VisualState;
-    onUpdate: (type: 'bg' | 'music' | 'sound' | 'class', value: string) => void;
+    onUpdate: (type: string, value: any) => void;
 }> = ({ isOpen, onClose, visualState, onUpdate }) => {
     const modalRef = useRef<HTMLDivElement>(null);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -74,7 +74,7 @@ const VisualSettingsModal: React.FC<{
     if (!isOpen) return null;
 
     return (
-        <div ref={modalRef} className="absolute top-14 right-4 w-80 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 animate-fade-in-up p-4">
+        <div ref={modalRef} className="absolute top-14 right-4 w-80 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 animate-fade-in-up p-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
             <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
                 <h3 className="font-bold text-slate-200">Cài đặt Giao diện & Âm thanh</h3>
                 <button 
@@ -86,38 +86,88 @@ const VisualSettingsModal: React.FC<{
                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
                 </button>
             </div>
-            <div className="space-y-4">
-                <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Link Hình nền (URL)</label>
-                    <input 
-                        type="text" 
-                        value={visualState.backgroundImage || ''} 
-                        onChange={(e) => onUpdate('bg', e.target.value)}
-                        placeholder="https://..."
-                        className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-xs text-slate-200"
-                    />
-                    <button onClick={() => onUpdate('bg', 'off')} className="text-xs text-red-400 mt-1 hover:underline">Xóa nền</button>
+            
+            <div className="space-y-6">
+                {/* Visuals */}
+                <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider">Hình ảnh & Hiệu ứng</h4>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-400 mb-1">Link Hình nền (URL)</label>
+                        <input 
+                            type="text" 
+                            value={visualState.backgroundImage || ''} 
+                            onChange={(e) => onUpdate('bg', e.target.value)}
+                            placeholder="https://..."
+                            className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-xs text-slate-200"
+                        />
+                        <button onClick={() => onUpdate('bg', 'off')} className="text-xs text-red-400 mt-1 hover:underline">Xóa nền</button>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-400 mb-1">Link Nhạc nền (URL)</label>
+                        <input 
+                            type="text" 
+                            value={visualState.musicUrl || ''} 
+                            onChange={(e) => onUpdate('music', e.target.value)}
+                            placeholder="https://... (mp3/ogg)"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-xs text-slate-200"
+                        />
+                        <button onClick={() => onUpdate('music', 'off')} className="text-xs text-red-400 mt-1 hover:underline">Tắt nhạc</button>
+                    </div>
+                     <div>
+                        <label className="block text-xs font-medium text-slate-400 mb-1">Hiệu ứng CSS Global</label>
+                        <input 
+                            type="text" 
+                            value={visualState.globalClass || ''} 
+                            onChange={(e) => onUpdate('class', e.target.value)}
+                            placeholder="grayscale, blur-sm, sepia..."
+                            className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-xs text-slate-200"
+                        />
+                    </div>
                 </div>
-                <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Link Nhạc nền (URL)</label>
-                    <input 
-                        type="text" 
-                        value={visualState.musicUrl || ''} 
-                        onChange={(e) => onUpdate('music', e.target.value)}
-                        placeholder="https://... (mp3/ogg)"
-                        className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-xs text-slate-200"
-                    />
-                    <button onClick={() => onUpdate('music', 'off')} className="text-xs text-red-400 mt-1 hover:underline">Tắt nhạc</button>
-                </div>
-                 <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Hiệu ứng CSS Global</label>
-                    <input 
-                        type="text" 
-                        value={visualState.globalClass || ''} 
-                        onChange={(e) => onUpdate('class', e.target.value)}
-                        placeholder="grayscale, blur-sm, sepia..."
-                        className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-xs text-slate-200"
-                    />
+
+                {/* Sounds */}
+                <div className="space-y-4 border-t border-slate-700 pt-4">
+                    <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Thông báo Âm thanh</h4>
+                        <div className="flex items-center">
+                            <button
+                                onClick={() => onUpdate('systemSoundEnabled', !(visualState.systemSoundEnabled !== false))}
+                                className={`relative inline-flex h-4 w-8 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                    visualState.systemSoundEnabled !== false ? 'bg-amber-600' : 'bg-slate-600'
+                                }`}
+                            >
+                                <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                    visualState.systemSoundEnabled !== false ? 'translate-x-4' : 'translate-x-0'
+                                }`} />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className={visualState.systemSoundEnabled === false ? 'opacity-50 pointer-events-none' : ''}>
+                        <div className="mb-3">
+                            <label className="block text-xs font-medium text-slate-400 mb-1">Âm thanh AI Xong (URL)</label>
+                            <input 
+                                type="text" 
+                                value={visualState.aiSoundUrl || ''} 
+                                onChange={(e) => onUpdate('aiSoundUrl', e.target.value)}
+                                placeholder="Mặc định: 'Pop'"
+                                className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-xs text-slate-200"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-slate-400 mb-1">Âm thanh RPG Xong (URL)</label>
+                            <input 
+                                type="text" 
+                                value={visualState.rpgSoundUrl || ''} 
+                                onChange={(e) => onUpdate('rpgSoundUrl', e.target.value)}
+                                placeholder="Mặc định: 'Magic Chime'"
+                                className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-xs text-slate-200"
+                            />
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-2 italic">
+                            Để trống để sử dụng âm thanh mặc định của hệ thống.
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
