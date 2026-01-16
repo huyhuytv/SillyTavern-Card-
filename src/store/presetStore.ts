@@ -6,6 +6,7 @@ import { parsePresetFile } from '../services/presetParser';
 import * as dbService from '../services/dbService';
 import defaultPreset from '../data/defaultPreset';
 import geminiCoT12kPreset from '../data/geminiCoT12kPreset';
+import tawaPreset from '../data/tawaPreset';
 
 interface PresetState {
   presets: SillyTavernPreset[];
@@ -45,6 +46,11 @@ export const usePresetStore = create<PresetState & PresetActions>()(
         if (!presets.some(p => p.name === geminiCoT12kPreset.name)) {
           await dbService.savePreset(geminiCoT12kPreset);
           presets.push(geminiCoT12kPreset);
+          needsSave = true;
+        }
+        if (!presets.some(p => p.name === tawaPreset.name)) {
+          await dbService.savePreset(tawaPreset);
+          presets.push(tawaPreset);
           needsSave = true;
         }
 
@@ -91,7 +97,7 @@ export const usePresetStore = create<PresetState & PresetActions>()(
 
     deleteActivePreset: async () => {
         const { activePresetName } = get();
-        if (!activePresetName || activePresetName === defaultPreset.name || activePresetName === geminiCoT12kPreset.name) return;
+        if (!activePresetName || activePresetName === defaultPreset.name || activePresetName === geminiCoT12kPreset.name || activePresetName === tawaPreset.name) return;
 
         try {
             await dbService.deletePreset(activePresetName);
@@ -133,6 +139,11 @@ export const usePresetStore = create<PresetState & PresetActions>()(
             if (activePresetName === geminiCoT12kPreset.name) {
                 await dbService.savePreset(geminiCoT12kPreset);
                 get().updateActivePreset(geminiCoT12kPreset);
+                return;
+            }
+            if (activePresetName === tawaPreset.name) {
+                await dbService.savePreset(tawaPreset);
+                get().updateActivePreset(tawaPreset);
                 return;
             }
             // For custom presets, reload from DB to "undo" unsaved changes if we had an edit buffer,

@@ -9,6 +9,7 @@ export interface PromptEntry {
     identifier?: string;
     include_title?: boolean;
     order?: number;
+    injection_order?: number; // Support for V3 ordering
 }
 
 export interface SillyTavernPreset {

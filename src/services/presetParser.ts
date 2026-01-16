@@ -75,6 +75,8 @@ export const parsePresetFile = async (file: File): Promise<SillyTavernPreset> =>
                     // Ensure enabled is boolean (default to true for core prompts if missing is handled elsewhere, 
                     // but here we just ensure type safety)
                     enabled: typeof p.enabled === 'boolean' ? p.enabled : false, 
+                    // Ensure injection_order is mapped if present, for sorting
+                    injection_order: p.injection_order ?? undefined
                 };
             }).filter(Boolean) as PromptEntry[];
         }

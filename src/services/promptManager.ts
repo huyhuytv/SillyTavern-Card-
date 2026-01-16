@@ -3,6 +3,7 @@ import type { CharacterCard, SillyTavernPreset, Lorebook, WorldInfoEntry, ChatMe
 import ejs from 'ejs';
 import { get, applyVariableOperation } from './variableEngine';
 import { resolveMedusaMacros, DEFAULT_MEDUSA_PROMPT, filterDatabaseForContext } from './medusaService';
+import { dispatchSystemLog } from './logBridge'; // Import logger
 
 /**
  * Helper to filter active entries based on state and placement.
@@ -26,6 +27,7 @@ const getActiveWorldInfoEntries = (
         });
     }
 
+    // World Info still respects insertion_order for now as it's dynamic
     activeEntries.sort((a, b) => (a.insertion_order || 0) - (b.insertion_order || 0));
     
     const entriesBefore: WorldInfoEntry[] = [];
@@ -283,6 +285,8 @@ export function prepareChat(
     worldInfoPlacement?: Record<string, 'before' | 'after' | undefined>
 ): { baseSections: PromptSection[] } {
     
+    // LOGIC CHANGE: Disabled sorting by injection_order.
+    // Prompts are now mapped strictly in the order they appear in the preset's array.
     const sections: PromptSection[] = (preset.prompts || [])
         .filter(p => p.enabled === true && p.content)
         .map((p, index) => {
@@ -324,6 +328,9 @@ export async function constructChatPrompt(
     if (fullHistoryForThisTurn.length === 0) {
         throw new Error("Không thể tạo phản hồi cho một lịch sử trống.");
     }
+
+    // DEBUG START
+    dispatchSystemLog('log', 'system', `[PROMPT-DEBUG] Start constructing prompt. Variable count: ${Object.keys(variables).length}`);
 
     const history = fullHistoryForThisTurn.slice(0, -1);
     const userInput = fullHistoryForThisTurn[fullHistoryForThisTurn.length - 1].content;
@@ -419,19 +426,7 @@ export async function constructChatPrompt(
         // Prepare context strings for macros
         const lorebookContext = [...worldInfoCombinedList].join('\n');
         
-        // NOTE: We don't have full chat history text here easily formatted for Medusa unless we construct it.
-        // We'll pass an empty string for history and let resolveMedusaMacros handle placeholders if we don't want to dup history.
-        // BUT Medusa prompt needs history.
-        // However, this is injecting into the SYSTEM PROMPT of the main chat.
-        // The Main Chat already sees the history.
-        // So we just need Schema, Rules, and Data.
-        
         const rawSystemPrompt = card.rpg_data.settings.customSystemPrompt || DEFAULT_MEDUSA_PROMPT;
-        // We resolve macros but we might skip history if it's already in main chat.
-        // Actually, resolveMedusaMacros puts history in {{chat_history}}.
-        // If we inject this huge block into main prompt, we are duplicating history if we are not careful.
-        // But the user requested "Main Prompt Injection".
-        // Let's rely on standard resolution.
         
         mythicIntegratedString = resolveMedusaMacros(rawSystemPrompt, filteredDb, "", lorebookContext);
         
@@ -565,7 +560,14 @@ export async function constructChatPrompt(
         if (content.includes('{{current_page_history}}')) addToSubSections(currentPageHistoryList);
         if (content.includes('{{last_turn}}')) addToSubSections(lastTurnList);
 
-        // Macro Replacement
+        // --- NEW: PIPELINE ORDER (Optimized for Variable Logic) ---
+        // 1. Comments {{//...}} or {{#...}} - Remove them first
+        content = content.replace(/{{(\/\/|#).*?}}/gi, '');
+
+        // 2. Trim Macro {{trim}} - Remove surrounding whitespace
+        content = content.replace(/\s*{{trim}}\s*/gi, '');
+
+        // 3. Roll/Random Macros (Moved UP so they can be used in addvar)
         const rollHandler = (_: string, countStr: string, sidesStr: string, modStr: string) => {
             const count = countStr ? parseInt(countStr, 10) : 1; 
             const sides = parseInt(sidesStr, 10);
@@ -581,25 +583,66 @@ export async function constructChatPrompt(
                              return args[Math.floor(Math.random() * args.length)].trim();
                          });
 
-        content = content.replace(/{{setglobalvar::([^:]+)::(.*?)}}/gi, (_, key, val) => {
-            variables = applyVariableOperation(variables, 'set', 'globals.' + key, val);
+        // 4. Add Variable Macro {{addvar::key::val}}
+        // FIX: Added multiline support via [\s\S]*?
+        content = content.replace(/{{addvar::([^:]+)::([\s\S]*?)}}/gi, (_, key, val) => {
+            const cleanKey = key.trim();
+            const cleanVal = val.trim();
+            
+            // Try parsing as number if applicable
+            const numVal = Number(cleanVal);
+            const finalVal = (cleanVal !== '' && !isNaN(numVal)) ? numVal : cleanVal;
+
+            // DEBUG LOGGING
+            dispatchSystemLog('log', 'variable', `[PROMPT-DEBUG] Found addvar: Key="${cleanKey}", Val="${cleanVal}" (Parsed: ${finalVal})`);
+
+            variables = applyVariableOperation(variables, 'add', cleanKey, finalVal);
+            return '';
+        });
+
+        // 5. Set Global Variable
+        // FIX: Added multiline support via [\s\S]*?
+        content = content.replace(/{{setglobalvar::([^:]+)::([\s\S]*?)}}/gi, (_, key, val) => {
+            const cleanKey = key.trim();
+            const cleanVal = val.trim();
+            const numVal = Number(cleanVal);
+            const finalVal = (cleanVal !== '' && !isNaN(numVal)) ? numVal : cleanVal;
+
+            variables = applyVariableOperation(variables, 'set', 'globals.' + cleanKey, finalVal);
             return ''; 
         });
 
-        content = content.replace(/{{setvar::([^:]+)::(.*?)}}/gi, (_, key, val) => {
-            variables = applyVariableOperation(variables, 'set', key, val);
+        // 6. Set Variable
+        // FIX: Added multiline support via [\s\S]*?
+        content = content.replace(/{{setvar::([^:]+)::([\s\S]*?)}}/gi, (_, key, val) => {
+            const cleanKey = key.trim();
+            const cleanVal = val.trim();
+            const numVal = Number(cleanVal);
+            const finalVal = (cleanVal !== '' && !isNaN(numVal)) ? numVal : cleanVal;
+
+            dispatchSystemLog('log', 'variable', `[PROMPT-DEBUG] Found setvar: Key="${cleanKey}", Val="${cleanVal}"`);
+            variables = applyVariableOperation(variables, 'set', cleanKey, finalVal);
             return ''; 
         });
 
+        // 7. Get Variable (Display)
         content = content.replace(/{{getvar::([^}]+)}}/gi, (_, path) => {
-            const val = get(variables, path);
+            const cleanPath = path.trim();
+            const val = get(variables, cleanPath);
+            
+            // DEBUG LOGGING
+            dispatchSystemLog('log', 'variable', `[PROMPT-DEBUG] Executing getvar: "${cleanPath}" -> Result: ${val}`);
+            
             return val !== undefined ? String(val) : '';
         });
         
         content = content.replace(/{{getglobalvar::([^}]+)}}/gi, (_, key) => {
-            const val = get(variables, 'globals.' + key);
+            const cleanKey = key.trim();
+            const val = get(variables, 'globals.' + cleanKey);
             return val !== undefined ? String(val) : '';
         });
+
+        // -----------------------------------------------
 
         content = content
             .replace(/{{worldInfo_before}}/g, worldInfoBeforeString)
@@ -611,7 +654,7 @@ export async function constructChatPrompt(
             .replace(/{{smart_state_block}}/g, smartStateString)
             .replace(/{{current_variables_state}}/g, variablesStateString)
             .replace(/{{mythic_database}}/g, mythicStateString) 
-            .replace(/{{mythic_instruction_block}}/g, mythicIntegratedString) // NEW: INTEGRATED MACRO
+            .replace(/{{mythic_instruction_block}}/g, mythicIntegratedString) 
             .replace(/{{last_state}}/g, lastStateBlock)
             .replace(/{{author_note}}/g, authorNote || '')
             .replace(/{{long_term_summary}}/g, longTermSummaryString)
@@ -620,7 +663,8 @@ export async function constructChatPrompt(
             .replace(/{{user_input}}/g, userInput)
             .replace(/{{prompt}}/g, userInput)
             .replace(/{{get_message_variable::([^}]+)}}/gi, (_, path) => {
-                const val = get(variables, path);
+                const cleanPath = path.trim();
+                const val = get(variables, cleanPath);
                 if (val === undefined) return '';
                 return typeof val === 'object' ? JSON.stringify(val) : String(val);
             })
