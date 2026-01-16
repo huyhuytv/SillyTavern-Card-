@@ -210,12 +210,7 @@ export const useChatFlow = () => {
                         
                         let rowId = action.rowId;
                         if (!rowId && action.type === 'INSERT' && action.data) {
-                            // Find the row just inserted? It's hard to track exactly which new row matches which action without ID in action response.
-                            // But MedusaService adds ID to row[0].
-                            // In Sync, we generate IDs.
-                            // For simplicity, we just rely on `syncDatabaseToLorebook` generating IDs.
-                            // And `performWorldInfoScan` treating undefined lastActiveTurn as Fresh.
-                            // So INSERT is auto-handled.
+                            // Insert auto-handled by sync logic mostly
                         } else if (action.type === 'UPDATE' && typeof action.rowIndex === 'number') {
                             // For UPDATE, we know the row index.
                             const row = table.data.rows[action.rowIndex];
@@ -223,7 +218,8 @@ export const useChatFlow = () => {
                                 const rowUuid = row[0];
                                 const uid = `mythic_${table.config.id}_${rowUuid}`;
                                 if (nextRuntime[uid]) {
-                                    nextRuntime[uid].lastActiveTurn = currentTurn;
+                                    // Fix: Create shallow copy before mutation to avoid read-only error
+                                    nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
                                 } else {
                                     nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
                                 }
@@ -455,6 +451,27 @@ export const useChatFlow = () => {
                         if (generatedEntries.length > 0) {
                             logger.logSystemMessage('state', 'system', `[Live-Link] Đồng bộ ${generatedEntries.length} mục.`);
                         }
+                        
+                        // Update Lifecycle logic for Integrated Mode too
+                        const nextRuntime = { ...state.worldInfoRuntime };
+                        if (actions) {
+                             actions.forEach(action => {
+                                 if (action.type === 'UPDATE' && typeof action.rowIndex === 'number') {
+                                    const table = newDb.tables[action.tableIndex!];
+                                    if (table && table.data.rows[action.rowIndex]) {
+                                        const rowUuid = table.data.rows[action.rowIndex][0];
+                                        const uid = `mythic_${table.config.id}_${rowUuid}`;
+                                        if (nextRuntime[uid]) {
+                                            // Fix: Shallow copy before mutation
+                                            nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
+                                        }
+                                        else nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
+                                    }
+                                 }
+                             });
+                             state.setSessionData({ worldInfoRuntime: nextRuntime });
+                        }
+
                     } else {
                         logger.logSystemMessage('log', 'system', '[Integrated RPG] No actions found in response.');
                     }
@@ -532,7 +549,10 @@ export const useChatFlow = () => {
                                                 if (table && table.data.rows[action.rowIndex]) {
                                                     const rowUuid = table.data.rows[action.rowIndex][0];
                                                     const uid = `mythic_${table.config.id}_${rowUuid}`;
-                                                    if (nextRuntime[uid]) nextRuntime[uid].lastActiveTurn = currentTurn;
+                                                    if (nextRuntime[uid]) {
+                                                        // Fix: Shallow copy before mutation
+                                                        nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
+                                                    }
                                                     else nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
                                                 }
                                             }
