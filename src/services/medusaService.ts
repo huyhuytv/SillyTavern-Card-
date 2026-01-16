@@ -162,9 +162,69 @@ const getDatabaseData = (db: RPGDatabase): string => {
     return output;
 };
 
+// --- NEW: Hybrid View Function (Schema + Data in Markdown Table) ---
+const getHybridDatabaseView = (db: RPGDatabase): string => {
+    let output = "";
+
+    db.tables.forEach((table, tableIndex) => {
+        const { config, data } = table;
+
+        // 1. Header with Index and Name
+        output += `### [${tableIndex}:${config.name}]\n`;
+
+        // 2. Metadata Block (Quote style)
+        if (config.description) {
+            output += `> **Mô tả:** ${config.description}\n`;
+        }
+
+        // Collect Rules
+        const rules: string[] = [];
+        if (config.aiRules?.init) rules.push(`[Init: ${config.aiRules.init}]`);
+        if (config.aiRules?.insert) rules.push(`[Insert: ${config.aiRules.insert}]`);
+        if (config.aiRules?.update) rules.push(`[Update: ${config.aiRules.update}]`);
+        if (config.aiRules?.delete) rules.push(`[Delete: ${config.aiRules.delete}]`);
+
+        if (rules.length > 0) {
+            output += `> **Luật AI:** ${rules.join(' ')}\n`;
+        }
+
+        // 3. Markdown Table Construction
+        // Columns: Prepend index [0], [1] to label for AI reference
+        const headers = config.columns.map((c, idx) => `[${idx}] ${c.label}`);
+        
+        const headerRow = `| ${headers.join(' | ')} |`;
+        const separatorRow = `| ${headers.map(() => ':---').join(' | ')} |`;
+
+        output += `${headerRow}\n${separatorRow}\n`;
+
+        // Rows
+        if (!data.rows || data.rows.length === 0) {
+             // Empty row placeholder to keep table valid
+             const emptyRow = `| ${headers.map(() => ' ').join(' | ')} |`;
+             output += `${emptyRow}\n`;
+        } else {
+            data.rows.forEach(row => {
+                // row structure: [UUID, val1, val2...]
+                // We skip UUID (index 0) for visual table, showing only content columns
+                const cells = row.slice(1).map(cell => {
+                    const cellStr = String(cell ?? '');
+                    // Escape pipes and newlines to prevent breaking markdown table
+                    return cellStr.replace(/\|/g, '\\|').replace(/\n/g, '<br>');
+                });
+                output += `| ${cells.join(' | ')} |\n`;
+            });
+        }
+
+        output += "\n";
+    });
+
+    return output;
+};
+
 export const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog: string, lorebookContext: string): string => {
     const schemaStr = getDatabaseSchema(db);
     const dataStr = getDatabaseData(db);
+    const hybridStr = getHybridDatabaseView(db); // NEW: Generate Hybrid View
     const globalRules = db.globalRules || "";
     
     const lastUserLineMatch = historyLog.match(/User: (.*)$/m);
@@ -173,6 +233,7 @@ export const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog:
     return prompt
         .replace('{{rpg_schema}}', schemaStr)
         .replace('{{rpg_data}}', dataStr)
+        .replace('{{rpg_hybrid_table}}', hybridStr) // NEW: Inject Hybrid View
         .replace('{{rpg_lorebook}}', lorebookContext)
         .replace('{{global_rules}}', globalRules)
         .replace('{{chat_history}}', historyLog)
