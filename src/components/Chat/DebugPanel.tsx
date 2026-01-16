@@ -36,6 +36,48 @@ interface DebugPanelProps {
     onRetryMythic?: () => Promise<void>; // NEW: Manual Mythic Trigger
 }
 
+// --- NEW COMPONENT: Length & Token Estimator ---
+const LengthIndicator: React.FC<{ sections: PromptSection[] }> = ({ sections }) => {
+    const [showStats, setShowStats] = useState(false);
+
+    const stats = useMemo(() => {
+        const totalChars = sections.reduce((acc, sec) => acc + (sec.content || '').length, 0);
+        // Ước lượng: 1 token ~ 3.5 ký tự (cho hỗn hợp Tiếng Việt/Anh)
+        const estTokens = Math.ceil(totalChars / 3.5);
+        return { 
+            chars: totalChars.toLocaleString('vi-VN'), 
+            tokens: estTokens.toLocaleString('vi-VN') 
+        };
+    }, [sections]);
+
+    if (showStats) {
+        return (
+            <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowStats(false); }}
+                className="text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 px-2 py-0.5 rounded shadow-sm transition-all animate-fade-in-up flex items-center gap-1 font-mono"
+                title="Nhấn để thu gọn"
+            >
+                <span>📝 {stats.chars} ký tự</span>
+                <span className="opacity-60">|</span>
+                <span className="text-indigo-200">~{stats.tokens} tokens</span>
+            </button>
+        );
+    }
+
+    return (
+        <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowStats(true); }}
+            className="text-[10px] bg-slate-800 text-slate-400 border border-slate-600 px-2 py-0.5 rounded hover:text-sky-400 hover:border-sky-500 hover:bg-slate-700 transition-colors flex items-center gap-1"
+            title="Kiểm tra độ dài và ước lượng token"
+        >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm2 10a1 1 0 10-2 0 1 1 0 002 0zm2-4a1 1 0 110-2 1 1 0 010 2zm1 4a1 1 0 10-2 0 1 1 0 002 0zm2 0a1 1 0 110-2 1 1 0 010 2z" clipRule="evenodd" />
+            </svg>
+            <span>Đếm độ dài</span>
+        </button>
+    );
+};
+
 const PromptBlock: React.FC<{ section: PromptSection }> = ({ section }) => {
     // Use subSections if available (for World Info explotion), otherwise default logic
     const hasSubSections = section.subSections && section.subSections.length > 0;
@@ -403,14 +445,17 @@ const MythicLogView: React.FC<{ logs: string[], onRetry?: () => void }> = ({ log
                             </div>
                             
                             <details className="mb-2 group">
-                                <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-sky-400 font-bold mb-1 flex items-center gap-2">
-                                    <span>📤 Lời nhắc Gửi đi (Outgoing Prompt)</span>
-                                    <span className="transform group-open:rotate-90 transition-transform text-[8px]" aria-hidden="true">▶</span>
+                                <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-sky-400 font-bold mb-1 flex items-center justify-between rounded hover:bg-slate-800/50 p-1 transition-colors select-none">
+                                    <div className="flex items-center gap-2">
+                                        <span>📤 Lời nhắc Gửi đi (Outgoing Prompt)</span>
+                                        <span className="transform group-open:rotate-90 transition-transform text-[8px]" aria-hidden="true">▶</span>
+                                    </div>
+                                    {/* Copy Button moved to header for easy access */}
+                                    <div onClick={(e) => e.stopPropagation()}>
+                                        <CopyButton textToCopy={parsedLog.fullPrompt} label="Sao chép tất cả" absolute={false} />
+                                    </div>
                                 </summary>
                                 <div className="mt-2 space-y-2 pl-2 border-l border-slate-800">
-                                    <div className="flex justify-end">
-                                        <CopyButton textToCopy={parsedLog.fullPrompt} label="Copy Toàn bộ" absolute={false} />
-                                    </div>
                                     {structuredPrompt.map((section) => (
                                         <PromptBlock key={section.id} section={section} />
                                     ))}
@@ -449,6 +494,8 @@ const PromptsView: React.FC<{ turns: ChatTurnLog[] }> = ({ turns }) => {
                                 <span className="text-[10px] text-slate-500">{new Date(turn.timestamp).toLocaleTimeString()}</span>
                             </div>
                             <div className="flex items-center gap-2">
+                                {/* Integrated Length Indicator Here */}
+                                <LengthIndicator sections={turn.prompt} />
                                 <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 rounded">{turn.prompt.length} mục</span>
                                 <span className="transform group-open:rotate-90 transition-transform text-slate-500 text-[10px]" aria-hidden="true">▶</span>
                             </div>

@@ -85,9 +85,14 @@ const scanEntries = (
     for (const entry of entries) {
         if (!entry.uid) continue;
         
-        // 1. Check Manual Toggle (Hard Override)
-        const isManuallyEnabled = manualState[entry.uid] !== false;
-        if (!isManuallyEnabled) continue;
+        // 1. Check Enabled State (Manual Override > Card Default)
+        // BUG FIX: Previously only checked `manualState !== false`. 
+        // Now checks: If manual override exists, use it. Else, use entry.enabled default.
+        const isEnabled = manualState[entry.uid] !== undefined
+            ? manualState[entry.uid]
+            : entry.enabled !== false;
+
+        if (!isEnabled) continue;
 
         const stats = runtimeState[entry.uid] || { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: undefined };
 
@@ -164,32 +169,8 @@ const scanEntries = (
 
         // If not dormant, but also not triggered (and not AI selected), standard logic applies
         if (!isDormant && !shouldInclude) {
-            // It wasn't triggered by keywords/AI, so it shouldn't be active unless it was already sticky (handled outside)
-            // But wait, standard logic says if no keyword match, it's not active.
-            // So 'shouldInclude' IS the standard activation flag.
-            // The Dormancy check just ADDS a condition that it MUST be triggered to wake up.
-            // If it's already active (not dormant), it STILL needs a trigger to be included in *this* turn's prompt 
-            // (unless we treat Live-Links as "Always On until Dormant"? No, user said "Auto-Prune from Context").
-            // Assuming Live-Links behave like standard WI: they need keywords to appear.
-            // UNLESS the user implies Live-Links are "Active" meaning "In Context".
-            // Let's assume standard behavior: Keyword/AI required to be in Context.
-            // BUT, updating `lastActiveTurn` keeps them from being "Pruned" from the CANDIDATE list in the future?
-            // Actually, `activeChatEntries` passed to Medusa is what matters.
-            
-            // Refined Interpretation:
-            // 1. If Triggered (AI/Key) -> Include in Context -> Update lastActiveTurn.
-            // 2. If NOT Triggered -> Do not include.
-            // 3. Dormancy logic affects Medusa Context mostly? 
-            // "Dormant entries are excluded from... Prompt sent to Chat AI".
-            // If they are not triggered, they are excluded anyway.
-            // Ah, maybe the user implies Live-Links should stay in context for 10 turns *after* activation?
-            // "If no update or mention... removed from context".
-            // This implies "Sticky for 10 turns".
-            
             if (isLiveLink && !isDormant) {
-                // If it is NOT dormant (active within last 10 turns), should it be included even without keywords?
-                // User: "Auto-Prune... track... if in 10 turns no update... remove".
-                // This implies they ARE included if < 10 turns.
+                // Keep live links active if they haven't timed out yet
                 shouldInclude = true; 
             }
         }
@@ -276,7 +257,15 @@ export const performWorldInfoScan = (
     // 1. Initial Scan Setup
     
     // A. Constants
-    const constantEntries = allEntries.filter(e => e.constant && manualState[e.uid!] !== false);
+    // BUG FIX: Check strict enabled status. Manual Toggle overrides Card Default.
+    const constantEntries = allEntries.filter(e => {
+        if (!e.constant || !e.uid) return false;
+        // Priority: Manual Toggle in Chat > Card Default Enabled State
+        if (manualState[e.uid] !== undefined) {
+            return manualState[e.uid];
+        }
+        return e.enabled !== false;
+    });
     constantEntries.forEach(e => activeUidSet.add(e.uid!));
     
     // B. Pinned
