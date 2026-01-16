@@ -190,21 +190,20 @@ const getHybridDatabaseView = (db: RPGDatabase): string => {
 
         // 4. Schema (Index Mapping)
         output += `> SCHEMA (Cấu trúc cột):\n`;
-        output += `  (0) UUID [System]\n`; 
+        // Removed UUID display (0) to align visual index with data index for AI
         config.columns.forEach((col, idx) => {
-            // Mapping: Column 0 -> Row Index 1
-            output += `  (${idx + 1}) ${col.label} (${col.type})\n`;
+            output += `  ["${idx}"] ${col.label} (${col.type})\n`;
         });
 
         // 5. Data (JSON Array)
         output += `> DATA (Mảng dữ liệu):\n`;
         if (!data.rows || data.rows.length === 0) {
-             output += `  (Trống)\n`;
+             output += `  (Trống - Cần khởi tạo)\n`;
         } else {
             // Opening array bracket
             output += `[\n`;
-            // Map rows to JSON strings
-            const jsonRows = data.rows.map(row => `  ${JSON.stringify(row)}`);
+            // Map rows to JSON strings, SLICING off the first element (UUID) so index 0 corresponds to Column 0
+            const jsonRows = data.rows.map(row => `  ${JSON.stringify(row.slice(1))}`);
             output += jsonRows.join(',\n');
             // Closing array bracket
             output += `\n]\n`;
