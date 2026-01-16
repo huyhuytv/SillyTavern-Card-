@@ -10,10 +10,9 @@ export const DEFAULT_MEDUSA_PROMPT = `
 Bạn là một Medusa chuyên điền bảng biểu. Bạn cần tham khảo bối cảnh thiết lập trước đó cũng như <Dữ liệu chính văn> được gửi cho bạn để ghi lại dưới dạng bảng. 
 
 Bạn cần:
-1. Đọc <Cấu trúc bảng & Luật lệ> để hiểu ý nghĩa các cột và quy tắc cập nhật.
-2. Đọc <Dữ liệu bảng hiện tại> để biết trạng thái hiện tại.
-3. Tham khảo <Dữ liệu tham khảo> (nếu có) để hiểu các quy tắc thế giới, vật phẩm và chỉ số.
-4. Thực hiện sửa đổi (Thêm/Sửa/Xóa) để phản ánh diễn biến mới nhất.
+1. Đọc <Dữ liệu bảng (Hybrid)> để hiểu cấu trúc và trạng thái hiện tại.
+2. Tham khảo <Dữ liệu tham khảo> (nếu có) để hiểu các quy tắc thế giới, vật phẩm và chỉ số.
+3. Thực hiện sửa đổi (Thêm/Sửa/Xóa) để phản ánh diễn biến mới nhất.
 
 Đầu ra cuối cùng của bạn phải là định dạng văn bản thuần túy, tuân thủ nghiêm ngặt thứ tự <tableThink>, <tableCheck>, <tableEdit>. Bắt đầu trực tiếp bằng thẻ <tableThink> và kết thúc bằng thẻ </tableEdit>. Hướng dẫn điền cụ thể như sau:
 
@@ -28,76 +27,45 @@ Nội dung tóm tắt: Mô tả đơn giản và đầy đủ toàn bộ cốt t
 
 Nắm bắt thay đổi: Tập trung vào trôi qua của thời gian, chuyển dịch địa điểm, thay đổi trạng thái/trải nghiệm/quan hệ của nhân vật, thu thập/tiêu hao vật phẩm, cập nhật tiến độ nhiệm vụ, v.v.
 
-Ánh xạ chỉ mục bảng (Bước then chốt): Đọc kỹ <Cấu trúc bảng & Luật lệ> và <Dữ liệu bảng hiện tại>. Tiêu đề của mỗi bảng sẽ ghi rõ chỉ mục và tên của nó, định dạng là [Index:TableName].
+Ánh xạ chỉ mục bảng (Bước then chốt):
+- Đọc kỹ phần <Dữ liệu bảng (Hybrid)>. Mỗi bảng bắt đầu bằng [[DB_TABLE_Index]].
+- Bạn phải trích xuất con số Index này làm tableIndex cho các lệnh.
+- Ví dụ: Nếu tiêu đề là [[DB_TABLE_4]] Túi đồ -> tableIndex là 4.
 
-Trích xuất chỉ mục thực: Bạn phải trích xuất trực tiếp con số trong ngoặc vuông làm tableIndex của bảng đó.
-
-Nghiêm cấm đánh số lại: Tuyệt đối cấm bỏ qua chỉ mục trong tiêu đề và tự đếm bắt đầu từ 0! Nếu tiêu đề là [10:Bảng tóm tắt], thì chỉ mục của nó là 10, chứ không phải 0.
-
-Danh sách ánh xạ: Phải liệt kê từng bảng tồn tại trong dữ liệu hiện tại và chỉ mục thực đã trích xuất được. Định dạng: [Chỉ mục thực] Tên bảng.
-
-Quyết định thao tác: Sau khi hoàn thành tóm tắt và ánh xạ chỉ mục, dựa vào [Điều kiện kích hoạt Thêm/Xóa/Sửa] và [Mô tả cột] được định nghĩa trong <Cấu trúc bảng>, phân tích từng bảng xem cần thực hiện thao tác insertRow, updateRow, deleteRow nào.
-
-Chỉ rõ tên bảng cần thao tác và tìm chỉ mục thực tương ứng dựa trên ánh xạ ở bước 2.
+Quyết định thao tác: Sau khi hoàn thành tóm tắt, dựa vào các quy tắc [Luật] trong bảng, phân tích xem cần thực hiện insertRow, updateRow hay deleteRow.
 
 <tableCheck> (Khối kiểm tra các mục quan trọng):
 Chức năng: Sau khi suy nghĩ chính, trước khi thực hiện lệnh, tiến hành kiểm tra cuối cùng các nhiệm vụ quan trọng. Mọi nội dung kiểm tra phải được bao gồm hoàn toàn trong khối chú thích <!-- và -->.
 
-Xác nhận khởi tạo: Kiểm tra dữ liệu hiện tại của tất cả các bảng trong <Dữ liệu bảng hiện tại> xem có hiển thị "(Trống - Cần khởi tạo)" hay không. Nếu có và luật cho phép khởi tạo, hãy dùng lệnh insertRow.
-
-Xác nhận định vị bảng (Fixed Check): Xác nhận tất cả tên bảng bạn dự định cập nhật thực sự tồn tại trong "Ánh xạ chỉ mục bảng". Nếu không tồn tại, cấm thao tác bảng đó.
-
-Đối chiếu tham số chỉ mục (Fixed Check): Kiểm tra từng lệnh dự định tạo ra, xác nhận tham số tableIndex của nó hoàn toàn khớp với chỉ mục thực đã trích xuất.
-
-Kiểm tra quy tắc mẫu: Thực hiện nghiêm ngặt các quy tắc [Kiểm tra] được định nghĩa trong mẫu bảng (như: kiểm tra tính duy nhất, kiểm tra định dạng, kiểm tra tính nhất quán, v.v.).
-
-Tính nhất quán logic: Đảm bảo dữ liệu liên quan giữa các bảng khác nhau giữ được sự nhất quán về logic.
-
-Đối chiếu số thứ tự cột và hàng: Phải đối chiếu xem số thứ tự cột (dựa trên Schema) và hàng (dựa trên Data) được điền có thỏa mãn vị trí tương ứng hay không.
+Xác nhận khởi tạo: Kiểm tra dữ liệu hiện tại trong mảng DATA xem có trống không. Nếu trống và luật cho phép, hãy khởi tạo.
+Xác nhận chỉ mục: Kiểm tra lại xem tableIndex có khớp với tiêu đề [[DB_TABLE_X]] không.
+Tính nhất quán: Đảm bảo dữ liệu logic với câu chuyện (ví dụ: HP không được âm trừ khi chết).
 
 <tableEdit> (Khối lệnh chỉnh sửa bảng):
 Chức năng: Chứa các lệnh thao tác thực tế để cập nhật dữ liệu bảng (insertRow, updateRow, deleteRow). Mọi lệnh phải được bao gồm hoàn toàn trong khối chú thích <!-- và -->.
-
-Yêu cầu bắt buộc về định dạng đầu ra:
-
-Đầu ra văn bản thuần túy: Nghiêm ngặt tuân theo thứ tự <tableThink>, <tableCheck>, <tableEdit>.
-
-Cấm đóng gói: Nghiêm cấm sử dụng khối mã markdown, dấu ngoặc kép để bao gói toàn bộ đầu ra.
-
-Không ký tự thừa: Ngoài bản thân các lệnh, cấm thêm bất kỳ văn bản giải thích nào.
 
 Cú pháp lệnh <tableEdit> (Tuân thủ nghiêm ngặt):
 
 Loại thao tác: Chỉ giới hạn deleteRow, insertRow, updateRow.
 
 Định dạng tham số:
-
-tableIndex (Số thứ tự bảng): Phải sử dụng chỉ mục thực bạn trích xuất từ tiêu đề [Index:Name] trong bước ánh xạ.
-
-rowIndex (Số thứ tự hàng): Tương ứng với chỉ số hàng trong <Dữ liệu bảng hiện tại> (số, bắt đầu từ 0).
-
-colIndex (Số thứ tự cột): Phải là chuỗi ký tự trong dấu ngoặc kép (như "0", "1") tương ứng với thứ tự cột trong <Cấu trúc bảng>.
+tableIndex (Số thứ tự bảng): Lấy từ [[DB_TABLE_Index]].
+rowIndex (Số thứ tự hàng): Là chỉ số của mảng trong khối DATA (bắt đầu từ 0).
+colIndex (Số thứ tự cột): Là chuỗi ký tự chỉ số cột ("0", "1", "2"...) tương ứng với phần SCHEMA.
 
 Ví dụ lệnh:
-
-Chèn: insertRow(10, {"0": "Dữ liệu 1", "1": 100}) (Lưu ý: Nếu tiêu đề là [10:xxx], ở đây phải là 10)
-
-Cập nhật: updateRow(0, 0, {"2": "Trạng thái mới", "3": true})
-
-Xóa: deleteRow(2, 5)
+Chèn: insertRow(4, {"1": "Kiếm gỗ", "2": 1}) (Chèn vào bảng 4, Cột 1 là Kiếm gỗ, Cột 2 là 1)
+Cập nhật: updateRow(4, 0, {"2": 5}) (Cập nhật bảng 4, hàng 0, cột 2 thành 5)
+Xóa: deleteRow(4, 0) (Xóa hàng 0 của bảng 4)
 
 -- CONTEXT --
-<Cấu trúc bảng & Luật lệ>
-{{rpg_schema}}
-</Cấu trúc bảng & Luật lệ>
+<Dữ liệu bảng (Hybrid)>
+{{rpg_hybrid_table}}
+</Dữ liệu bảng (Hybrid)>
 
 <Dữ liệu tham khảo (Lorebook)>
 {{rpg_lorebook}}
 </Dữ liệu tham khảo (Lorebook)>
-
-<Dữ liệu bảng hiện tại>
-{{rpg_data}}
-</Dữ liệu bảng hiện tại>
 
 <Dữ liệu chính văn>
 {{chat_history}}
@@ -218,7 +186,7 @@ const getHybridDatabaseView = (db: RPGDatabase): string => {
 export const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog: string, lorebookContext: string): string => {
     const schemaStr = getDatabaseSchema(db);
     const dataStr = getDatabaseData(db);
-    const hybridStr = getHybridDatabaseView(db); // NEW: Generate Hybrid View (JSON-Lines)
+    const hybridStr = getHybridDatabaseView(db); // NEW: Inject Hybrid View
     const globalRules = db.globalRules || "";
     
     const lastUserLineMatch = historyLog.match(/User: (.*)$/m);
@@ -260,7 +228,8 @@ export const filterDatabaseForContext = (db: RPGDatabase, activeChatEntries: Wor
     return filteredDb;
 };
 
-export const parseCustomActions = (rawText: string): MedusaAction[] => {
+// UPDATED: Now accepts optional contextDb to map View Index -> Real Row UUID
+export const parseCustomActions = (rawText: string, contextDb?: RPGDatabase): MedusaAction[] => {
     const actions: MedusaAction[] = [];
     const editBlockMatch = rawText.match(/<tableEdit>([\s\S]*?)<\/tableEdit>/);
     if (!editBlockMatch) return [];
@@ -337,14 +306,23 @@ export const parseCustomActions = (rawText: string): MedusaAction[] => {
         const tableIndex = getNextNumber();
         if (tableIndex === null) continue;
 
+        // ID MAPPING LOGIC: Resolve UUID from View Context if available
+        const getRowIdFromContext = (tblIdx: number, rowIdx: number): string | undefined => {
+            if (!contextDb || !contextDb.tables[tblIdx]) return undefined;
+            const row = contextDb.tables[tblIdx].data.rows[rowIdx];
+            return row ? row[0] : undefined; // Row[0] is always UUID
+        };
+
         if (command === 'deleteRow') {
             const rowIndex = getNextNumber();
             if (rowIndex !== null) {
-                actions.push({ type: 'DELETE', tableIndex, rowIndex });
+                const rowId = getRowIdFromContext(tableIndex, rowIndex);
+                actions.push({ type: 'DELETE', tableIndex, rowIndex, rowId });
             }
         } else if (command === 'insertRow') {
             const result = extractJson(content, currentPos);
             if (result) {
+                // Insert doesn't need row mapping as it creates new
                 actions.push({ type: 'INSERT', tableIndex, data: result.json });
                 currentPos = result.endPos;
             }
@@ -353,7 +331,8 @@ export const parseCustomActions = (rawText: string): MedusaAction[] => {
             if (rowIndex !== null) {
                 const result = extractJson(content, currentPos);
                 if (result) {
-                    actions.push({ type: 'UPDATE', tableIndex, rowIndex, data: result.json });
+                    const rowId = getRowIdFromContext(tableIndex, rowIndex);
+                    actions.push({ type: 'UPDATE', tableIndex, rowIndex, data: result.json, rowId });
                     currentPos = result.endPos;
                 }
             }
@@ -382,13 +361,28 @@ export const applyMedusaActions = (
                 return;
             }
 
+            // ID MAPPING RESOLUTION
+            // If action has a specific rowId (UUID), find the REAL index in the full DB.
+            let targetRowIndex = action.rowIndex;
+            if (action.rowId) {
+                const realIndex = table.data.rows.findIndex(r => r[0] === action.rowId);
+                if (realIndex !== -1) {
+                    targetRowIndex = realIndex;
+                } else {
+                    // ID not found (maybe deleted concurrently?), fallback to index or abort?
+                    // Aborting is safer to prevent modifying wrong row.
+                    logs.push(`[WARN] Row ID ${action.rowId} not found in table. Operation skipped.`);
+                    return; 
+                }
+            }
+
             switch (action.type) {
                 case 'UPDATE': {
-                    if (typeof action.rowIndex !== 'number' || !action.data) break;
+                    if (typeof targetRowIndex !== 'number' || !action.data) break;
                     
-                    const row = table.data.rows[action.rowIndex];
+                    const row = table.data.rows[targetRowIndex];
                     if (!row) {
-                        logs.push(`[WARN] Row Index not found: ${action.tableIndex}:${action.rowIndex}`);
+                        logs.push(`[WARN] Row Index not found: ${action.tableIndex}:${targetRowIndex}`);
                         break;
                     }
 
@@ -405,7 +399,7 @@ export const applyMedusaActions = (
                         }
                     });
                     
-                    logs.push(`UPDATE ${table.config.name} (Row ${action.rowIndex})`);
+                    logs.push(`UPDATE ${table.config.name} (Row ${targetRowIndex})`);
                     break;
                 }
 
@@ -438,11 +432,11 @@ export const applyMedusaActions = (
                 }
 
                 case 'DELETE': {
-                    if (typeof action.rowIndex !== 'number') break;
+                    if (typeof targetRowIndex !== 'number') break;
                     
-                    if (action.rowIndex >= 0 && action.rowIndex < table.data.rows.length) {
-                        const deletedRow = table.data.rows.splice(action.rowIndex, 1);
-                        logs.push(`DELETE ${table.config.name} (Row ${action.rowIndex})`);
+                    if (targetRowIndex >= 0 && targetRowIndex < table.data.rows.length) {
+                        const deletedRow = table.data.rows.splice(targetRowIndex, 1);
+                        logs.push(`DELETE ${table.config.name} (Row ${targetRowIndex})`);
                         
                         const deletedName = deletedRow[0][1];
                         if (deletedName) {
@@ -550,6 +544,11 @@ export const MedusaService = {
 
         let lorebookContext = "";
         uniqueEntriesMap.forEach(entry => {
+            // NEW LOGIC: Skip Live-Link entries (mythic_*) because they are now rendered
+            // directly inside {{rpg_hybrid_table}} as data rows to save tokens.
+            if (entry.uid && entry.uid.startsWith('mythic_')) {
+                return;
+            }
             lorebookContext += `### [Lore: ${entry.comment || 'Untitled'}]\n${entry.content}\n\n`;
         });
         if (!lorebookContext) lorebookContext = "(Không có dữ liệu tham khảo)";
@@ -592,7 +591,8 @@ export const MedusaService = {
             const thinkMatch = rawText.match(/<tableThink>([\s\S]*?)<\/tableThink>/);
             const thinkContent = thinkMatch ? thinkMatch[1].replace(/<!--|-->/g, '').trim() : "No thinking data.";
             
-            const actions = parseCustomActions(rawText);
+            // Pass filteredDb to parser to enable ID mapping
+            const actions = parseCustomActions(rawText, filteredDb);
 
             if (actions.length === 0) {
                 return {
