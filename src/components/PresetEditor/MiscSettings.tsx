@@ -16,6 +16,9 @@ export const MiscSettings: React.FC<MiscSettingsProps> = ({ preset, onChange }) 
     const [isValid, setIsValid] = useState(true);
 
     useEffect(() => {
+        // Only update from props if the prop value is effectively different from what we parsed last time
+        // This prevents cursor jumping, but here we just sync on mount or preset switch
+        // To be safe against external updates, we keep this, but the handleJsonChange fix below solves the empty string issue.
         setExtensionsJson(JSON.stringify(preset.extensions, null, 2) || '{}');
         setIsValid(true);
     }, [preset.extensions]);
@@ -23,6 +26,14 @@ export const MiscSettings: React.FC<MiscSettingsProps> = ({ preset, onChange }) 
     const handleJsonChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const val = e.target.value;
         setExtensionsJson(val);
+
+        // Fix: Treat empty string as valid empty object to prevent revert logic
+        if (!val.trim()) {
+            onChange('extensions', {});
+            setIsValid(true);
+            return;
+        }
+
         try {
             const parsed = JSON.parse(val);
             onChange('extensions', parsed);
@@ -53,6 +64,7 @@ export const MiscSettings: React.FC<MiscSettingsProps> = ({ preset, onChange }) 
                     containerClassName="md:col-span-2"
                     className={!isValid ? 'border-red-500' : ''}
                 />
+                {!isValid && <p className="text-xs text-red-400 mt-1">JSON không hợp lệ (Dữ liệu cũ sẽ được giữ nguyên cho đến khi bạn sửa lại).</p>}
             </Section>
         </>
     );
