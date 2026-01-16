@@ -9,7 +9,8 @@ import _ from 'lodash';
  * 2. Lodash Inheritance: Kế thừa lodash thật, chỉ override các hàm mutate dữ liệu.
  * 3. Tuple-Awareness: Tự động phát hiện và bảo tồn cấu trúc [Value, Description].
  * 4. Type Safety: Ép kiểu số học nghiêm ngặt cho các phép toán.
- * 5. Scope Isolation: Che khuất biến toàn cục (window, document...).
+ * 5. Smart Polymorphism: Tự động xử lý add/concat/push dựa trên kiểu dữ liệu.
+ * 6. Scope Isolation: Che khuất biến toàn cục (window, document...).
  */
 
 // --- 1. UTILITIES ---
@@ -121,10 +122,11 @@ const set = (obj: any, path: string, value: any): void => {
 };
 
 /**
- * Xử lý các phép toán số học an toàn.
- * Tự động ép kiểu Number() để tránh lỗi cộng chuỗi.
+ * Xử lý các phép toán số học an toàn (Strict Math).
+ * Tự động ép kiểu Number() để tránh lỗi cộng chuỗi khi ý định là toán học.
+ * Dùng cho: sub, mul, div, mod
  */
-const mathOp = (obj: any, path: string, val: any, op: 'add' | 'sub' | 'mul' | 'div' | 'mod') => {
+const mathOp = (obj: any, path: string, val: any, op: 'sub' | 'mul' | 'div' | 'mod') => {
     // Lấy giá trị hiện tại (đã unwrap nếu là tuple)
     const currentRaw = get(obj, path, 0); 
     const currentNum = Number(currentRaw);
@@ -136,7 +138,6 @@ const mathOp = (obj: any, path: string, val: any, op: 'add' | 'sub' | 'mul' | 'd
 
     let result = safeCurrent;
     switch (op) {
-        case 'add': result += operand; break;
         case 'sub': result -= operand; break;
         case 'mul': result *= operand; break;
         case 'div': result = operand !== 0 ? result / operand : result; break; // Tránh chia cho 0
@@ -147,12 +148,52 @@ const mathOp = (obj: any, path: string, val: any, op: 'add' | 'sub' | 'mul' | 'd
     set(obj, path, result);
 };
 
+/**
+ * SMART ADD OPERATION (Polymorphic)
+ * Tự động phát hiện kiểu dữ liệu để thực hiện hành động hợp lý nhất:
+ * 1. Nếu biến là Số -> Cộng toán học.
+ * 2. Nếu biến là Mảng -> Push vào mảng.
+ * 3. Nếu biến là Chuỗi (hoặc khác) -> Nối chuỗi (Concatenate).
+ * 4. Nếu biến chưa tồn tại -> Khởi tạo.
+ */
+const smartAddOp = (obj: any, path: string, val: any): string => {
+    const current = get(obj, path, undefined, true); // Unwrap tuple
+
+    // Case 1: Initialize (Biến chưa tồn tại)
+    if (current === undefined || current === null) {
+        set(obj, path, val);
+        return 'INIT';
+    }
+
+    // Case 2: Number Arithmetic (Nếu cả đích và nguồn đều ép kiểu số thành công và đích ĐANG là số)
+    if (typeof current === 'number') {
+        const valNum = Number(val);
+        if (!isNaN(valNum)) {
+            set(obj, path, current + valNum);
+            return 'MATH';
+        }
+    }
+
+    // Case 3: Array Push
+    if (Array.isArray(current)) {
+        current.push(val);
+        // Lưu ý: Array trong JS là tham chiếu, nên push trực tiếp đã thay đổi obj gốc.
+        // Tuy nhiên, nếu biến đó nằm trong Tuple, ta không cần gọi set() vì get() đã trả về tham chiếu đến array bên trong tuple.
+        return 'PUSH';
+    }
+
+    // Case 4: String Concatenation (Fallback)
+    // Dùng cho việc nối prompt, rule, memory
+    set(obj, path, String(current) + String(val));
+    return 'CONCAT';
+};
+
 // --- 2. ENGINE CORE ---
 
 /**
  * Tạo ra một phiên bản Lodash "lai" (Hybrid Lodash).
  * Nó kế thừa mọi hàm của lodash gốc, nhưng ghi đè các hàm thao tác dữ liệu
- * để phù hợp với logic của SillyTavern (Tuple, Math, Logging).
+ * để phù hợp với logic của SillyTavern (Tuple, Math, Logging, SmartAdd).
  */
 const createHybridLodash = (scopeVariables: any, logger: (msg: string) => void) => {
     
@@ -169,8 +210,13 @@ const createHybridLodash = (scopeVariables: any, logger: (msg: string) => void) 
             logger(`SET ${path} = ${JSON.stringify(actualVal)}`);
         },
 
-        // --- Math Ops (Type Safe) ---
-        add: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'add'); logger(`ADD ${path} += ${val}`); },
+        // --- Smart Add (Polymorphic) ---
+        add: (path: string, val: any) => { 
+            const type = smartAddOp(scopeVariables, path, val);
+            logger(`ADD [${type}] ${path} += ${JSON.stringify(val)}`); 
+        },
+
+        // --- Strict Math Ops ---
         sub: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'sub'); logger(`SUB ${path} -= ${val}`); },
         mul: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'mul'); logger(`MUL ${path} *= ${val}`); },
         div: (path: string, val: any) => { mathOp(scopeVariables, path, val, 'div'); logger(`DIV ${path} /= ${val}`); },
@@ -391,7 +437,8 @@ export const applyVariableOperation = (
     
     // Mapping thủ công sang logic mới
     if (command === 'set') set(newVars, path, valueOrArgs);
-    else if (['add', 'sub', 'mul', 'div', 'mod'].includes(command)) mathOp(newVars, path, valueOrArgs, command as any);
+    else if (command === 'add') smartAddOp(newVars, path, valueOrArgs); // Use Smart Add
+    else if (['sub', 'mul', 'div', 'mod'].includes(command)) mathOp(newVars, path, valueOrArgs, command as any);
     else if (command === 'push' || command === 'insert') {
         const arr = get(newVars, path, undefined, true);
         if (Array.isArray(arr)) arr.push(valueOrArgs);

@@ -9,15 +9,16 @@ import { scanWorldInfoWithAI } from '../services/geminiService';
 export interface WorldSystemResult {
     // Updated to be async to support AI calls
     scanInput: (
-        text: string, // Kept for legacy/keyword compatibility (combined)
+        text: string, 
         worldInfoState: Record<string, boolean>,
         worldInfoRuntime: Record<string, WorldInfoRuntimeStats>,
         worldInfoPinned: Record<string, boolean>,
         preset?: SillyTavernPreset, 
         historyForScan?: string[],
-        latestInput?: string, // NEW: Specific latest input for AI mode
-        variables?: Record<string, any>, // NEW: Pass current variables
-        dynamicEntries?: WorldInfoEntry[] // NEW: Pass generated entries from RPG
+        latestInput?: string, 
+        variables?: Record<string, any>, 
+        dynamicEntries?: WorldInfoEntry[],
+        currentTurnIndex?: number // NEW: Pass turn index
     ) => Promise<{
         activeEntries: WorldInfoEntry[];
         updatedRuntimeState: Record<string, WorldInfoRuntimeStats>;
@@ -49,7 +50,8 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
         historyForScan: string[] = [],
         latestInput: string = '',
         variables: Record<string, any> = {},
-        dynamicEntries: WorldInfoEntry[] = []
+        dynamicEntries: WorldInfoEntry[] = [],
+        currentTurnIndex: number = 0 // Default 0
     ) => {
         // MERGE LOGIC: Combine static entries from card with dynamic entries from RPG
         const staticEntries = card?.char_book?.entries || [];
@@ -70,17 +72,15 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
             try {
                 // 1. Prepare Context (History)
                 const depth = preset?.smart_scan_depth || 3;
-                // Ensure we only take what is asked, historyForScan is already reversed/sliced usually but safeguard here
                 const chatContext = historyForScan.slice(-depth).join('\n');
                 
                 // 2. Prepare State String
                 let stateString = "";
                 if (variables && Object.keys(variables).length > 0) {
-                    // Simplified formatting for AI reading
                     stateString = Object.entries(variables)
                         .map(([k, v]) => {
                             if (Array.isArray(v) && v.length > 1 && typeof v[1] === 'string') {
-                                return `- ${k}: ${v[0]} (${v[1]})`; // Value + Desc
+                                return `- ${k}: ${v[0]} (${v[1]})`; 
                             }
                             return `- ${k}: ${JSON.stringify(v)}`;
                         })
@@ -88,20 +88,20 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
                 }
 
                 // 3. Prepare Lorebook Payload (Separated)
-                // NOW USING allEntries which includes Dynamic Entries
-                const { contextString, candidateString } = prepareLorebookForAI(allEntries);
+                // NOW USING currentTurnIndex to flag dormant entries
+                const { contextString, candidateString } = prepareLorebookForAI(allEntries, currentTurnIndex, worldInfoRuntime);
 
                 // Only scan if there are candidates to choose from
                 if (candidateString) {
                     // 4. Call API with New Structure
                     const { selectedIds, outgoingPrompt, rawResponse } = await scanWorldInfoWithAI(
-                        chatContext, // Old sig placeholder, treated as history inside service now
+                        chatContext, 
                         contextString,
                         candidateString,
-                        latestInput || textToScan, // Fallback to textToScan if latestInput missing
+                        latestInput || textToScan, 
                         stateString,
                         preset?.smart_scan_model || 'gemini-2.5-flash',
-                        preset?.smart_scan_system_prompt // Pass custom prompt
+                        preset?.smart_scan_system_prompt 
                     );
                     
                     // 5. Apply "Token Budget" / Max Entries
@@ -117,7 +117,7 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
                 }
             } catch (e) {
                 console.error("[Smart Scan] Error:", e);
-                // CRITICAL CHANGE: Re-throw error to be caught by useChatFlow
+                // Re-throw error to be caught by useChatFlow
                 throw e;
             } finally {
                 setIsScanning(false);
@@ -125,8 +125,6 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
         }
 
         // --- HYBRID / KEYWORD SCANNING ---
-        // Pass bypassKeywordScan=true if mode is 'ai_only'
-        // NOW USING allEntries which includes Dynamic Entries for Keyword Matching too
         const result = performWorldInfoScan(
             textToScan, 
             allEntries, 
@@ -134,7 +132,8 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
             worldInfoRuntime, 
             worldInfoPinned,
             aiActiveUids,
-            mode === 'ai_only' // Bypass keyword check?
+            mode === 'ai_only', // Bypass keyword check?
+            currentTurnIndex // Pass turn for Lifecycle check
         );
 
         return { ...result, smartScanLog: smartScanLogData };
@@ -149,9 +148,6 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
 
         // 2. Regex / Script Engine (Display Processing Phase)
         const scripts = card?.extensions?.regex_scripts || [];
-        
-        // CRITICAL: Pass [2] to indicate Output processing logic.
-        // Placement 2 = AI Output.
         const { displayContent, interactiveHtml, diagnosticLog } = processWithRegex(cleanedText, scripts, [2]);
 
         return {

@@ -2,6 +2,7 @@
 import type { CharacterCard, SillyTavernPreset, Lorebook, WorldInfoEntry, ChatMessage, UserPersona, PromptSection } from '../types';
 import ejs from 'ejs';
 import { get, applyVariableOperation } from './variableEngine';
+import { resolveMedusaMacros, DEFAULT_MEDUSA_PROMPT, filterDatabaseForContext } from './medusaService';
 
 /**
  * Helper to filter active entries based on state and placement.
@@ -251,6 +252,7 @@ const expandKeysToContent = async (
 /**
  * CLEANS technical/mechanical content from a message string.
  * Removes: <thinking>, <UpdateVariable>, [CHOICE], StatusPlaceholders, and Code Blocks.
+ * UPDATED: Also cleans <tableEdit>, <tableThink>, <tableCheck> for Integrated Mode.
  */
 export const cleanMessageContent = (text: string): string => {
     if (!text) return '';
@@ -262,6 +264,7 @@ export const cleanMessageContent = (text: string): string => {
         .replace(/<StatusPlaceHolderImpl\s*\/?>/gi, '') // Remove Status Bar placeholders
         .replace(/\[CHOICE:[\s\S]*?\]/gi, '') // Remove Choices (Case insensitive, handle multiline)
         .replace(/```[\s\S]*?```/g, '') // Remove Code blocks (mechanics/status)
+        .replace(/<tableThink>[\s\S]*?<\/tableEdit>/gi, '') // Remove Mythic Engine Integrated Block
         .replace(/\n\s*\n/g, '\n') // Collapse extra newlines
         .trim();
 };
@@ -401,10 +404,41 @@ export async function constructChatPrompt(
 
     const variablesStateString = formatVariablesForPrompt(variables);
     
-    // --- MYTHIC ENGINE DATA PREP ---
+    // --- MYTHIC ENGINE DATA PREP (FOR PLACEHOLDERS) ---
     const mythicStateString = formatRpgData(card.rpg_data);
     const mythicBlock = mythicStateString ? `<MythicDatabase>\n${mythicStateString}\n</MythicDatabase>` : '';
     // -------------------------------
+
+    // --- INTEGRATED MODE PREP (NEW) ---
+    let mythicIntegratedString = "";
+    if (card.rpg_data?.settings?.executionMode === 'integrated' && card.rpg_data) {
+        // Resolve Medusa Prompt using medusaService logic
+        // Use filtered DB context
+        const filteredDb = filterDatabaseForContext(card.rpg_data, activeEntriesOverride || []);
+        
+        // Prepare context strings for macros
+        const lorebookContext = [...worldInfoCombinedList].join('\n');
+        
+        // NOTE: We don't have full chat history text here easily formatted for Medusa unless we construct it.
+        // We'll pass an empty string for history and let resolveMedusaMacros handle placeholders if we don't want to dup history.
+        // BUT Medusa prompt needs history.
+        // However, this is injecting into the SYSTEM PROMPT of the main chat.
+        // The Main Chat already sees the history.
+        // So we just need Schema, Rules, and Data.
+        
+        const rawSystemPrompt = card.rpg_data.settings.customSystemPrompt || DEFAULT_MEDUSA_PROMPT;
+        // We resolve macros but we might skip history if it's already in main chat.
+        // Actually, resolveMedusaMacros puts history in {{chat_history}}.
+        // If we inject this huge block into main prompt, we are duplicating history if we are not careful.
+        // But the user requested "Main Prompt Injection".
+        // Let's rely on standard resolution.
+        
+        mythicIntegratedString = resolveMedusaMacros(rawSystemPrompt, filteredDb, "", lorebookContext);
+        
+        // Add specific instruction for Integrated Mode
+        mythicIntegratedString += "\n\n[SYSTEM NOTE: Bạn đang ở chế độ INTEGRATED (Tích hợp). Sau khi viết phản hồi câu chuyện, BẮT BUỘC phải thực hiện các lệnh cập nhật bảng trong thẻ <tableEdit>...]";
+    }
+    // ----------------------------------
 
     let smartStateString = '';
     const stateParts: string[] = [];
@@ -576,7 +610,8 @@ export async function constructChatPrompt(
             .replace(/<user>/g, userPersonaName)
             .replace(/{{smart_state_block}}/g, smartStateString)
             .replace(/{{current_variables_state}}/g, variablesStateString)
-            .replace(/{{mythic_database}}/g, mythicStateString) // NEW MACRO SUPPORT
+            .replace(/{{mythic_database}}/g, mythicStateString) 
+            .replace(/{{mythic_instruction_block}}/g, mythicIntegratedString) // NEW: INTEGRATED MACRO
             .replace(/{{last_state}}/g, lastStateBlock)
             .replace(/{{author_note}}/g, authorNote || '')
             .replace(/{{long_term_summary}}/g, longTermSummaryString)

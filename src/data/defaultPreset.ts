@@ -640,6 +640,17 @@ Bạn phải kiểm soát độ dài của phản hồi dựa trên cài đặt 
             enabled: true,
         },
 
+        // --- MYTHIC ENGINE INSTRUCTION (INTEGRATED MODE) ---
+        {
+            name: "### [System Instruction] Mythic Engine (Integrated Mode)",
+            content: `{{mythic_instruction_block}}`,
+            role: "system",
+            identifier: "mythic_integrated_instruction",
+            enabled: true,
+            order: 9999 // Đặt ở cuối để AI ưu tiên
+        },
+        // --------------------------------------------------
+
         // --- GROUP 5: TRIGGER & EXECUTION (KÍCH HOẠT) ---
         {
             name: "H. Diễn Biến Gần Nhất (Ngữ cảnh tức thời)",

@@ -126,6 +126,7 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
     const [activeTab, setActiveTab] = useState<Tab>('operation');
     const [settings, setSettings] = useState<RPGSettings>({
         triggerMode: 'auto',
+        executionMode: 'standalone', // Default
         modelId: '',
         customSystemPrompt: DEFAULT_MEDUSA_PROMPT,
         pinnedLorebookUids: []
@@ -140,6 +141,7 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
         if (isOpen) {
             setSettings({
                 triggerMode: database.settings?.triggerMode || 'auto',
+                executionMode: database.settings?.executionMode || 'standalone',
                 modelId: database.settings?.modelId || '',
                 customSystemPrompt: database.settings?.customSystemPrompt || DEFAULT_MEDUSA_PROMPT,
                 triggerKeywords: database.settings?.triggerKeywords || [],
@@ -250,7 +252,7 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                 
                 onClose();
             } catch (err) {
-                alert("Lỗi nhập file: " + (err instanceof Error ? err.message : String(err)));
+                alert("Lỗi nhập file: " + (err instanceof Error ? e.message : String(err)));
             }
         };
         reader.readAsText(file);
@@ -356,7 +358,27 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                     {activeTab === 'operation' && (
                         <div className="space-y-6">
                             <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-                                <h4 className="font-bold text-slate-200 mb-4">Mô hình AI (Game Master)</h4>
+                                <h4 className="font-bold text-slate-200 mb-4">Chiến lược Thực thi (Quan trọng)</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <button 
+                                        onClick={() => setSettings({ ...settings, executionMode: 'standalone' })}
+                                        className={`p-4 rounded-lg border text-left transition-all ${settings.executionMode === 'standalone' ? 'bg-indigo-900/30 border-indigo-500 ring-1 ring-indigo-500' : 'bg-slate-900 border-slate-600 hover:bg-slate-800'}`}
+                                    >
+                                        <div className="font-bold text-sm mb-1 text-indigo-300">🛡️ Độc lập (Standalone)</div>
+                                        <div className="text-xs text-slate-400">An toàn & Chính xác. Chạy logic RPG <strong>sau khi</strong> Chat AI đã trả lời. (Gọi API 2 lần).</div>
+                                    </button>
+                                    <button 
+                                        onClick={() => setSettings({ ...settings, executionMode: 'integrated' })}
+                                        className={`p-4 rounded-lg border text-left transition-all ${settings.executionMode === 'integrated' ? 'bg-fuchsia-900/30 border-fuchsia-500 ring-1 ring-fuchsia-500' : 'bg-slate-900 border-slate-600 hover:bg-slate-800'}`}
+                                    >
+                                        <div className="font-bold text-sm mb-1 text-fuchsia-300">⚡ Tích hợp (Integrated)</div>
+                                        <div className="text-xs text-slate-400">Nhanh & Tiết kiệm. Gộp logic vào Chat AI để vừa viết văn vừa cập nhật bảng. (Gọi API 1 lần).</div>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className={`bg-slate-800/50 p-4 rounded-lg border border-slate-700 transition-opacity ${settings.executionMode === 'integrated' ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <h4 className="font-bold text-slate-200 mb-4">Cấu hình Medusa (Chỉ cho chế độ Độc lập)</h4>
                                 <SelectInput
                                     label="Chọn Model xử lý Logic RPG"
                                     value={settings.modelId || ''}

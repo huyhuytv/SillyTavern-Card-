@@ -49,6 +49,7 @@ export interface SummaryQueueItem {
 export interface WorldInfoRuntimeStats {
     stickyDuration: number;
     cooldownDuration: number;
+    lastActiveTurn?: number; // Tracks the last turn index this entry was active/interacted with
 }
 
 export interface VisualState {

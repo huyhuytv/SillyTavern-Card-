@@ -78,6 +78,7 @@ export interface RPGSettings {
     // 1. Vận hành (Operation)
     modelId?: string; // ID model riêng (nếu undefined thì dùng mặc định của app)
     triggerMode: 'auto' | 'manual' | 'keyword';
+    executionMode?: 'standalone' | 'integrated'; // NEW: Standalone (2-pass) vs Integrated (1-pass)
     triggerKeywords?: string[]; // Dùng cho mode 'keyword'
 
     // 2. Lời nhắc (Prompt Engineering)

@@ -162,7 +162,7 @@ const getDatabaseData = (db: RPGDatabase): string => {
     return output;
 };
 
-const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog: string, lorebookContext: string): string => {
+export const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog: string, lorebookContext: string): string => {
     const schemaStr = getDatabaseSchema(db);
     const dataStr = getDatabaseData(db);
     const globalRules = db.globalRules || "";
@@ -179,7 +179,33 @@ const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog: string
         .replace('{{last_user_input}}', lastUserInput);
 };
 
-const parseCustomActions = (rawText: string): MedusaAction[] => {
+// Filter database for context - Only include rows that match Active Live-Links
+export const filterDatabaseForContext = (db: RPGDatabase, activeChatEntries: WorldInfoEntry[]): RPGDatabase => {
+    // Deep clone to avoid mutating original
+    const filteredDb: RPGDatabase = JSON.parse(JSON.stringify(db));
+    
+    // Create a Set of active UIDs for fast lookup
+    const activeUidSet = new Set(activeChatEntries.map(e => e.uid));
+
+    filteredDb.tables.forEach(table => {
+        // Only filter tables that have Live-Link enabled
+        if (table.config.lorebookLink?.enabled) {
+            // Keep rows only if their generated UID exists in active set
+            // Note: syncDatabaseToLorebook generates UIDs as `mythic_${tableId}_${rowUUID}`
+            table.data.rows = table.data.rows.filter(row => {
+                const rowUuid = row[0];
+                const expectedUid = `mythic_${table.config.id}_${rowUuid}`;
+                return activeUidSet.has(expectedUid);
+            });
+        }
+        // Tables without Live-Link enabled are sent fully (or should they also be filtered? Prompt implied "Live-Link" pruning)
+        // Assuming non-Live-Link tables are global/always active or managed differently.
+    });
+
+    return filteredDb;
+};
+
+export const parseCustomActions = (rawText: string): MedusaAction[] => {
     const actions: MedusaAction[] = [];
     const editBlockMatch = rawText.match(/<tableEdit>([\s\S]*?)<\/tableEdit>/);
     if (!editBlockMatch) return [];
@@ -282,7 +308,7 @@ const parseCustomActions = (rawText: string): MedusaAction[] => {
     return actions;
 };
 
-const applyMedusaActions = (
+export const applyMedusaActions = (
     currentDb: RPGDatabase, 
     actions: MedusaAction[]
 ): { newDb: RPGDatabase; notifications: string[], logs: string[] } => {
@@ -384,13 +410,6 @@ const applyMedusaActions = (
 
 // --- LIVE LINK LOGIC (OPTION A: MARKDOWN CARD) ---
 
-/**
- * Generates Lorebook entries from database content using Markdown formatting.
- * Rules:
- * 1. Checks `lorebookLink.enabled`.
- * 2. Formats as clean Markdown Card.
- * 3. Uses Smart Naming: "[Mythic] <KeyWord>".
- */
 export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
     const entries: WorldInfoEntry[] = [];
 
@@ -404,7 +423,6 @@ export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
 
         table.data.rows.forEach(row => {
             const rowId = row[0]; // UUID
-            // Get Key Value (e.g. "Excalibur")
             const keyValue = row[keyColIndex + 1]; 
             
             if (!keyValue) return; // Skip rows without key value
@@ -417,21 +435,16 @@ export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
             // Body Loop
             table.config.columns.forEach((col, idx) => {
                 const val = row[idx + 1];
-                // Skip empty/null values to save tokens and keep it clean
                 if (val === null || val === undefined || val === '') return;
-
-                // Format: - **Label:** Value
                 contentLines.push(`- **${col.label}:** ${val}`);
             });
 
             const fullContent = contentLines.join('\n');
 
-            // Create Entry
             const entry: WorldInfoEntry = {
-                uid: `mythic_${table.config.id}_${rowId}`,
-                keys: [String(keyValue)], // The main key
+                uid: `mythic_${table.config.id}_${rowId}`, // Stable UID
+                keys: [String(keyValue)],
                 secondary_keys: [], 
-                // Smart Naming
                 comment: `[Live-Link] ${keyValue}`,
                 content: fullContent,
                 constant: false,
@@ -439,7 +452,7 @@ export const syncDatabaseToLorebook = (db: RPGDatabase): WorldInfoEntry[] => {
                 enabled: true,
                 position: 'before_char',
                 use_regex: false,
-                insertion_order: 100 // High priority
+                insertion_order: 100 
             };
 
             entries.push(entry);
@@ -459,7 +472,7 @@ export const MedusaService = {
         activeChatEntries: WorldInfoEntry[], 
         allAvailableEntries: WorldInfoEntry[],
         defaultModelId: string = 'gemini-2.5-pro',
-        maxTokens: number = 8192 // New optional parameter
+        maxTokens: number = 8192
     ): Promise<MedusaResult> => { 
         
         const connection = getConnectionSettings();
@@ -467,6 +480,7 @@ export const MedusaService = {
         
         const targetModel = database.settings?.modelId || (useProxy ? connection.proxy_tool_model || connection.proxy_model : defaultModelId);
 
+        // Gather context from Pinned Items & Active Items (Prompt Context)
         const pinnedUids = database.settings?.pinnedLorebookUids || [];
         const uniqueEntriesMap = new Map<string, WorldInfoEntry>();
 
@@ -485,8 +499,13 @@ export const MedusaService = {
         });
         if (!lorebookContext) lorebookContext = "(Không có dữ liệu tham khảo)";
 
+        // --- FILTER DATABASE FOR CONTEXT ---
+        // Only send rows relevant to Active Live-Links to save tokens
+        const filteredDb = filterDatabaseForContext(database, activeChatEntries);
+
         const rawSystemPrompt = database.settings?.customSystemPrompt || DEFAULT_MEDUSA_PROMPT;
-        const resolvedSystemPrompt = resolveMedusaMacros(rawSystemPrompt, database, historyLog, lorebookContext);
+        // Use filteredDb for prompt resolution
+        const resolvedSystemPrompt = resolveMedusaMacros(rawSystemPrompt, filteredDb, historyLog, lorebookContext);
 
         try {
             let rawText = "";
@@ -509,7 +528,7 @@ export const MedusaService = {
                     config: {
                         temperature: 0.1,
                         safetySettings,
-                        maxOutputTokens: maxTokens // Apply here too for good measure
+                        maxOutputTokens: maxTokens 
                     }
                 });
                 rawText = response.text || "";
@@ -520,7 +539,6 @@ export const MedusaService = {
             
             const actions = parseCustomActions(rawText);
 
-            // CRITICAL CHANGE: Check for Empty Actions and treat as Error
             if (actions.length === 0) {
                 return {
                     success: false,
@@ -534,6 +552,7 @@ export const MedusaService = {
             }
 
             if (actions.length > 0) {
+                // Apply actions to the FULL original database (since we want to save changes to the real DB)
                 const { newDb, notifications, logs } = applyMedusaActions(database, actions);
                 logs.unshift(`[Thinking]: ${thinkContent.substring(0, 200)}...`);
                 
@@ -549,8 +568,6 @@ export const MedusaService = {
                     }
                 };
             } else {
-                // This branch shouldn't be reached if we treat empty as error above, 
-                // but keeping as fallback structure
                 return {
                     success: true,
                     newDb: database,
