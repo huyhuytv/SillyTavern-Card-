@@ -162,22 +162,22 @@ const getDatabaseData = (db: RPGDatabase): string => {
     return output;
 };
 
-// --- NEW: Hybrid View Function (Schema + Data in Markdown Table) ---
+// --- NEW: Hybrid View Function (JSON-Lines Block) ---
 const getHybridDatabaseView = (db: RPGDatabase): string => {
     let output = "";
 
     db.tables.forEach((table, tableIndex) => {
         const { config, data } = table;
 
-        // 1. Header with Index and Name
-        output += `### [${tableIndex}:${config.name}]\n`;
+        // 1. Block Header
+        output += `[[DB_TABLE_${tableIndex}]] ${config.name}\n`;
 
-        // 2. Metadata Block (Quote style)
+        // 2. Description
         if (config.description) {
-            output += `> **Mô tả:** ${config.description}\n`;
+            output += `> MÔ TẢ: ${config.description}\n`;
         }
 
-        // Collect Rules
+        // 3. Rules
         const rules: string[] = [];
         if (config.aiRules?.init) rules.push(`[Init: ${config.aiRules.init}]`);
         if (config.aiRules?.insert) rules.push(`[Insert: ${config.aiRules.insert}]`);
@@ -185,34 +185,29 @@ const getHybridDatabaseView = (db: RPGDatabase): string => {
         if (config.aiRules?.delete) rules.push(`[Delete: ${config.aiRules.delete}]`);
 
         if (rules.length > 0) {
-            output += `> **Luật AI:** ${rules.join(' ')}\n`;
+            output += `> LUẬT: ${rules.join(' ')}\n`;
         }
 
-        // 3. Markdown Table Construction
-        // Columns: Prepend index [0], [1] to label for AI reference
-        const headers = config.columns.map((c, idx) => `[${idx}] ${c.label}`);
-        
-        const headerRow = `| ${headers.join(' | ')} |`;
-        const separatorRow = `| ${headers.map(() => ':---').join(' | ')} |`;
+        // 4. Schema (Index Mapping)
+        output += `> SCHEMA (Cấu trúc cột):\n`;
+        output += `  (0) UUID [System]\n`; 
+        config.columns.forEach((col, idx) => {
+            // Mapping: Column 0 -> Row Index 1
+            output += `  (${idx + 1}) ${col.label} (${col.type})\n`;
+        });
 
-        output += `${headerRow}\n${separatorRow}\n`;
-
-        // Rows
+        // 5. Data (JSON Array)
+        output += `> DATA (Mảng dữ liệu):\n`;
         if (!data.rows || data.rows.length === 0) {
-             // Empty row placeholder to keep table valid
-             const emptyRow = `| ${headers.map(() => ' ').join(' | ')} |`;
-             output += `${emptyRow}\n`;
+             output += `  (Trống)\n`;
         } else {
-            data.rows.forEach(row => {
-                // row structure: [UUID, val1, val2...]
-                // We skip UUID (index 0) for visual table, showing only content columns
-                const cells = row.slice(1).map(cell => {
-                    const cellStr = String(cell ?? '');
-                    // Escape pipes and newlines to prevent breaking markdown table
-                    return cellStr.replace(/\|/g, '\\|').replace(/\n/g, '<br>');
-                });
-                output += `| ${cells.join(' | ')} |\n`;
-            });
+            // Opening array bracket
+            output += `[\n`;
+            // Map rows to JSON strings
+            const jsonRows = data.rows.map(row => `  ${JSON.stringify(row)}`);
+            output += jsonRows.join(',\n');
+            // Closing array bracket
+            output += `\n]\n`;
         }
 
         output += "\n";
@@ -224,7 +219,7 @@ const getHybridDatabaseView = (db: RPGDatabase): string => {
 export const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog: string, lorebookContext: string): string => {
     const schemaStr = getDatabaseSchema(db);
     const dataStr = getDatabaseData(db);
-    const hybridStr = getHybridDatabaseView(db); // NEW: Generate Hybrid View
+    const hybridStr = getHybridDatabaseView(db); // NEW: Generate Hybrid View (JSON-Lines)
     const globalRules = db.globalRules || "";
     
     const lastUserLineMatch = historyLog.match(/User: (.*)$/m);
