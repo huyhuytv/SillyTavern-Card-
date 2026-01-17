@@ -2,7 +2,7 @@
 import type { CharacterCard, SillyTavernPreset, Lorebook, WorldInfoEntry, ChatMessage, UserPersona, PromptSection } from '../types';
 import ejs from 'ejs';
 import { get, applyVariableOperation } from './variableEngine';
-import { resolveMedusaMacros, DEFAULT_MEDUSA_PROMPT, filterDatabaseForContext } from './medusaService';
+import { resolveMedusaMacros, DEFAULT_MEDUSA_PROMPT, filterDatabaseForContext, getHybridDatabaseView } from './medusaService';
 import { dispatchSystemLog } from './logBridge'; // Import logger
 
 /**
@@ -415,6 +415,17 @@ export async function constructChatPrompt(
     const mythicStateString = formatRpgData(card.rpg_data);
     const mythicBlock = mythicStateString ? `<MythicDatabase>\n${mythicStateString}\n</MythicDatabase>` : '';
     // -------------------------------
+    
+    // --- MYTHIC HYBRID TABLE PREP (NEW) ---
+    let rpgHybridTableString = '';
+    if (card.rpg_data) {
+        // Filter DB based on active WI (Live-Link pruning)
+        const allActiveEntries = [...before, ...after];
+        const filteredDb = filterDatabaseForContext(card.rpg_data, allActiveEntries);
+        // Generate View
+        rpgHybridTableString = getHybridDatabaseView(filteredDb);
+    }
+    // ------------------------------------
 
     // --- INTEGRATED MODE PREP (NEW) ---
     let mythicIntegratedString = "";
@@ -654,6 +665,7 @@ export async function constructChatPrompt(
             .replace(/{{smart_state_block}}/g, smartStateString)
             .replace(/{{current_variables_state}}/g, variablesStateString)
             .replace(/{{mythic_database}}/g, mythicStateString) 
+            .replace(/{{rpg_hybrid_table}}/g, rpgHybridTableString) // NEW: Hybrid Table Macro
             .replace(/{{mythic_instruction_block}}/g, mythicIntegratedString) 
             .replace(/{{last_state}}/g, lastStateBlock)
             .replace(/{{author_note}}/g, authorNote || '')

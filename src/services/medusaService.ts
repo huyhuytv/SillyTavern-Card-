@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import type { RPGDatabase, MedusaAction, MedusaResult } from '../types/rpg';
 import type { WorldInfoEntry } from '../types';
@@ -131,7 +130,7 @@ const getDatabaseData = (db: RPGDatabase): string => {
 };
 
 // --- NEW: Hybrid View Function (JSON-Lines Block) ---
-const getHybridDatabaseView = (db: RPGDatabase): string => {
+export const getHybridDatabaseView = (db: RPGDatabase): string => {
     let output = "";
 
     db.tables.forEach((table, tableIndex) => {
