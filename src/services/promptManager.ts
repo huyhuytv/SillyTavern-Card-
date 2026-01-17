@@ -430,8 +430,8 @@ export async function constructChatPrompt(
         
         mythicIntegratedString = resolveMedusaMacros(rawSystemPrompt, filteredDb, "", lorebookContext);
         
-        // Add specific instruction for Integrated Mode
-        mythicIntegratedString += "\n\n[SYSTEM NOTE: Bạn đang ở chế độ INTEGRATED (Tích hợp). Sau khi viết phản hồi câu chuyện, BẮT BUỘC phải thực hiện các lệnh cập nhật bảng trong thẻ <tableEdit>...]";
+        // Removed hardcoded system note here as per user request.
+        // The user is responsible for adding instructions in their Preset/Prompt.
     }
     // ----------------------------------
 
