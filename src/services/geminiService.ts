@@ -4,7 +4,7 @@ import type { SillyTavernPreset } from '../types';
 import { getConnectionSettings, getProxyUrl, getProxyPassword, getProxyLegacyMode } from './settingsService';
 import { callGeminiDirect, getGeminiClient, buildGeminiPayload } from './api/geminiApi';
 import { callOpenRouter } from './api/openRouterApi';
-import { callProxy } from './api/proxyApi';
+import { callProxy, callProxyStream } from './api/proxyApi';
 
 const safetySettings = [
     { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
@@ -47,15 +47,26 @@ export async function* sendChatRequestStream(
     signal?: AbortSignal // NEW: Abort Signal
 ): AsyncGenerator<string, void, unknown> {
     const connection = getConnectionSettings();
+    const source = connection.source;
     
-    // Nếu source không phải gemini native, fallback về request thường (giả lập stream)
-    if (connection.source !== 'gemini') {
+    // 1. Handle Proxy Streaming
+    if (source === 'proxy') {
+        const stream = callProxyStream(connection.proxy_model, fullPrompt, settings, signal);
+        for await (const chunk of stream) {
+            yield chunk;
+        }
+        return;
+    }
+
+    // 2. Handle Non-Gemini Sources (fallback for OpenRouter or others not implemented yet)
+    if (source !== 'gemini') {
         if (signal?.aborted) throw new Error("Aborted");
         const result = await sendChatRequest(fullPrompt, settings);
         yield result.response.text || "";
         return;
     }
 
+    // 3. Handle Gemini Native Streaming
     const ai = getGeminiClient();
     const model = connection.gemini_model || 'gemini-3-pro-preview';
     const payload = buildGeminiPayload(fullPrompt, settings, safetySettings);
