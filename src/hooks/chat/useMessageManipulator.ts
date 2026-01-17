@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 import type { CharacterCard, SillyTavernPreset, ChatMessage } from '../../types';
 import { parseLooseJson } from '../../utils';
 import { useChatStore } from '../../store/chatStore';
+import { syncDatabaseToLorebook } from '../../services/medusaService';
 
 interface MessageManipulatorProps {
     saveSession: (data: any) => Promise<void>;
@@ -30,7 +31,8 @@ export const useMessageManipulator = ({
         setLastStateBlock,
         setLongTermSummaries,
         setSummaryQueue,
-        setSessionData // Needed to update card.rpg_data and WI state
+        setSessionData, // Needed to update card.rpg_data and WI state
+        setGeneratedLorebookEntries
     } = useChatStore();
 
     const deleteMessage = useCallback(async (messageId: string) => {
@@ -87,7 +89,17 @@ export const useMessageManipulator = ({
         if (restoredRpgState && card) {
              const updatedCard = { ...card, rpg_data: restoredRpgState };
              setSessionData({ card: updatedCard });
-             logSystemMessage('state', 'system', 'RPG State restored from history snapshot.');
+             
+             // --- FIX: Đồng bộ lại Live-Link ngay lập tức ---
+             // Đảm bảo Lorebook được tạo ra khớp với dữ liệu RPG vừa khôi phục
+             try {
+                const generatedEntries = syncDatabaseToLorebook(restoredRpgState);
+                setGeneratedLorebookEntries(generatedEntries);
+                logSystemMessage('state', 'system', `RPG State restored & Synced ${generatedEntries.length} Live-Link entries.`);
+             } catch(e) {
+                 console.warn("Failed to sync Lorebook during rewind", e);
+             }
+             // -----------------------------------------------
         }
 
         // 4. Khôi phục World Info State (Cooldowns & Toggles) - NEW
@@ -148,10 +160,11 @@ export const useMessageManipulator = ({
         await saveSession({
             messages: newMessages,
             variables: restoredVariables,
-            lastStateBlock: restoredStateBlock
+            lastStateBlock: restoredStateBlock,
+            generatedLorebookEntries: restoredRpgState ? syncDatabaseToLorebook(restoredRpgState) : [] // Save synced entries too
         });
 
-    }, [card, mergedSettings, isBusy, saveSession, setMessages, setVariables, setLastStateBlock, setLongTermSummaries, setSummaryQueue, setSessionData, logSystemMessage]);
+    }, [card, mergedSettings, isBusy, saveSession, setMessages, setVariables, setLastStateBlock, setLongTermSummaries, setSummaryQueue, setSessionData, setGeneratedLorebookEntries, logSystemMessage]);
 
     const deleteLastTurn = useCallback(async () => {
         const messages = useChatStore.getState().messages;
