@@ -6,12 +6,12 @@ import { processWithRegex } from '../../services/regexService';
 import type { ChatMessage, QuickReply } from '../../types';
 
 // Helper: Trích xuất các lựa chọn từ văn bản thô
-// Hỗ trợ cả ngoặc kép thẳng (" ') và ngoặc kép cong (smart quotes “ ”)
+// Hỗ trợ cả ngoặc kép thẳng (" ') và ngoặc kép cong (smart quotes “ ”) và ngoặc góc (「 」)
 const extractChoices = (text: string): QuickReply[] => {
     const choices: QuickReply[] = [];
-    // Regex: Tìm [CHOICE: "Nội dung"] hoặc [CHOICE: “Nội dung”]
+    // Regex: Tìm [CHOICE: "Nội dung"] hoặc [CHOICE: “Nội dung”] hoặc [CHOICE: 「Nội dung」]
     // Flags: g (global), i (case-insensitive)
-    const regex = /\[CHOICE:\s*(?:["'“])(.*?)(?:["'”])\s*\]/gi;
+    const regex = /\[CHOICE:\s*(?:["'“「])(.*?)(?:["'”」])\s*\]/gi;
     
     let match;
     while ((match = regex.exec(text)) !== null) {

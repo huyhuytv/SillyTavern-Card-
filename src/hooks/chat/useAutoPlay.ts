@@ -31,11 +31,15 @@ export const useAutoPlay = ({
             const rawContent = lastMessage.originalRawContent || lastMessage.content || "";
             
             // Extract CHOICE blocks
-            const choiceRegex = /\[CHOICE:\s*"([^"]+)"\]/gi;
+            // Updated Regex to support standard quotes, smart quotes, and asian brackets
+            const choiceRegex = /\[CHOICE:\s*(?:["'“「])(.*?)(?:["'”」])\s*\]/gi;
+            
             const choices: string[] = [];
             let match;
             while ((match = choiceRegex.exec(rawContent)) !== null) {
-                choices.push(match[1]);
+                if (match[1]) {
+                    choices.push(match[1].trim());
+                }
             }
 
             let nextPrompt = "";
