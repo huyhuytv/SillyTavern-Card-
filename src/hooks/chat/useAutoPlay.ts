@@ -23,15 +23,16 @@ export const useAutoPlay = ({
 }: UseAutoPlayProps) => {
 
     useEffect(() => {
+        // Chỉ chạy khi bật Auto Loop và không có tác vụ nền nào đang chạy
         if (!isAutoLooping || isGenerating || isScanning || isSummarizing || messages.length === 0) return;
 
         const lastMessage = messages[messages.length - 1];
 
+        // Chỉ tự động trả lời khi tin nhắn cuối cùng là của AI
         if (lastMessage.role === 'model') {
             const rawContent = lastMessage.originalRawContent || lastMessage.content || "";
             
-            // Extract CHOICE blocks
-            // Updated Regex to support standard quotes, smart quotes, and asian brackets
+            // Trích xuất các lựa chọn có sẵn trong tin nhắn cuối
             const choiceRegex = /\[CHOICE:\s*(?:["'“「])(.*?)(?:["'”」])\s*\]/gi;
             
             const choices: string[] = [];
@@ -45,16 +46,18 @@ export const useAutoPlay = ({
             let nextPrompt = "";
 
             if (choices.length > 0) {
+                // Nếu có lựa chọn, chọn ngẫu nhiên một cái
                 const randomIndex = Math.floor(Math.random() * choices.length);
                 nextPrompt = choices[randomIndex];
             } else {
+                // Nếu không có lựa chọn, dùng prompt mặc định "Tiếp tục..."
                 nextPrompt = preset?.continue_nudge_prompt || "[Tiếp tục...]";
             }
 
-            // Minimal delay to allow UI to update before sending next request
+            // Thêm độ trễ nhỏ để UI kịp render trước khi gửi tin nhắn tiếp theo
             const timer = setTimeout(() => {
                 sendMessage(nextPrompt);
-            }, 100);
+            }, 1000); // Delay 1 giây cho tự nhiên
             
             return () => clearTimeout(timer);
         }

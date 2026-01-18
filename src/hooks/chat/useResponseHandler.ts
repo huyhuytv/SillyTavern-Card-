@@ -6,11 +6,15 @@ import { processWithRegex } from '../../services/regexService';
 import type { ChatMessage, QuickReply } from '../../types';
 
 // Helper: Trích xuất các lựa chọn từ văn bản thô
-// Hỗ trợ cả ngoặc kép thẳng (" ') và ngoặc kép cong (smart quotes “ ”) và ngoặc góc (「 」)
+// Hỗ trợ: [CHOICE: "Nội dung"], [CHOICE: 'Nội dung'], [CHOICE: “Nội dung”], [CHOICE: 「Nội dung」]
 const extractChoices = (text: string): QuickReply[] => {
     const choices: QuickReply[] = [];
-    // Regex: Tìm [CHOICE: "Nội dung"] hoặc [CHOICE: “Nội dung”] hoặc [CHOICE: 「Nội dung」]
-    // Flags: g (global), i (case-insensitive)
+    // Regex giải thích:
+    // \[CHOICE:\s*   -> Bắt đầu bằng [CHOICE: và khoảng trắng tùy ý
+    // (?:["'“「])     -> Non-capturing group: Mở ngoặc bằng ", ', “, hoặc 「
+    // (.*?)          -> Capturing group 1: Nội dung bên trong (non-greedy)
+    // (?:["'”」])     -> Non-capturing group: Đóng ngoặc bằng ", ', ”, hoặc 」
+    // \s*\]          -> Khoảng trắng tùy ý và đóng thẻ ]
     const regex = /\[CHOICE:\s*(?:["'“「])(.*?)(?:["'”」])\s*\]/gi;
     
     let match;
@@ -33,14 +37,14 @@ export const useResponseHandler = () => {
 
     const processAIResponse = useCallback(async (rawText: string, messageId: string) => {
         // 0. Trích xuất CHOICE (Quick Replies) trước khi làm sạch văn bản
+        // Bước này giúp bắt được các lựa chọn ngay cả khi chúng bị ẩn hoặc xóa bởi script sau này
         const extractedChoices = extractChoices(rawText);
         
         // Nếu tìm thấy lựa chọn mới, cập nhật ngay vào UI
-        // Nếu không, giữ nguyên (hoặc có thể clear nếu muốn mỗi lượt reset)
         if (extractedChoices.length > 0) {
             setQuickReplies(extractedChoices);
         } else {
-            // Tùy chọn: Xóa các lựa chọn cũ nếu lượt này không có lựa chọn nào
+            // Tùy chọn: Bạn có thể bỏ comment dòng dưới nếu muốn xóa nút cũ khi không có nút mới
             // setQuickReplies([]); 
         }
 
