@@ -26,6 +26,9 @@ interface ChatInputProps {
     storyQueueLength?: number;
     onNextStoryChunk?: () => void;
     onCancelStoryMode?: () => void;
+    // New Props for Error Handling
+    error?: string | null;
+    onClearError?: () => void;
 }
 
 const AVAILABLE_COMMANDS = [
@@ -62,7 +65,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     isStoryMode = false,
     storyQueueLength = 0,
     onNextStoryChunk,
-    onCancelStoryMode
+    onCancelStoryMode,
+    error,
+    onClearError
 }) => {
     const [userInput, setUserInput] = useState('');
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -105,15 +110,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         
         // Handle STOP Action
         if (isLoading) {
-            // FIX: Nếu đang Auto Loop, CHỈ tắt cờ AutoLoop.
-            // Điều này cho phép tin nhắn hiện tại hoàn thành (Soft Stop).
-            // Nếu người dùng bấm thêm lần nữa (khi isAutoLooping đã false), nó sẽ rơi xuống onStop() ở dưới để Abort ngay.
             if (isAutoLooping && onToggleAutoLoop) {
                 onToggleAutoLoop();
                 return;
             }
-            
-            // Nếu là chat thường hoặc đã tắt Loop, thì gọi hàm Stop của engine (Abort)
             onStop();
             return;
         }
@@ -169,6 +169,30 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
     return (
         <div className={inputAreaClasses}>
+            
+            {/* ERROR BANNER (NON-BLOCKING) */}
+            {error && (
+                <div className="bg-red-900/90 text-white px-4 py-2 flex items-center justify-between animate-fade-in-up border-b border-red-700/50">
+                    <div className="flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-sm font-medium">{error}</span>
+                    </div>
+                    {onClearError && (
+                        <button 
+                            onClick={onClearError} 
+                            className="p-1 hover:bg-red-800 rounded-full transition-colors text-red-200 hover:text-white"
+                            title="Đóng thông báo"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                        </button>
+                    )}
+                </div>
+            )}
+
             {/* Command Suggestions Popup */}
             {showSuggestions && !isInputLocked && !isSummarizing && (
                 <div className={`absolute bottom-full left-4 md:left-6 mb-2 w-72 bg-slate-900 border border-slate-600 rounded-lg shadow-2xl overflow-hidden z-50 animate-fade-in-up flex flex-col`}>

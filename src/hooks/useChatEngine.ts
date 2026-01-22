@@ -179,6 +179,7 @@ export const useChatEngine = (sessionId: string | null) => {
         handleUserDecision, 
         handleRetryMythic: manualMythicTrigger,
         cancelStoryMode: store.clearStoryQueue, // Expose cancellation
+        setError: store.setError, // EXPOSED: Allow UI to clear error manually
         
         // Specific Setters
         setIsAutoLooping,

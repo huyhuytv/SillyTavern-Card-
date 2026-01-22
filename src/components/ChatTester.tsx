@@ -89,14 +89,8 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         );
     }
 
-    if (engine.error) {
-        return (
-            <div className="flex flex-col justify-center items-center h-full gap-4 text-red-400">
-                <p className="text-center px-4">Lỗi: {engine.error}</p>
-                <button onClick={onBack} className="text-slate-300 underline hover:text-white transition-colors">Quay lại</button>
-            </div>
-        );
-    }
+    // REMOVED BLOCKING ERROR SCREEN
+    // Instead, we will pass engine.error to ChatInput to show a non-blocking alert
 
     if (!engine.card || !engine.preset) {
         return (
@@ -200,7 +194,10 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 isStoryMode={engine.isStoryMode}
                 storyQueueLength={engine.storyQueue ? engine.storyQueue.length : 0}
                 onNextStoryChunk={engine.advanceStoryChunk}
-                onCancelStoryMode={engine.cancelStoryMode} // NEW: Pass down cancellation handler
+                onCancelStoryMode={engine.cancelStoryMode}
+                // ERROR HANDLING
+                error={engine.error} // Pass error string
+                onClearError={() => engine.setError(null)} // Pass clear handler
             >
                 <DebugPanel 
                     logs={engine.logs} 
