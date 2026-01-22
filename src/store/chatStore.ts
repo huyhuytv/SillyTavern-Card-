@@ -4,7 +4,7 @@ import { immer } from 'zustand/middleware/immer';
 import type { 
     ChatMessage, CharacterCard, SillyTavernPreset, UserPersona, 
     VisualState, WorldInfoRuntimeStats, SystemLogEntry, ChatTurnLog, 
-    QuickReply, ScriptButton, SummaryQueueItem, WorldInfoEntry, RPGDatabase
+    QuickReply, ScriptButton, SummaryQueueItem, WorldInfoEntry, RPGDatabase, NetworkLogEntry
 } from '../types';
 // IMPORT SYNC LOGIC
 import { syncDatabaseToLorebook } from '../services/medusaService'; 
@@ -49,6 +49,7 @@ interface ChatState {
         worldInfoLog: string[];
         smartScanLog: string[];
         mythicLog: string[];
+        networkLog: NetworkLogEntry[]; // NEW
     };
     
     isLoading: boolean;
@@ -73,6 +74,7 @@ interface ChatActions {
     addWorldInfoLog: (log: string) => void;
     addSmartScanLog: (log: string) => void;
     addMythicLog: (log: string) => void; 
+    addNetworkLog: (log: NetworkLogEntry) => void; // NEW
     
     setLongTermSummaries: (summaries: string[]) => void;
     setSummaryQueue: (queue: SummaryQueueItem[]) => void;
@@ -112,7 +114,7 @@ const initialState: Omit<ChatState, 'abortController'> = {
     worldInfoPinned: {}, worldInfoPlacement: {}, authorNote: '',
     lastStateBlock: '', initialDiagnosticLog: '', rpgNotification: null, generatedLorebookEntries: [],
     visualState: {}, quickReplies: [], scriptButtons: [],
-    logs: { turns: [], systemLog: [], worldInfoLog: [], smartScanLog: [], mythicLog: [] },
+    logs: { turns: [], systemLog: [], worldInfoLog: [], smartScanLog: [], mythicLog: [], networkLog: [] },
     isLoading: false, isSummarizing: false, isInputLocked: false, isAutoLooping: false, error: null
 };
 
@@ -143,6 +145,11 @@ export const useChatStore = create<ChatState & ChatActions>()(
         addWorldInfoLog: (log) => set((state) => { state.logs.worldInfoLog.unshift(log); }),
         addSmartScanLog: (log) => set((state) => { state.logs.smartScanLog.unshift(log); }),
         addMythicLog: (log) => set((state) => { state.logs.mythicLog.unshift(log); }),
+        addNetworkLog: (log) => set((state) => { 
+            state.logs.networkLog.unshift(log); 
+            // Keep last 50 requests to avoid memory bloat
+            if (state.logs.networkLog.length > 50) state.logs.networkLog.pop();
+        }),
         
         setLongTermSummaries: (summaries) => set((state) => { state.longTermSummaries = summaries; }),
         setSummaryQueue: (queue) => set((state) => { state.summaryQueue = queue; }),
@@ -162,7 +169,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
         setError: (error) => set((state) => { state.error = error; }),
         setAbortController: (ac) => set((state) => { state.abortController = ac; }),
 
-        clearLogs: () => set((state) => { state.logs = { turns: [], systemLog: [], worldInfoLog: [], smartScanLog: [], mythicLog: [] }; }),
+        clearLogs: () => set((state) => { state.logs = { turns: [], systemLog: [], worldInfoLog: [], smartScanLog: [], mythicLog: [], networkLog: [] }; }),
         resetStore: () => set((state) => { Object.assign(state, initialState); state.abortController = null; }),
 
         updateRpgCell: (tableId, rowIndex, colIndex, value) => set((state) => {

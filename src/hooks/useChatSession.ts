@@ -113,7 +113,8 @@ export const useChatSession = (sessionId: string | null) => {
                         systemLog: [], 
                         worldInfoLog: [], 
                         smartScanLog: [], 
-                        mythicLog: [] 
+                        mythicLog: [],
+                        networkLog: [] // Init network logs
                     },
                 });
 

@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import type { SystemLogEntry, ChatTurnLog, PromptSection, SummaryQueueItem } from '../../types';
+import type { SystemLogEntry, ChatTurnLog, PromptSection, SummaryQueueItem, NetworkLogEntry } from '../../types';
 import { CopyButton } from '../ui/CopyButton';
 
 interface SummaryStats {
@@ -17,7 +17,8 @@ interface DebugPanelProps {
         systemLog: SystemLogEntry[];
         smartScanLog: string[];
         worldInfoLog: string[];
-        mythicLog: string[]; // NEW
+        mythicLog: string[];
+        networkLog?: NetworkLogEntry[]; // NEW
     };
     onClearLogs: () => void;
     onInspectState: () => void;
@@ -350,135 +351,6 @@ const SmartScanLogView: React.FC<{ logs: string[] }> = ({ logs }) => {
     );
 }
 
-// --- 8. Mythic Engine Logs (UPDATED with STRUCTURED PARSER) ---
-
-// Helper Parser
-const parseMythicPrompt = (fullText: string): PromptSection[] => {
-    const sections: PromptSection[] = [];
-    
-    // 1. System Instructions (Start to Schema)
-    const schemaStart = fullText.indexOf('<Cấu trúc bảng & Luật lệ>');
-    if (schemaStart === -1) {
-        // Fallback: No structure found, return whole text as one section
-        return [{ id: 'mythic_raw', name: 'Raw Prompt (Unstructured)', content: fullText, role: 'system' }];
-    }
-
-    const systemContent = fullText.substring(0, schemaStart).trim();
-    if (systemContent) {
-        sections.push({ id: 'mythic_system', name: '🎛️ System Instructions (Chỉ dẫn)', content: systemContent, role: 'system' });
-    }
-
-    // 2. Schema
-    const schemaMatch = fullText.match(/<Cấu trúc bảng & Luật lệ>([\s\S]*?)<\/Cấu trúc bảng & Luật lệ>/);
-    if (schemaMatch) {
-        sections.push({ id: 'mythic_schema', name: '📐 Schema & Rules (Cấu trúc bảng)', content: schemaMatch[1].trim(), role: 'system' });
-    }
-
-    // 3. Lorebook (with Splitting for detailed view)
-    const loreMatch = fullText.match(/<Dữ liệu tham khảo \(Lorebook\)>([\s\S]*?)<\/Dữ liệu tham khảo \(Lorebook\)>/);
-    if (loreMatch) {
-        const rawLore = loreMatch[1].trim();
-        // Split by "### [Lore:" to create sub-sections as requested
-        const entries = rawLore.split('### [Lore:').filter(Boolean).map(e => '### [Lore:' + e);
-        
-        sections.push({ 
-            id: 'mythic_lore', 
-            name: '📚 Lorebook Reference (Dữ liệu tham khảo)', 
-            content: rawLore, 
-            role: 'system',
-            subSections: entries.length > 0 ? entries : undefined
-        });
-    }
-
-    // 4. Current Data (Consolidated Block)
-    const dataMatch = fullText.match(/<Dữ liệu bảng hiện tại>([\s\S]*?)<\/Dữ liệu bảng hiện tại>/);
-    if (dataMatch) {
-        sections.push({ id: 'mythic_data', name: '💾 Current Database (Dữ liệu hiện tại)', content: dataMatch[1].trim(), role: 'system' });
-    }
-
-    // 5. Chat History (Consolidated Block)
-    const chatMatch = fullText.match(/<Dữ liệu chính văn>([\s\S]*?)<\/Dữ liệu chính văn>/);
-    if (chatMatch) {
-        sections.push({ id: 'mythic_chat', name: '💬 Chat Context (Chính văn)', content: chatMatch[1].trim(), role: 'system' });
-    }
-
-    // 6. Global Rules
-    const globalMatch = fullText.match(/LUẬT CHUNG:([\s\S]*)$/);
-    if (globalMatch) {
-        sections.push({ id: 'mythic_global', name: '⚖️ Global Rules (Luật chung)', content: globalMatch[1].trim(), role: 'system' });
-    }
-
-    return sections;
-};
-
-const MythicLogView: React.FC<{ logs: string[], onRetry?: () => void }> = ({ logs, onRetry }) => {
-    return (
-        <div className="space-y-4">
-            {logs.length === 0 ? (
-                <div className="p-4 text-center text-slate-600 italic text-xs bg-slate-900/30 rounded-lg border border-slate-800">Chưa có dữ liệu Mythic Engine.</div>
-            ) : (
-                logs.map((logString, idx) => {
-                    let parsedLog = { latency: 0, fullPrompt: '', rawResponse: '' };
-                    try {
-                        parsedLog = JSON.parse(logString);
-                    } catch (e) {
-                        parsedLog.fullPrompt = logString;
-                    }
-
-                    // Parse the huge prompt into sections
-                    const structuredPrompt = parseMythicPrompt(parsedLog.fullPrompt);
-                    const isLatest = idx === 0;
-
-                    return (
-                        <div key={idx} className="bg-slate-900/30 border border-rose-500/20 rounded-lg p-3 relative group">
-                            <div className="flex justify-between items-center mb-2 border-b border-rose-500/20 pb-2">
-                                <span className="text-xs font-bold text-rose-400">Medusa Cycle #{logs.length - idx} <span className="text-slate-500 font-normal">({parsedLog.latency}ms)</span></span>
-                                {isLatest && onRetry && (
-                                    <button 
-                                        onClick={onRetry}
-                                        className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white shadow-lg transition-colors"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" /></svg>
-                                        Tạo lại (Re-run)
-                                    </button>
-                                )}
-                            </div>
-                            
-                            <details className="mb-2 group">
-                                <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-sky-400 font-bold mb-1 flex items-center justify-between rounded hover:bg-slate-800/50 p-1 transition-colors select-none">
-                                    <div className="flex items-center gap-2">
-                                        <span>📤 Lời nhắc Gửi đi (Outgoing Prompt)</span>
-                                        <span className="transform group-open:rotate-90 transition-transform text-[8px]" aria-hidden="true">▶</span>
-                                    </div>
-                                    {/* Copy Button moved to header for easy access */}
-                                    <div onClick={(e) => e.stopPropagation()}>
-                                        <CopyButton textToCopy={parsedLog.fullPrompt} label="Sao chép tất cả" absolute={false} />
-                                    </div>
-                                </summary>
-                                <div className="mt-2 space-y-2 pl-2 border-l border-slate-800">
-                                    {structuredPrompt.map((section) => (
-                                        <PromptBlock key={section.id} section={section} />
-                                    ))}
-                                </div>
-                            </details>
-
-                            <div className="relative">
-                                <div className="flex justify-between items-center mb-1">
-                                    <span className="text-[10px] text-orange-400 font-bold">📥 Phản hồi Thô (AI Response)</span>
-                                    <CopyButton textToCopy={parsedLog.rawResponse} label="Copy" absolute={false} />
-                                </div>
-                                <pre className="text-[10px] text-orange-100 font-mono whitespace-pre-wrap break-words bg-black/20 p-2 rounded border border-rose-500/20 max-h-60 overflow-y-auto custom-scrollbar">
-                                    {parsedLog.rawResponse}
-                                </pre>
-                            </div>
-                        </div>
-                    );
-                })
-            )}
-        </div>
-    );
-}
-
 // --- 5. Prompts View ---
 const PromptsView: React.FC<{ turns: ChatTurnLog[] }> = ({ turns }) => {
     return (
@@ -729,6 +601,228 @@ const SummariesView: React.FC<{
     );
 }
 
+// --- 8. Mythic Engine Logs (UPDATED with STRUCTURED PARSER) ---
+
+// Helper Parser
+const parseMythicPrompt = (fullText: string): PromptSection[] => {
+    const sections: PromptSection[] = [];
+    
+    // 1. System Instructions (Start to Schema)
+    const schemaStart = fullText.indexOf('<Cấu trúc bảng & Luật lệ>');
+    if (schemaStart === -1) {
+        // Fallback: No structure found, return whole text as one section
+        return [{ id: 'mythic_raw', name: 'Raw Prompt (Unstructured)', content: fullText, role: 'system' }];
+    }
+
+    const systemContent = fullText.substring(0, schemaStart).trim();
+    if (systemContent) {
+        sections.push({ id: 'mythic_system', name: '🎛️ System Instructions (Chỉ dẫn)', content: systemContent, role: 'system' });
+    }
+
+    // 2. Schema
+    const schemaMatch = fullText.match(/<Cấu trúc bảng & Luật lệ>([\s\S]*?)<\/Cấu trúc bảng & Luật lệ>/);
+    if (schemaMatch) {
+        sections.push({ id: 'mythic_schema', name: '📐 Schema & Rules (Cấu trúc bảng)', content: schemaMatch[1].trim(), role: 'system' });
+    }
+
+    // 3. Lorebook (with Splitting for detailed view)
+    const loreMatch = fullText.match(/<Dữ liệu tham khảo \(Lorebook\)>([\s\S]*?)<\/Dữ liệu tham khảo \(Lorebook\)>/);
+    if (loreMatch) {
+        const rawLore = loreMatch[1].trim();
+        // Split by "### [Lore:" to create sub-sections as requested
+        const entries = rawLore.split('### [Lore:').filter(Boolean).map(e => '### [Lore:' + e);
+        
+        sections.push({ 
+            id: 'mythic_lore', 
+            name: '📚 Lorebook Reference (Dữ liệu tham khảo)', 
+            content: rawLore, 
+            role: 'system',
+            subSections: entries.length > 0 ? entries : undefined
+        });
+    }
+
+    // 4. Current Data (Consolidated Block)
+    const dataMatch = fullText.match(/<Dữ liệu bảng hiện tại>([\s\S]*?)<\/Dữ liệu bảng hiện tại>/);
+    if (dataMatch) {
+        sections.push({ id: 'mythic_data', name: '💾 Current Database (Dữ liệu hiện tại)', content: dataMatch[1].trim(), role: 'system' });
+    }
+
+    // 5. Chat History (Consolidated Block)
+    const chatMatch = fullText.match(/<Dữ liệu chính văn>([\s\S]*?)<\/Dữ liệu chính văn>/);
+    if (chatMatch) {
+        sections.push({ id: 'mythic_chat', name: '💬 Chat Context (Chính văn)', content: chatMatch[1].trim(), role: 'system' });
+    }
+
+    // 6. Global Rules
+    const globalMatch = fullText.match(/LUẬT CHUNG:([\s\S]*)$/);
+    if (globalMatch) {
+        sections.push({ id: 'mythic_global', name: '⚖️ Global Rules (Luật chung)', content: globalMatch[1].trim(), role: 'system' });
+    }
+
+    return sections;
+};
+
+const MythicLogView: React.FC<{ logs: string[], onRetry?: () => void }> = ({ logs, onRetry }) => {
+    return (
+        <div className="space-y-4">
+            {logs.length === 0 ? (
+                <div className="p-4 text-center text-slate-600 italic text-xs bg-slate-900/30 rounded-lg border border-slate-800">Chưa có dữ liệu Mythic Engine.</div>
+            ) : (
+                logs.map((logString, idx) => {
+                    let parsedLog = { latency: 0, fullPrompt: '', rawResponse: '' };
+                    try {
+                        parsedLog = JSON.parse(logString);
+                    } catch (e) {
+                        parsedLog.fullPrompt = logString;
+                    }
+
+                    // Parse the huge prompt into sections
+                    const structuredPrompt = parseMythicPrompt(parsedLog.fullPrompt);
+                    const isLatest = idx === 0;
+
+                    return (
+                        <div key={idx} className="bg-slate-900/30 border border-rose-500/20 rounded-lg p-3 relative group">
+                            <div className="flex justify-between items-center mb-2 border-b border-rose-500/20 pb-2">
+                                <span className="text-xs font-bold text-rose-400">Medusa Cycle #{logs.length - idx} <span className="text-slate-500 font-normal">({parsedLog.latency}ms)</span></span>
+                                {isLatest && onRetry && (
+                                    <button 
+                                        onClick={onRetry}
+                                        className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white shadow-lg transition-colors"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" /></svg>
+                                        Tạo lại (Re-run)
+                                    </button>
+                                )}
+                            </div>
+                            
+                            <details className="mb-2 group">
+                                <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-sky-400 font-bold mb-1 flex items-center justify-between rounded hover:bg-slate-800/50 p-1 transition-colors select-none">
+                                    <div className="flex items-center gap-2">
+                                        <span>📤 Lời nhắc Gửi đi (Outgoing Prompt)</span>
+                                        <span className="transform group-open:rotate-90 transition-transform text-[8px]" aria-hidden="true">▶</span>
+                                    </div>
+                                    {/* Copy Button moved to header for easy access */}
+                                    <div onClick={(e) => e.stopPropagation()}>
+                                        <CopyButton textToCopy={parsedLog.fullPrompt} label="Sao chép tất cả" absolute={false} />
+                                    </div>
+                                </summary>
+                                <div className="mt-2 space-y-2 pl-2 border-l border-slate-800">
+                                    {structuredPrompt.map((section) => (
+                                        <PromptBlock key={section.id} section={section} />
+                                    ))}
+                                </div>
+                            </details>
+
+                            <div className="relative">
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-[10px] text-orange-400 font-bold">📥 Phản hồi Thô (AI Response)</span>
+                                    <CopyButton textToCopy={parsedLog.rawResponse} label="Copy" absolute={false} />
+                                </div>
+                                <pre className="text-[10px] text-orange-100 font-mono whitespace-pre-wrap break-words bg-black/20 p-2 rounded border border-rose-500/20 max-h-60 overflow-y-auto custom-scrollbar">
+                                    {parsedLog.rawResponse}
+                                </pre>
+                            </div>
+                        </div>
+                    );
+                })
+            )}
+        </div>
+    );
+}
+
+// --- 9. Network Logs (NEW: CURL) ---
+
+// Helper to mask API Key
+const maskApiKey = (cmd: string): string => {
+    // Regex for Bearer token
+    return cmd.replace(/(Authorization: Bearer\s+)([A-Za-z0-9\-\._]+)/gi, (match, prefix, token) => {
+        if (token.length > 8) {
+            return `${prefix}${token.substring(0, 4)}...${token.substring(token.length - 4)}`;
+        }
+        return `${prefix}****`;
+    }).replace(/key=([^&\s]+)/gi, (match, key) => { // Query param key=...
+         if (key.length > 8) {
+            return `key=${key.substring(0, 4)}...${key.substring(key.length - 4)}`;
+        }
+        return `key=****`;
+    });
+};
+
+const generateCurlCommand = (entry: NetworkLogEntry): string => {
+    let cmd = `curl -X ${entry.method} "${entry.url}" \\\n`;
+    
+    // Headers
+    if (entry.headers) {
+        Object.entries(entry.headers).forEach(([key, value]) => {
+            cmd += `  -H "${key}: ${value}" \\\n`;
+        });
+    }
+    
+    // Body
+    if (entry.body) {
+        let bodyStr = "";
+        if (typeof entry.body === 'string') {
+            bodyStr = entry.body;
+        } else {
+            try {
+                bodyStr = JSON.stringify(entry.body, null, 2);
+            } catch {
+                bodyStr = String(entry.body);
+            }
+        }
+        // Escape single quotes for bash
+        const escapedBody = bodyStr.replace(/'/g, "'\\''");
+        cmd += `  -d '${escapedBody}'`;
+    } else {
+        // Remove trailing backslash if no body
+        cmd = cmd.slice(0, -3); 
+    }
+    
+    return maskApiKey(cmd);
+};
+
+const NetworkLogView: React.FC<{ logs: NetworkLogEntry[] | undefined }> = ({ logs }) => {
+    if (!logs || logs.length === 0) {
+        return (
+             <div className="p-8 text-center text-slate-600 italic text-xs bg-slate-900/30 rounded-lg border border-slate-800">Chưa có nhật ký mạng nào.</div>
+        );
+    }
+
+    return (
+        <div className="space-y-4">
+             {logs.map((log, idx) => {
+                 const curlCmd = generateCurlCommand(log);
+                 const dateStr = new Date(log.timestamp).toLocaleTimeString();
+                 
+                 return (
+                     <div key={log.id || idx} className="bg-slate-950/50 border border-slate-700/50 rounded-lg overflow-hidden">
+                        <div className="flex justify-between items-center px-3 py-2 bg-slate-900 border-b border-slate-800">
+                             <div className="flex items-center gap-2">
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                    log.source === 'proxy' ? 'bg-cyan-900/30 text-cyan-400 border border-cyan-800' :
+                                    log.source === 'openrouter' ? 'bg-purple-900/30 text-purple-400 border border-purple-800' :
+                                    'bg-blue-900/30 text-blue-400 border border-blue-800'
+                                }`}>
+                                    {log.source.toUpperCase()}
+                                </span>
+                                <span className="text-xs text-slate-400 font-mono">{log.method}</span>
+                                <span className="text-[10px] text-slate-600">{dateStr}</span>
+                             </div>
+                             <CopyButton textToCopy={curlCmd} label="Copy CURL" absolute={false} />
+                        </div>
+                        <div className="p-2 overflow-x-auto">
+                            <pre className="text-[10px] text-slate-300 font-mono whitespace-pre-wrap break-all">
+                                {curlCmd}
+                            </pre>
+                        </div>
+                     </div>
+                 );
+             })}
+        </div>
+    );
+};
+
+
 // --- MAIN COMPONENT ---
 
 export const DebugPanel: React.FC<DebugPanelProps> = ({ 
@@ -775,7 +869,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                 </svg>
             </button>
 
-            {/* Body: Linear Layout with 8 Sections */}
+            {/* Body: Linear Layout with 9 Sections */}
             {isExpanded && (
                 <div className="bg-slate-900/50 border-x border-b border-slate-800 rounded-b-lg p-2 animate-fade-in-up max-h-[70vh] overflow-y-auto custom-scrollbar">
                     
@@ -864,6 +958,14 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                             )}
                         </div>
                         <MythicLogView logs={logs.mythicLog} onRetry={onRetryMythic} />
+                    </div>
+
+                    {/* Section 9: Network Inspector (NEW) */}
+                    <div className="mb-6">
+                        <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-wider mb-2 border-b border-cyan-500/20 pb-1 flex items-center gap-2">
+                            <span>9. Network Inspector (CURL)</span>
+                        </h3>
+                        <NetworkLogView logs={logs.networkLog} />
                     </div>
 
                 </div>

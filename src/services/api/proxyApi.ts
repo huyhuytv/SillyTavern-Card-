@@ -1,6 +1,7 @@
 
 import type { SillyTavernPreset } from '../../types';
 import { getProxyUrl, getProxyPassword, getProxyLegacyMode } from '../settingsService';
+import { useChatStore } from '../../store/chatStore';
 
 export const callProxy = async (
     model: string,
@@ -28,7 +29,21 @@ export const callProxy = async (
         if (proxyPassword) headers['Authorization'] = `Bearer ${proxyPassword}`;
     }
 
-    const response = await fetch(`${cleanUrl}/v1/chat/completions`, {
+    const endpoint = `${cleanUrl}/v1/chat/completions`;
+
+    // --- NETWORK LOGGING ---
+    useChatStore.getState().addNetworkLog({
+        id: `proxy-${Date.now()}`,
+        timestamp: Date.now(),
+        url: endpoint,
+        method: 'POST',
+        headers: headers,
+        body: payload,
+        source: 'proxy'
+    });
+    // -----------------------
+
+    const response = await fetch(endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload)
@@ -69,7 +84,21 @@ export const callOpenAIProxyTask = async (
         if (proxyPassword) headers['Authorization'] = `Bearer ${proxyPassword}`;
     }
 
-    const response = await fetch(`${cleanUrl}/v1/chat/completions`, {
+    const endpoint = `${cleanUrl}/v1/chat/completions`;
+
+    // --- NETWORK LOGGING ---
+    useChatStore.getState().addNetworkLog({
+        id: `proxy-task-${Date.now()}`,
+        timestamp: Date.now(),
+        url: endpoint,
+        method: 'POST',
+        headers: headers,
+        body: payload,
+        source: 'proxy'
+    });
+    // -----------------------
+
+    const response = await fetch(endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload)
@@ -110,7 +139,21 @@ export async function* callProxyStream(
         if (proxyPassword) headers['Authorization'] = `Bearer ${proxyPassword}`;
     }
 
-    const response = await fetch(`${cleanUrl}/v1/chat/completions`, {
+    const endpoint = `${cleanUrl}/v1/chat/completions`;
+
+    // --- NETWORK LOGGING ---
+    useChatStore.getState().addNetworkLog({
+        id: `proxy-stream-${Date.now()}`,
+        timestamp: Date.now(),
+        url: endpoint,
+        method: 'POST',
+        headers: headers,
+        body: payload,
+        source: 'proxy'
+    });
+    // -----------------------
+
+    const response = await fetch(endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),

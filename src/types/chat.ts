@@ -1,7 +1,7 @@
 
 // --- PERSISTENCE DATA (Saved to DB) ---
 
-import type { VisualState, WorldInfoRuntimeStats, SummaryQueueItem, ChatTurnLog, SystemLogEntry } from './app';
+import type { VisualState, WorldInfoRuntimeStats, SummaryQueueItem, ChatTurnLog, SystemLogEntry, NetworkLogEntry } from './app';
 import type { WorldInfoEntry } from './character';
 import type { RPGDatabase } from './rpg';
 
@@ -61,6 +61,7 @@ export interface ChatSession {
         worldInfoLog: string[];
         smartScanLog: string[];
         mythicLog: string[];
+        networkLog?: NetworkLogEntry[]; // NEW
     };
     // -----------------------------
 

@@ -2,6 +2,7 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { getApiKey } from '../settingsService';
 import type { SillyTavernPreset } from '../../types';
+import { useChatStore } from '../../store/chatStore';
 
 export const getGeminiClient = (): GoogleGenAI => {
     const apiKey = getApiKey();
@@ -37,6 +38,26 @@ export const callGeminiDirect = async (
 ): Promise<GenerateContentResponse> => {
     const ai = getGeminiClient();
     const payload = buildGeminiPayload(prompt, settings, safetySettings);
+
+    // --- NETWORK LOGGING (SIMULATED) ---
+    // Because SDK hides the fetch, we simulate the CURL command for debugging visibility.
+    const apiKey = getApiKey();
+    const modelId = model || payload.model;
+    const simulatedEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey ? apiKey.substring(0, 5) + '...' : 'MISSING'}`;
+    
+    useChatStore.getState().addNetworkLog({
+        id: `gemini-${Date.now()}`,
+        timestamp: Date.now(),
+        url: `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: {
+            contents: payload.contents,
+            generationConfig: payload.config
+        },
+        source: 'gemini'
+    });
+    // -----------------------------------
 
     try {
         const response = await ai.models.generateContent({

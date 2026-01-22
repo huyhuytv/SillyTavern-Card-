@@ -18,6 +18,16 @@ export interface SystemLogEntry {
     payload?: any;
 }
 
+export interface NetworkLogEntry {
+    id: string;
+    timestamp: number;
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: any; // Can be object or string
+    source: 'proxy' | 'openrouter' | 'gemini';
+}
+
 export interface ChatTurnLog {
     timestamp: number;
     prompt: PromptSection[]; 
