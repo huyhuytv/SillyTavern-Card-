@@ -146,6 +146,10 @@ export const useChatStore = create<ChatState & ChatActions>()(
         addSmartScanLog: (log) => set((state) => { state.logs.smartScanLog.unshift(log); }),
         addMythicLog: (log) => set((state) => { state.logs.mythicLog.unshift(log); }),
         addNetworkLog: (log) => set((state) => { 
+            // DEFENSIVE FIX: Ensure networkLog array exists (handle old session structure)
+            if (!state.logs.networkLog) {
+                state.logs.networkLog = [];
+            }
             state.logs.networkLog.unshift(log); 
             // Keep last 50 requests to avoid memory bloat
             if (state.logs.networkLog.length > 50) state.logs.networkLog.pop();

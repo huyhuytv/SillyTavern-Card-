@@ -85,6 +85,15 @@ export const useChatSession = (sessionId: string | null) => {
                 }
                 // ---------------------------
 
+                const defaultLogs = { 
+                    turns: [], 
+                    systemLog: [], 
+                    worldInfoLog: [], 
+                    smartScanLog: [], 
+                    mythicLog: [],
+                    networkLog: [] 
+                };
+
                 // Hydrate Store (Atomic update)
                 setSessionData({
                     sessionId,
@@ -108,14 +117,8 @@ export const useChatSession = (sessionId: string | null) => {
                     generatedLorebookEntries: session.generatedLorebookEntries || [], // Hydrate generated entries
                     
                     // --- HYDRATE LOGS ---
-                    logs: session.logs || { 
-                        turns: [], 
-                        systemLog: [], 
-                        worldInfoLog: [], 
-                        smartScanLog: [], 
-                        mythicLog: [],
-                        networkLog: [] // Init network logs
-                    },
+                    // FIX: Merge with default to ensure new log arrays (like networkLog) exist if loading old session
+                    logs: { ...defaultLogs, ...(session.logs || {}) },
                 });
 
                 // Hydrate WI State
