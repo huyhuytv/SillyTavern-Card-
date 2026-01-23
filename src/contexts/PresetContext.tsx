@@ -13,6 +13,9 @@ interface PresetContextType {
   updateActivePreset: (preset: SillyTavernPreset) => Promise<void>;
   setActivePresetName: (name: string | null) => void;
   revertActivePreset: () => Promise<void>;
+  duplicatePreset: (originalName: string, newName: string) => Promise<void>;
+  createPreset: (name: string) => Promise<void>;
+  renamePreset: (oldName: string, newName: string) => Promise<void>;
   reloadPresets: () => Promise<void>;
   dispatch: any;
 }
@@ -37,6 +40,9 @@ export const usePreset = (): PresetContextType => {
     updateActivePreset: store.updateActivePreset,
     setActivePresetName: store.setActivePresetName,
     revertActivePreset: store.revertActivePreset,
+    duplicatePreset: store.duplicatePreset,
+    createPreset: store.createPreset,
+    renamePreset: store.renamePreset,
     reloadPresets: store.reloadPresets,
     dispatch: () => {},
   };

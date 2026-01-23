@@ -165,14 +165,11 @@ const MessageListComponent: React.FC<MessageListProps> = ({
     const hasMoreMessages = messages.length > visibleCount;
 
     // --- SMART SCROLL LOGIC ---
-    // Chỉ cuộn khi số lượng tin nhắn tăng lên HOẶC ID tin nhắn cuối cùng thay đổi
-    // Tránh cuộn khi chỉ có biến số (variables) thay đổi do Smart Scan
     useEffect(() => {
         const isNewMessage = messages.length > prevMessagesLengthRef.current;
         const currentLastId = messages.length > 0 ? messages[messages.length - 1].id : null;
         const isLastIdChanged = currentLastId !== lastMessageIdRef.current;
 
-        // Nếu đang edit thì không cuộn, trừ khi là tin mới
         if ((isNewMessage || isLastIdChanged) && !editingMessageId) {
             setTimeout(() => {
                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -183,6 +180,7 @@ const MessageListComponent: React.FC<MessageListProps> = ({
         lastMessageIdRef.current = currentLastId;
     }, [messages, editingMessageId]); 
 
+    // Calculate Last Model Index (Global)
     let lastModelMsgIndex = -1;
     for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'model') {
@@ -196,7 +194,6 @@ const MessageListComponent: React.FC<MessageListProps> = ({
         <div 
             ref={containerRef}
             className={`flex-grow p-4 md:p-6 overflow-y-auto custom-scrollbar relative z-10 w-full ${isImmersive ? 'max-w-5xl mx-auto transition-all' : ''}`}
-            // Thêm aria-live để Screen Reader biết có nội dung mới, nhưng 'polite' để không ngắt lời
             aria-live="polite"
         >
             {hasMoreMessages && (
@@ -210,14 +207,19 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                 </div>
             )}
 
-            {displayedMessages.map((msg) => {
-                const originalIndex = messages.findIndex(m => m.id === msg.id);
+            {displayedMessages.map((msg, index) => {
+                // Calculate absolute index in the full 'messages' array
+                // displayedMessages is a slice from the end.
+                // Start index of display = total length - displayed length
+                const startIndex = messages.length - displayedMessages.length;
+                const originalIndex = startIndex + index;
                 
                 const isLastMessage = originalIndex === lastMessageIndex;
                 const isLastModelMessage = originalIndex === lastModelMsgIndex;
                 
-                const canRegenerate = (isLastModelMessage || (isLastMessage && msg.role === 'user')) && !isLoading && msg.role !== 'system';
-                // Delete is always possible now for rewind logic, unless loading
+                // Allow regenerate if it's the Last Model Message OR the Last Message (even if User)
+                const canRegenerate = !isLoading && msg.role !== 'system' && (isLastModelMessage || isLastMessage);
+                
                 const canDelete = !isLoading;
 
                 const menuActions = [
@@ -225,24 +227,22 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                     { label: 'Ghi chú của Tác giả', onClick: onOpenAuthorNote },
                     { label: 'Quản lý World Info', onClick: onOpenWorldInfo },
                     { 
-                        label: msg.role === 'user' ? 'Thử lại (Gửi lại)' : 'Tạo lại', 
+                        label: msg.role === 'user' ? 'Gửi lại (Tạo lại)' : 'Tạo lại phản hồi', 
                         onClick: regenerateLastResponse, 
                         disabled: !canRegenerate 
                     },
                     { 
                         label: 'Xóa từ đây (Tua lại)', 
-                        onClick: () => onDeleteMessage(msg.id), // Direct delete call 
+                        onClick: () => onDeleteMessage(msg.id), 
                         disabled: !canDelete, 
                         className: 'text-red-400 hover:bg-red-800/50' 
                     },
                 ];
 
-                // Check for empty message
                 if (!msg.content.trim() && !msg.interactiveHtml && editingMessageId !== msg.id) return null;
 
                 return (
                     <div key={msg.id} className="group relative flex flex-col gap-2 my-4">
-                        {/* 1. Text Bubble Part */}
                         {(msg.content.trim() || editingMessageId === msg.id) && (
                             <MessageBubble 
                                 message={msg} 
@@ -257,10 +257,8 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                             />
                         )}
 
-                        {/* 2. Interactive HTML Part */}
                         {msg.interactiveHtml && (
                             <div className="relative w-full">
-                                {/* If message has ONLY HTML (no text), show overlay actions */}
                                 {(!msg.content.trim() && editingMessageId !== msg.id) && (
                                     <div className="absolute top-0 right-0 z-20 flex items-center gap-2 p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none group-hover:pointer-events-auto">
                                         {ttsEnabled && (
@@ -279,7 +277,6 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                                     </div>
                                 )}
 
-                                {/* Thinking Reveal inside HTML Logic (if extraction needed) */}
                                 {(() => {
                                     let finalHtml = msg.interactiveHtml;
                                     let thinkingContent: string | null = null;

@@ -22,6 +22,9 @@ interface PresetActions {
   updateActivePreset: (preset: SillyTavernPreset) => Promise<void>;
   setActivePresetName: (name: string | null) => void;
   revertActivePreset: () => Promise<void>;
+  duplicatePreset: (originalName: string, newName: string) => Promise<void>;
+  createPreset: (name: string) => Promise<void>;
+  renamePreset: (oldName: string, newName: string) => Promise<void>;
 }
 
 export const usePresetStore = create<PresetState & PresetActions>()(
@@ -78,9 +81,7 @@ export const usePresetStore = create<PresetState & PresetActions>()(
         const existing = presets.find(p => p.name === loadedPreset.name);
         
         if (existing) {
-             // We can't use window.confirm in store easily without blocking, 
-             // but strictly speaking we should just overwrite or rename.
-             // For now, overwrite.
+             // Overwrite existing logic or handle conflict
         }
 
         await dbService.savePreset(loadedPreset);
@@ -97,13 +98,15 @@ export const usePresetStore = create<PresetState & PresetActions>()(
 
     deleteActivePreset: async () => {
         const { activePresetName } = get();
-        if (!activePresetName || activePresetName === defaultPreset.name || activePresetName === geminiCoT12kPreset.name || activePresetName === tawaPreset.name) return;
+        if (!activePresetName) return;
+        // Optional: Protect default presets? 
+        // if (activePresetName === defaultPreset.name || activePresetName === geminiCoT12kPreset.name) return;
 
         try {
             await dbService.deletePreset(activePresetName);
             set((state) => {
                 state.presets = state.presets.filter(p => p.name !== activePresetName);
-                state.activePresetName = defaultPreset.name;
+                state.activePresetName = state.presets.length > 0 ? state.presets[0].name : null;
             });
         } catch (err) {
             set((state) => { state.error = 'Failed to delete preset'; });
@@ -131,6 +134,7 @@ export const usePresetStore = create<PresetState & PresetActions>()(
         if (!activePresetName) return;
         
         try {
+            // Revert logic for hardcoded presets
             if (activePresetName === defaultPreset.name) {
                 await dbService.savePreset(defaultPreset);
                 get().updateActivePreset(defaultPreset);
@@ -146,9 +150,8 @@ export const usePresetStore = create<PresetState & PresetActions>()(
                 get().updateActivePreset(tawaPreset);
                 return;
             }
-            // For custom presets, reload from DB to "undo" unsaved changes if we had an edit buffer,
-            // but currently edits are live-saved. So revert might mean something else in future.
-            // For now, just reload from DB.
+            
+            // For others, reload from DB to undo unsaved changes in store (if any)
             const all = await dbService.getAllPresets();
             const original = all.find(p => p.name === activePresetName);
             if (original) {
@@ -158,6 +161,103 @@ export const usePresetStore = create<PresetState & PresetActions>()(
                 });
             }
         } catch (e) {}
+    },
+
+    duplicatePreset: async (originalName: string, newName: string) => {
+        set((state) => { state.error = ''; });
+        const { presets } = get();
+        const original = presets.find(p => p.name === originalName);
+        
+        if (!original) {
+            set((state) => { state.error = 'Không tìm thấy Preset gốc.'; });
+            return;
+        }
+
+        if (presets.some(p => p.name === newName)) {
+             throw new Error('Tên Preset đã tồn tại.');
+        }
+
+        try {
+            const newPreset = JSON.parse(JSON.stringify(original));
+            newPreset.name = newName;
+            newPreset.comment = `Bản sao của ${originalName}. ${newPreset.comment || ''}`;
+
+            await dbService.savePreset(newPreset);
+            
+            set((state) => {
+                state.presets.push(newPreset);
+                state.activePresetName = newName;
+            });
+        } catch (err) {
+            set((state) => { state.error = 'Lỗi khi nhân bản Preset.'; });
+            throw err;
+        }
+    },
+
+    createPreset: async (name: string) => {
+        set((state) => { state.error = ''; });
+        const { presets } = get();
+
+        if (presets.some(p => p.name === name)) {
+             throw new Error('Tên Preset đã tồn tại.');
+        }
+
+        try {
+            const newPreset = JSON.parse(JSON.stringify(defaultPreset));
+            newPreset.name = name;
+            newPreset.comment = "Preset mới được tạo.";
+            newPreset.prompts = []; // Empty or keep defaults? Let's keep empty for fresh start or defaults? Keeping defaults is safer for user.
+            // Actually let's use the defaultPreset's prompts so it's usable immediately
+            
+            await dbService.savePreset(newPreset);
+            
+            set((state) => {
+                state.presets.push(newPreset);
+                state.activePresetName = name;
+            });
+        } catch (err) {
+             set((state) => { state.error = 'Lỗi khi tạo Preset.'; });
+             throw err;
+        }
+    },
+
+    renamePreset: async (oldName: string, newName: string) => {
+        set((state) => { state.error = ''; });
+        const { presets } = get();
+        const original = presets.find(p => p.name === oldName);
+
+        if (!original) {
+             set((state) => { state.error = 'Không tìm thấy Preset gốc.'; });
+             return;
+        }
+        
+        if (oldName === newName) return;
+
+        if (presets.some(p => p.name === newName)) {
+             throw new Error('Tên Preset mới đã tồn tại.');
+        }
+
+        try {
+            // 1. Create new entry
+            const newPreset = { ...original, name: newName };
+            await dbService.savePreset(newPreset);
+
+            // 2. Delete old entry (IndexedDB key is name)
+            await dbService.deletePreset(oldName);
+
+            set((state) => {
+                // Remove old, add new
+                state.presets = state.presets.filter(p => p.name !== oldName);
+                state.presets.push(newPreset);
+                // Update active if we renamed the active one
+                if (state.activePresetName === oldName) {
+                    state.activePresetName = newName;
+                }
+            });
+        } catch (err) {
+            set((state) => { state.error = 'Lỗi khi đổi tên Preset.'; });
+            throw err;
+        }
     }
   }))
 );

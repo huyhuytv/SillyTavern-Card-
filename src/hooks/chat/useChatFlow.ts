@@ -34,7 +34,7 @@ export const useChatFlow = () => {
 
     // --- SOUND NOTIFICATION SYSTEM ---
     const playNotification = useCallback((type: 'ai' | 'rpg') => {
-        const { visualState } = state;
+        const { visualState } = useChatStore.getState(); // Always get fresh visual state
         if (visualState.systemSoundEnabled === false) return;
 
         let soundUrl = '';
@@ -75,7 +75,7 @@ export const useChatFlow = () => {
                 }
             } catch(e) {}
         }
-    }, [state.visualState]);
+    }, []);
 
     const waitForUserDecision = useCallback((title: string, message: string, errorDetails: any, canIgnore: boolean = true): Promise<'retry' | 'ignore'> => {
         return new Promise((resolve) => {
@@ -94,8 +94,10 @@ export const useChatFlow = () => {
     }, []);
 
     const stopGeneration = useCallback(() => {
-        if (state.abortController) {
-            state.abortController.abort();
+        // Access fresh state to get the current controller
+        const freshState = useChatStore.getState();
+        if (freshState.abortController) {
+            freshState.abortController.abort();
             state.setAbortController(null);
             state.setLoading(false);
             logger.logSystemMessage('interaction', 'system', 'Người dùng đã dừng quá trình tạo.');
@@ -104,20 +106,21 @@ export const useChatFlow = () => {
 
     // --- MANUAL MYTHIC TRIGGER ---
     const manualMythicTrigger = useCallback(async () => {
-        if (!state.card || !state.card.rpg_data) {
+        // CRITICAL FIX: Use getState() to ensure we work with fresh data (especially after edits/deletes)
+        const freshState = useChatStore.getState();
+
+        if (!freshState.card || !freshState.card.rpg_data) {
             showToast('Không tìm thấy dữ liệu RPG để xử lý.', 'warning');
             return;
         }
 
-        const msgs = state.messages;
+        const msgs = freshState.messages;
         if (msgs.length < 2) {
             showToast('Lịch sử trò chuyện chưa đủ để phân tích.', 'warning');
             return;
         }
 
-        // Logic tương tự sendMessage nhưng chỉ chạy RPG
-        // Calculate Current Turn Index for lifecycle updates
-        const currentTurn = countTotalTurns(state.messages) + 1;
+        const currentTurn = countTotalTurns(msgs) + 1;
 
         let lastModelMsg = null;
         let lastUserMsg = null;
@@ -153,7 +156,7 @@ export const useChatFlow = () => {
             const mythicStartTime = Date.now();
             let historyLog = `User: ${lastUserMsg.content}\nGM/System: ${lastModelMsg.content}`;
             
-            let allEntries: WorldInfoEntry[] = state.card.char_book?.entries || [];
+            let allEntries: WorldInfoEntry[] = freshState.card.char_book?.entries || [];
             lorebooks.forEach(lb => {
                 if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
             });
@@ -162,11 +165,11 @@ export const useChatFlow = () => {
             // Let's assume empty active entries for Manual Trigger to avoid complexity.
             const activeEntries: WorldInfoEntry[] = []; 
 
-            const maxTokens = Number(state.preset?.max_tokens) || 16384;
+            const maxTokens = Number(freshState.preset?.max_tokens) || 16384;
 
             const medusaResult = await MedusaService.processTurn(
                 historyLog,
-                state.card.rpg_data,
+                freshState.card.rpg_data,
                 apiKey,
                 activeEntries,
                 allEntries,
@@ -180,7 +183,7 @@ export const useChatFlow = () => {
             }
 
             if (medusaResult.success) {
-                const updatedCard = { ...state.card, rpg_data: medusaResult.newDb };
+                const updatedCard = { ...freshState.card, rpg_data: medusaResult.newDb };
                 state.setSessionData({ card: updatedCard });
                 state.updateMessage(lastModelMsg.id, { rpgState: medusaResult.newDb });
 
@@ -201,24 +204,21 @@ export const useChatFlow = () => {
                 state.setGeneratedLorebookEntries(generatedEntries);
                 
                 // Update Lifecycle for modified rows
-                const nextRuntime = { ...state.worldInfoRuntime };
+                const nextRuntime = { ...freshState.worldInfoRuntime };
                 if (medusaResult.rawActions) {
                     medusaResult.rawActions.forEach(action => {
-                        // Find Table config ID
                         const table = medusaResult.newDb.tables[action.tableIndex!];
                         if (!table) return;
                         
                         let rowId = action.rowId;
                         if (!rowId && action.type === 'INSERT' && action.data) {
-                            // Insert auto-handled by sync logic mostly
+                            // Insert auto-handled
                         } else if (action.type === 'UPDATE' && typeof action.rowIndex === 'number') {
-                            // For UPDATE, we know the row index.
                             const row = table.data.rows[action.rowIndex];
                             if (row) {
                                 const rowUuid = row[0];
                                 const uid = `mythic_${table.config.id}_${rowUuid}`;
                                 if (nextRuntime[uid]) {
-                                    // Fix: Create shallow copy before mutation to avoid read-only error
                                     nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
                                 } else {
                                     nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
@@ -250,8 +250,14 @@ export const useChatFlow = () => {
 
     // --- UNIFIED SEND MESSAGE ---
     const sendMessage = useCallback(async (text: string, options?: { forcedContent?: string }) => {
-        if (!state.card || !state.preset || !text.trim()) return;
+        // CRITICAL FIX: Always get FRESH state from store directly.
+        // This ensures that when regenerate calls deleteMessage (updating store) and then sendMessage,
+        // we use the messages list AFTER deletion, not the stale closure variable.
+        const freshState = useChatStore.getState();
 
+        if (!freshState.card || !freshState.preset || !text.trim()) return;
+
+        // Use 'state' for actions (setters are stable), use 'freshState' for reading data
         state.setError(null);
         state.setLoading(true);
         logger.startTurn();
@@ -259,14 +265,13 @@ export const useChatFlow = () => {
         const ac = new AbortController();
         state.setAbortController(ac);
 
-        // Calculate Current Turn Index (Length of history + 1 for new turn)
-        // Note: messages contains User+AI pairs. Count AI messages to get "Turns".
-        const currentTurn = countTotalTurns(state.messages) + 1;
+        // Calculate Current Turn Index based on FRESH messages
+        const currentTurn = countTotalTurns(freshState.messages) + 1;
 
-        const currentVariablesSnapshot = JSON.parse(JSON.stringify(state.variables));
-        const currentRpgSnapshot = state.card.rpg_data ? JSON.parse(JSON.stringify(state.card.rpg_data)) : undefined;
-        const currentWIRuntimeSnapshot = JSON.parse(JSON.stringify(state.worldInfoRuntime));
-        const currentWIStateSnapshot = JSON.parse(JSON.stringify(state.worldInfoState));
+        const currentVariablesSnapshot = JSON.parse(JSON.stringify(freshState.variables));
+        const currentRpgSnapshot = freshState.card.rpg_data ? JSON.parse(JSON.stringify(freshState.card.rpg_data)) : undefined;
+        const currentWIRuntimeSnapshot = JSON.parse(JSON.stringify(freshState.worldInfoRuntime));
+        const currentWIStateSnapshot = JSON.parse(JSON.stringify(freshState.worldInfoState));
         
         const userMsg = { 
             id: `u-${Date.now()}`, 
@@ -281,41 +286,50 @@ export const useChatFlow = () => {
         state.addMessage(userMsg);
 
         try {
-            // 4. Smart Scan (World Info)
+            // 4. Smart Scan (World Info) using FRESH data
             let scanResult;
             let retryScan = true;
             let forceKeywordMode = false;
 
-            const dynamicEntries = state.generatedLorebookEntries || [];
+            const dynamicEntries = freshState.generatedLorebookEntries || [];
 
             while (retryScan) {
                 try {
-                    const recentHistoryText = state.messages.slice(-3).map(m => m.content).join('\n');
+                    // Use freshState.messages (which DOES NOT include userMsg yet in the store, 
+                    // but we added it via addMessage action just now. 
+                    // WAIT: addMessage updates the store synchronously in memory (Immer).
+                    // So freshState.messages MIGHT include it if we called getState() again.
+                    // But here we use 'freshState' captured at start of function. 
+                    // Actually, let's grab latest state again for history to be super safe or just append userMsg manually.
+                    // Ideally, we append userMsg to the history passed to constructs.
+                    
+                    const messagesForScan = [...freshState.messages]; // Messages BEFORE userMsg (snapshot at start)
+                    const recentHistoryText = messagesForScan.slice(-3).map(m => m.content).join('\n');
                     
                     const textToScan = options?.forcedContent 
                         ? `${recentHistoryText}\n${text}\n${options.forcedContent}`
                         : `${recentHistoryText}\n${text}`;
                         
-                    const historyList = state.messages.map(m => m.content).slice(-3);
+                    const historyList = messagesForScan.map(m => m.content).slice(-3);
 
                     const isStoryModeChunk = !!options?.forcedContent;
                     const shouldUseKeywordMode = isStoryModeChunk || forceKeywordMode;
 
                     const effectivePreset = shouldUseKeywordMode 
-                        ? { ...state.preset, smart_scan_mode: 'keyword' as const } 
-                        : state.preset;
+                        ? { ...freshState.preset, smart_scan_mode: 'keyword' as const } 
+                        : freshState.preset;
 
                     scanResult = await scanInput(
                         textToScan, 
-                        state.worldInfoState, 
-                        state.worldInfoRuntime, 
-                        state.worldInfoPinned,
+                        freshState.worldInfoState, 
+                        freshState.worldInfoRuntime, 
+                        freshState.worldInfoPinned,
                         effectivePreset,
                         historyList, 
                         text, 
-                        state.variables,
+                        freshState.variables,
                         dynamicEntries,
-                        currentTurn // Pass Current Turn
+                        currentTurn
                     );
                     
                     retryScan = false;
@@ -337,7 +351,7 @@ export const useChatFlow = () => {
             }
             
             if (!scanResult) {
-                 scanResult = { activeEntries: [], updatedRuntimeState: state.worldInfoRuntime };
+                 scanResult = { activeEntries: [], updatedRuntimeState: freshState.worldInfoRuntime };
             }
 
             state.setSessionData({ worldInfoRuntime: scanResult.updatedRuntimeState });
@@ -346,32 +360,33 @@ export const useChatFlow = () => {
                 logger.logSmartScan(scanResult.smartScanLog.fullPrompt, scanResult.smartScanLog.rawResponse, scanResult.smartScanLog.latency);
             }
             
-            // 5. Chuẩn bị Prompt
+            // 5. Chuẩn bị Prompt using FRESH data
             let fullPrompt = "";
             
             if (!options?.forcedContent) {
                 const sessionLorebook = { name: "Session Generated", book: { entries: dynamicEntries } };
                 const effectiveLorebooks = [...lorebooks, sessionLorebook];
 
-                const { baseSections } = prepareChat(state.card, state.preset, effectiveLorebooks, state.persona);
+                const { baseSections } = prepareChat(freshState.card, freshState.preset, effectiveLorebooks, freshState.persona);
                 logger.logPrompt(baseSections); 
 
+                // Note: We append userMsg manually here to the history list from freshState
                 const constructed = await constructChatPrompt(
                     baseSections, 
-                    [...state.messages, userMsg], 
-                    state.authorNote,
-                    state.card, 
-                    state.longTermSummaries, 
-                    state.preset.summarization_chunk_size || 10,
-                    state.variables, 
-                    state.lastStateBlock, 
+                    [...freshState.messages, userMsg], 
+                    freshState.authorNote,
+                    freshState.card, 
+                    freshState.longTermSummaries, 
+                    freshState.preset.summarization_chunk_size || 10,
+                    freshState.variables, 
+                    freshState.lastStateBlock, 
                     effectiveLorebooks,
-                    state.preset.context_mode || 'standard',
-                    state.persona?.name || 'User',
-                    state.worldInfoState,
+                    freshState.preset.context_mode || 'standard',
+                    freshState.persona?.name || 'User',
+                    freshState.worldInfoState,
                     scanResult.activeEntries, 
-                    state.worldInfoPlacement,
-                    state.preset
+                    freshState.worldInfoPlacement,
+                    freshState.preset
                 );
                 fullPrompt = constructed.fullPrompt;
                 logger.logPrompt(constructed.structuredPrompt); 
@@ -386,17 +401,17 @@ export const useChatFlow = () => {
 
             // 7. Thực hiện lấy nội dung
             let accumulatedText = "";
-            let executionMode = state.card.rpg_data?.settings?.executionMode || 'standalone';
+            let executionMode = freshState.card.rpg_data?.settings?.executionMode || 'standalone';
             
             if (options?.forcedContent) {
                 accumulatedText = options.forcedContent;
                 state.updateMessage(aiMsg.id, { content: accumulatedText });
                 playNotification('ai');
             } else {
-                const shouldStream = state.preset.stream_response; 
+                const shouldStream = freshState.preset.stream_response; 
 
                 if (shouldStream) {
-                    const stream = sendChatRequestStream(fullPrompt, state.preset, ac.signal);
+                    const stream = sendChatRequestStream(fullPrompt, freshState.preset, ac.signal);
                     for await (const chunk of stream) {
                         if (ac.signal.aborted) break;
                         accumulatedText += chunk;
@@ -404,7 +419,7 @@ export const useChatFlow = () => {
                     }
                 } else {
                     state.updateMessage(aiMsg.id, { content: "..." }); 
-                    const result = await sendChatRequest(fullPrompt, state.preset);
+                    const result = await sendChatRequest(fullPrompt, freshState.preset);
                     if (!ac.signal.aborted) {
                         accumulatedText = result.response.text || "";
                         state.updateMessage(aiMsg.id, { content: accumulatedText });
@@ -422,16 +437,14 @@ export const useChatFlow = () => {
                 }
 
                 // --- INTEGRATED MODE LOGIC (1-PASS) ---
-                if (state.card.rpg_data && executionMode === 'integrated') {
-                    // In integrated mode, the AI response contains hidden tags like <tableEdit>
-                    // We parse these tags and apply them directly without calling API again.
+                if (freshState.card.rpg_data && executionMode === 'integrated') {
                     const actions = parseCustomActions(accumulatedText);
                     
                     if (actions.length > 0) {
                         logger.logSystemMessage('state', 'system', `[Integrated RPG] Detected ${actions.length} actions.`);
-                        const { newDb, notifications, logs } = applyMedusaActions(state.card.rpg_data, actions);
+                        const { newDb, notifications, logs } = applyMedusaActions(freshState.card.rpg_data, actions);
                         
-                        const updatedCard = { ...state.card, rpg_data: newDb };
+                        const updatedCard = { ...freshState.card, rpg_data: newDb };
                         state.setSessionData({ card: updatedCard });
                         state.updateMessage(aiMsg.id, { rpgState: newDb });
                         
@@ -445,15 +458,13 @@ export const useChatFlow = () => {
                             state.setRpgNotification(null);
                         }
                         
-                        // SYNC Live-Link
                         const generatedEntries = syncDatabaseToLorebook(newDb);
                         state.setGeneratedLorebookEntries(generatedEntries);
                         if (generatedEntries.length > 0) {
                             logger.logSystemMessage('state', 'system', `[Live-Link] Đồng bộ ${generatedEntries.length} mục.`);
                         }
                         
-                        // Update Lifecycle logic for Integrated Mode too
-                        const nextRuntime = { ...state.worldInfoRuntime };
+                        const nextRuntime = { ...freshState.worldInfoRuntime };
                         if (actions) {
                              actions.forEach(action => {
                                  if (action.type === 'UPDATE' && typeof action.rowIndex === 'number') {
@@ -462,7 +473,6 @@ export const useChatFlow = () => {
                                         const rowUuid = table.data.rows[action.rowIndex][0];
                                         const uid = `mythic_${table.config.id}_${rowUuid}`;
                                         if (nextRuntime[uid]) {
-                                            // Fix: Shallow copy before mutation
                                             nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
                                         }
                                         else nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
@@ -478,7 +488,7 @@ export const useChatFlow = () => {
                 }
                 
                 // --- STANDALONE MODE LOGIC (2-PASS / LEGACY) ---
-                else if (state.card.rpg_data && executionMode === 'standalone') {
+                else if (freshState.card.rpg_data && executionMode === 'standalone') {
                     logger.logSystemMessage('state', 'system', 'Mythic Engine: Đang kích hoạt Medusa (Standalone)...');
                     const apiKey = getApiKey();
                     
@@ -489,24 +499,24 @@ export const useChatFlow = () => {
                                 const mythicStartTime = Date.now();
                                 let historyLog = `User: ${text}\nGM/System: ${accumulatedText}`;
                                 
-                                if (state.messages.length <= 3) {
-                                    const greetingMsg = state.messages.find(m => m.role === 'model');
+                                if (freshState.messages.length <= 3) {
+                                    const greetingMsg = freshState.messages.find(m => m.role === 'model');
                                     if (greetingMsg && greetingMsg.content) {
                                         historyLog = `System (Context/Greeting): ${greetingMsg.content}\n\n${historyLog}`;
                                     }
                                 }
                                 
-                                let allEntries: WorldInfoEntry[] = state.card.char_book?.entries || [];
+                                let allEntries: WorldInfoEntry[] = freshState.card.char_book?.entries || [];
                                 lorebooks.forEach(lb => {
                                     if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
                                 });
 
                                 const dynamicActiveEntries = scanResult.activeEntries.filter(e => !e.constant);
-                                const maxTokens = Number(state.preset?.max_tokens) || 16384;
+                                const maxTokens = Number(freshState.preset?.max_tokens) || 16384;
 
                                 const medusaResult = await MedusaService.processTurn(
                                     historyLog,
-                                    state.card.rpg_data,
+                                    freshState.card.rpg_data,
                                     apiKey,
                                     dynamicActiveEntries,
                                     allEntries,
@@ -520,7 +530,7 @@ export const useChatFlow = () => {
                                 }
 
                                 if (medusaResult.success) {
-                                    const updatedCard = { ...state.card, rpg_data: medusaResult.newDb };
+                                    const updatedCard = { ...freshState.card, rpg_data: medusaResult.newDb };
                                     
                                     state.setSessionData({ card: updatedCard });
                                     state.updateMessage(aiMsg.id, { rpgState: medusaResult.newDb });
@@ -540,8 +550,7 @@ export const useChatFlow = () => {
                                     const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
                                     state.setGeneratedLorebookEntries(generatedEntries);
                                     
-                                    // UPDATE LIFECYCLE (Touch Rows)
-                                    const nextRuntime = { ...state.worldInfoRuntime };
+                                    const nextRuntime = { ...freshState.worldInfoRuntime };
                                     if (medusaResult.rawActions) {
                                         medusaResult.rawActions.forEach(action => {
                                             if (action.type === 'UPDATE' && typeof action.rowIndex === 'number') {
@@ -550,7 +559,6 @@ export const useChatFlow = () => {
                                                     const rowUuid = table.data.rows[action.rowIndex][0];
                                                     const uid = `mythic_${table.config.id}_${rowUuid}`;
                                                     if (nextRuntime[uid]) {
-                                                        // Fix: Shallow copy before mutation
                                                         nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
                                                     }
                                                     else nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
@@ -587,7 +595,7 @@ export const useChatFlow = () => {
                     }
                 }
 
-            } else if (!options?.forcedContent && state.preset.stream_response) {
+            } else if (!options?.forcedContent && freshState.preset.stream_response) {
                 state.updateMessage(aiMsg.id, { content: accumulatedText });
             }
 
