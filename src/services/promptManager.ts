@@ -190,6 +190,7 @@ const processEjsTemplate = async (
             getvar, 
             getwi, 
             char: card.name, 
+            user: variables.user || 'User', // Ensure user name is available in EJS
             stat_data: variables, // Inject alias for V3 compatibility
             ...variables 
         };
@@ -342,6 +343,17 @@ export async function constructChatPrompt(
         card.mes_example,
     ].filter(Boolean).join('\n\n');
 
+    // --- HELPER: Identity Replacement ---
+    // Centralized function to replace identity macros safely
+    const replaceIdentityMacros = (text: string): string => {
+        return text
+            .replace(/{{char}}/gi, card.name || '')
+            .replace(/{{user}}/gi, userPersonaName)
+            .replace(/<user>/gi, userPersonaName) // Tawa support
+            .replace(/{{user_input}}/gi, userInput)
+            .replace(/{{prompt}}/gi, userInput);
+    };
+
     // --- 1. Process World Info (Render -> Filter -> Format) ---
     const { before, after } = getActiveWorldInfoEntries(card, worldInfoState, activeEntriesOverride, worldInfoPlacement);
     const wiFormat = preset?.wi_format || '[{{keys}}: {{content}}]';
@@ -350,8 +362,9 @@ export async function constructChatPrompt(
         const results: string[] = [];
         for (const entry of entries) {
             // A. Render EJS first (Execute logic)
-            // This step might update 'variables' via side effects if the entry contains scripts
-            let renderedContent = await processEjsTemplate(entry.content, variables, card, lorebooks);
+            // Inject User Name into Variables for EJS context
+            const ejsVars = { ...variables, user: userPersonaName };
+            let renderedContent = await processEjsTemplate(entry.content, ejsVars, card, lorebooks);
             
             // B. Auto-Expansion: If content is just an Event ID, fetch the real event content
             renderedContent = await expandKeysToContent(renderedContent, variables, card, lorebooks);
@@ -359,8 +372,11 @@ export async function constructChatPrompt(
             // C. Filter: If result is empty/whitespace, discard it (Logic Controller)
             // UNLESS it is an error message we want to show for debugging
             if (!renderedContent || (!renderedContent.trim() && !renderedContent.includes('[SYSTEM ERROR'))) continue;
+            
+            // D. Replace Identity Macros in result
+            renderedContent = replaceIdentityMacros(renderedContent);
 
-            // D. Format: Apply the display format (e.g. [Key: Value])
+            // E. Format: Apply the display format (e.g. [Key: Value])
             const formatted = wiFormat
                 .replace(/{{keys}}/g, (entry.keys || []).join(', '))
                 .replace(/{{content}}/g, renderedContent.trim());
@@ -473,10 +489,6 @@ export async function constructChatPrompt(
         currentPageMessages = currentPageMessages.filter(msg => msg.role === 'model' || msg.role === 'system');
     }
 
-    const replaceHistoryMacros = (text: string) => {
-        return text.replace(/{{user}}/gi, userPersonaName).replace(/{{char}}/gi, card.name);
-    };
-
     // HELPER: Get meaningful text content (fallback to raw if display is empty)
     const getMessageContent = (msg: ChatMessage) => {
         if (msg.content && msg.content.trim()) return msg.content;
@@ -491,7 +503,7 @@ export async function constructChatPrompt(
         // Apply cleaning specifically for history injection
         const cleanText = cleanMessageContent(rawText);
         // Apply macros
-        const content = replaceHistoryMacros(cleanText);
+        const content = replaceIdentityMacros(cleanText);
         
         if (!content.trim()) return null; // Skip empty lines after cleaning
 
@@ -537,7 +549,7 @@ export async function constructChatPrompt(
         
         relevantMsgs.forEach(msg => {
              const rawText = getMessageContent(msg);
-             const content = replaceHistoryMacros(rawText);
+             const content = replaceIdentityMacros(rawText);
              
              if (content.trim()) {
                  const role = msg.role === 'user' ? userPersonaName : card.name;
@@ -571,14 +583,18 @@ export async function constructChatPrompt(
         if (content.includes('{{current_page_history}}')) addToSubSections(currentPageHistoryList);
         if (content.includes('{{last_turn}}')) addToSubSections(lastTurnList);
 
-        // --- NEW: PIPELINE ORDER (Optimized for Variable Logic) ---
-        // 1. Comments {{//...}} or {{#...}} - Remove them first
+        // --- PIPELINE ORDER (Optimized for Variable Logic & Identity) ---
+        
+        // 1. PRE-REPLACE IDENTITY (Crucial for setvar/addvar logic using names)
+        content = replaceIdentityMacros(content);
+
+        // 2. Comments {{//...}} or {{#...}} - Remove them
         content = content.replace(/{{(\/\/|#).*?}}/gi, '');
 
-        // 2. Trim Macro {{trim}} - Remove surrounding whitespace
+        // 3. Trim Macro {{trim}} - Remove surrounding whitespace
         content = content.replace(/\s*{{trim}}\s*/gi, '');
 
-        // 3. Roll/Random Macros (Moved UP so they can be used in addvar)
+        // 4. Roll/Random Macros (Moved UP so they can be used in addvar)
         const rollHandler = (_: string, countStr: string, sidesStr: string, modStr: string) => {
             const count = countStr ? parseInt(countStr, 10) : 1; 
             const sides = parseInt(sidesStr, 10);
@@ -594,7 +610,7 @@ export async function constructChatPrompt(
                              return args[Math.floor(Math.random() * args.length)].trim();
                          });
 
-        // 4. Add Variable Macro {{addvar::key::val}}
+        // 5. Add Variable Macro {{addvar::key::val}}
         // FIX: Added multiline support via [\s\S]*?
         content = content.replace(/{{addvar::([^:]+)::([\s\S]*?)}}/gi, (_, key, val) => {
             const cleanKey = key.trim();
@@ -611,7 +627,7 @@ export async function constructChatPrompt(
             return '';
         });
 
-        // 5. Set Global Variable
+        // 6. Set Global Variable
         // FIX: Added multiline support via [\s\S]*?
         content = content.replace(/{{setglobalvar::([^:]+)::([\s\S]*?)}}/gi, (_, key, val) => {
             const cleanKey = key.trim();
@@ -623,7 +639,7 @@ export async function constructChatPrompt(
             return ''; 
         });
 
-        // 6. Set Variable
+        // 7. Set Variable
         // FIX: Added multiline support via [\s\S]*?
         content = content.replace(/{{setvar::([^:]+)::([\s\S]*?)}}/gi, (_, key, val) => {
             const cleanKey = key.trim();
@@ -636,7 +652,7 @@ export async function constructChatPrompt(
             return ''; 
         });
 
-        // 7. Get Variable (Display)
+        // 8. Get Variable (Display)
         content = content.replace(/{{getvar::([^}]+)}}/gi, (_, path) => {
             const cleanPath = path.trim();
             const val = get(variables, cleanPath);
@@ -659,6 +675,7 @@ export async function constructChatPrompt(
             .replace(/{{worldInfo_before}}/g, worldInfoBeforeString)
             .replace(/{{worldInfo_after}}/g, worldInfoAfterString)
             .replace(/{{worldInfo}}/g, worldInfoCombinedString)
+            // Run standard replacements again just in case new tokens were introduced
             .replace(/{{char}}/g, card.name || '')
             .replace(/{{user}}/g, userPersonaName)
             .replace(/<user>/g, userPersonaName)
@@ -686,7 +703,13 @@ export async function constructChatPrompt(
             .replace(/{{scenario}}/g, card.scenario)
             .replace(/{{mes_example}}/g, card.mes_example);
 
-        content = await processEjsTemplate(content, variables, card, lorebooks);
+        // Run EJS with updated variables containing User Name
+        const ejsVars = { ...variables, user: userPersonaName };
+        content = await processEjsTemplate(content, ejsVars, card, lorebooks);
+        
+        // Final Identity Replace for any tokens output by EJS
+        content = replaceIdentityMacros(content);
+
         content = content.trim();
         
         if (content) {
