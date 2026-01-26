@@ -96,6 +96,11 @@ export interface RPGDatabase {
     settings?: RPGSettings;     // Cấu hình nâng cao
 }
 
+// --- SNAPSHOT SYSTEM (Fix Index Shifting) ---
+// Index 0: Table Index.
+// Index 1: Array of Row UUIDs visible to AI at that time.
+export type RpgSnapshot = string[][];
+
 // --- MEDUSA ACTIONS ---
 // AI trả về JSON này để thao tác dữ liệu
 export interface MedusaAction {

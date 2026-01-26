@@ -1,8 +1,8 @@
 
-import type { CharacterCard, SillyTavernPreset, Lorebook, WorldInfoEntry, ChatMessage, UserPersona, PromptSection } from '../types';
+import type { CharacterCard, SillyTavernPreset, Lorebook, WorldInfoEntry, ChatMessage, UserPersona, PromptSection, RpgSnapshot } from '../types';
 import ejs from 'ejs';
 import { get, applyVariableOperation } from './variableEngine';
-import { resolveMedusaMacros, DEFAULT_MEDUSA_PROMPT, filterDatabaseForContext, getHybridDatabaseView } from './medusaService';
+import { resolveMedusaMacros, DEFAULT_MEDUSA_PROMPT, filterDatabaseForContext, getHybridDatabaseView, createRpgSnapshot } from './medusaService';
 import { dispatchSystemLog } from './logBridge'; // Import logger
 
 /**
@@ -324,7 +324,7 @@ export async function constructChatPrompt(
     activeEntriesOverride?: WorldInfoEntry[],
     worldInfoPlacement?: Record<string, 'before' | 'after' | undefined>,
     preset?: SillyTavernPreset
-): Promise<{ fullPrompt: string, structuredPrompt: PromptSection[] }> {
+): Promise<{ fullPrompt: string, structuredPrompt: PromptSection[], rpgSnapshot?: RpgSnapshot }> { // Updated Return Type
 
     if (fullHistoryForThisTurn.length === 0) {
         throw new Error("Không thể tạo phản hồi cho một lịch sử trống.");
@@ -355,8 +355,32 @@ export async function constructChatPrompt(
     };
 
     // --- 1. Process World Info (Render -> Filter -> Format) ---
+    // STEP 1: Get ALL active entries (including Mythic Live-Links)
     const { before, after } = getActiveWorldInfoEntries(card, worldInfoState, activeEntriesOverride, worldInfoPlacement);
     const wiFormat = preset?.wi_format || '[{{keys}}: {{content}}]';
+
+    // --- MYTHIC HYBRID TABLE PREP (NEW - STEP 2) ---
+    // We use the FULL set of active entries (including mythic_) to build the table context.
+    // This allows the table to know which rows should be "Visible" (not dormant).
+    let rpgHybridTableString = '';
+    let rpgSnapshot: RpgSnapshot | undefined; // Store the snapshot here
+
+    if (card.rpg_data) {
+        // Filter DB based on active WI (Live-Link pruning)
+        const allActiveEntries = [...before, ...after];
+        const filteredDb = filterDatabaseForContext(card.rpg_data, allActiveEntries);
+        // Generate View
+        rpgHybridTableString = getHybridDatabaseView(filteredDb);
+        // Generate Snapshot for Action Parsing
+        rpgSnapshot = createRpgSnapshot(filteredDb);
+    }
+    // ------------------------------------
+
+    // --- STEP 3: FILTER OUT LIVE-LINKS FOR WORLD INFO STRING ---
+    // Now we remove 'mythic_*' entries from the lists that will be rendered into {{worldInfo}}.
+    // This prevents duplication since they are already in the Table above.
+    const cleanBefore = before.filter(e => !e.uid?.startsWith('mythic_'));
+    const cleanAfter = after.filter(e => !e.uid?.startsWith('mythic_'));
 
     const processEntryList = async (entries: WorldInfoEntry[]): Promise<string[]> => {
         const results: string[] = [];
@@ -386,9 +410,9 @@ export async function constructChatPrompt(
         return results;
     };
 
-    // Processing WI lists triggers any scripts within them (like @@preprocessing)
-    const worldInfoBeforeList = await processEntryList(before);
-    const worldInfoAfterList = await processEntryList(after);
+    // Processing clean lists (no mythic)
+    const worldInfoBeforeList = await processEntryList(cleanBefore);
+    const worldInfoAfterList = await processEntryList(cleanAfter);
     const worldInfoCombinedList = [...worldInfoBeforeList, ...worldInfoAfterList];
 
     const worldInfoBeforeString = worldInfoBeforeList.join('\n');
@@ -432,22 +456,11 @@ export async function constructChatPrompt(
     const mythicBlock = mythicStateString ? `<MythicDatabase>\n${mythicStateString}\n</MythicDatabase>` : '';
     // -------------------------------
     
-    // --- MYTHIC HYBRID TABLE PREP (NEW) ---
-    let rpgHybridTableString = '';
-    if (card.rpg_data) {
-        // Filter DB based on active WI (Live-Link pruning)
-        const allActiveEntries = [...before, ...after];
-        const filteredDb = filterDatabaseForContext(card.rpg_data, allActiveEntries);
-        // Generate View
-        rpgHybridTableString = getHybridDatabaseView(filteredDb);
-    }
-    // ------------------------------------
-
     // --- INTEGRATED MODE PREP (NEW) ---
     let mythicIntegratedString = "";
     if (card.rpg_data?.settings?.executionMode === 'integrated' && card.rpg_data) {
         // Resolve Medusa Prompt using medusaService logic
-        // Use filtered DB context
+        // Use filtered DB context (and pass implicit snapshot logic later)
         const filteredDb = filterDatabaseForContext(card.rpg_data, activeEntriesOverride || []);
         
         // Prepare context strings for macros
@@ -456,9 +469,6 @@ export async function constructChatPrompt(
         const rawSystemPrompt = card.rpg_data.settings.customSystemPrompt || DEFAULT_MEDUSA_PROMPT;
         
         mythicIntegratedString = resolveMedusaMacros(rawSystemPrompt, filteredDb, "", lorebookContext);
-        
-        // Removed hardcoded system note here as per user request.
-        // The user is responsible for adding instructions in their Preset/Prompt.
     }
     // ----------------------------------
 
@@ -719,5 +729,5 @@ export async function constructChatPrompt(
 
     const fullPrompt = resolvedSections.map(s => s.content).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
     
-    return { fullPrompt, structuredPrompt: resolvedSections };
+    return { fullPrompt, structuredPrompt: resolvedSections, rpgSnapshot }; // Return snapshot
 }

@@ -1,5 +1,6 @@
+
 import { GoogleGenAI } from "@google/genai";
-import type { RPGDatabase, MedusaAction, MedusaResult } from '../types/rpg';
+import type { RPGDatabase, MedusaAction, MedusaResult, RpgSnapshot } from '../types/rpg';
 import type { WorldInfoEntry } from '../types';
 import { parseLooseJson } from '../utils';
 import { getConnectionSettings, getProxyForTools } from './settingsService';
@@ -182,6 +183,25 @@ export const getHybridDatabaseView = (db: RPGDatabase): string => {
     return output;
 };
 
+// --- NEW: Create Snapshot (Extract UUIDs from Filtered DB) ---
+export const createRpgSnapshot = (db: RPGDatabase): RpgSnapshot => {
+    const snapshot: RpgSnapshot = [];
+    
+    db.tables.forEach(table => {
+        const rowUids: string[] = [];
+        if (table.data.rows) {
+            table.data.rows.forEach(row => {
+                if (row.length > 0) {
+                    rowUids.push(row[0]); // UUID is always at index 0
+                }
+            });
+        }
+        snapshot.push(rowUids);
+    });
+
+    return snapshot;
+};
+
 export const resolveMedusaMacros = (prompt: string, db: RPGDatabase, historyLog: string, lorebookContext: string): string => {
     const schemaStr = getDatabaseSchema(db);
     const dataStr = getDatabaseData(db);
@@ -228,7 +248,7 @@ export const filterDatabaseForContext = (db: RPGDatabase, activeChatEntries: Wor
 };
 
 // UPDATED: Now accepts optional contextDb to map View Index -> Real Row UUID
-export const parseCustomActions = (rawText: string, contextDb?: RPGDatabase): MedusaAction[] => {
+export const parseCustomActions = (rawText: string, snapshot?: RpgSnapshot): MedusaAction[] => {
     const actions: MedusaAction[] = [];
     const editBlockMatch = rawText.match(/<tableEdit>([\s\S]*?)<\/tableEdit>/);
     if (!editBlockMatch) return [];
@@ -305,17 +325,17 @@ export const parseCustomActions = (rawText: string, contextDb?: RPGDatabase): Me
         const tableIndex = getNextNumber();
         if (tableIndex === null) continue;
 
-        // ID MAPPING LOGIC: Resolve UUID from View Context if available
-        const getRowIdFromContext = (tblIdx: number, rowIdx: number): string | undefined => {
-            if (!contextDb || !contextDb.tables[tblIdx]) return undefined;
-            const row = contextDb.tables[tblIdx].data.rows[rowIdx];
-            return row ? row[0] : undefined; // Row[0] is always UUID
+        // ID MAPPING LOGIC: Resolve UUID from SNAPSHOT if available
+        const getRowIdFromSnapshot = (tblIdx: number, rowIdx: number): string | undefined => {
+            if (!snapshot || !snapshot[tblIdx]) return undefined;
+            // The snapshot contains simple string[] of row UUIDs visible at time of prompt
+            return snapshot[tblIdx][rowIdx]; 
         };
 
         if (command === 'deleteRow') {
             const rowIndex = getNextNumber();
             if (rowIndex !== null) {
-                const rowId = getRowIdFromContext(tableIndex, rowIndex);
+                const rowId = getRowIdFromSnapshot(tableIndex, rowIndex);
                 actions.push({ type: 'DELETE', tableIndex, rowIndex, rowId });
             }
         } else if (command === 'insertRow') {
@@ -330,7 +350,7 @@ export const parseCustomActions = (rawText: string, contextDb?: RPGDatabase): Me
             if (rowIndex !== null) {
                 const result = extractJson(content, currentPos);
                 if (result) {
-                    const rowId = getRowIdFromContext(tableIndex, rowIndex);
+                    const rowId = getRowIdFromSnapshot(tableIndex, rowIndex);
                     actions.push({ type: 'UPDATE', tableIndex, rowIndex, data: result.json, rowId });
                     currentPos = result.endPos;
                 }
@@ -360,17 +380,17 @@ export const applyMedusaActions = (
                 return;
             }
 
-            // ID MAPPING RESOLUTION
-            // If action has a specific rowId (UUID), find the REAL index in the full DB.
+            // ID MAPPING RESOLUTION (CRITICAL FIX)
+            // If action has a specific rowId (UUID resolved from snapshot), find the REAL index in the full DB.
             let targetRowIndex = action.rowIndex;
             if (action.rowId) {
                 const realIndex = table.data.rows.findIndex(r => r[0] === action.rowId);
                 if (realIndex !== -1) {
                     targetRowIndex = realIndex;
                 } else {
-                    // ID not found (maybe deleted concurrently?), fallback to index or abort?
-                    // Aborting is safer to prevent modifying wrong row.
-                    logs.push(`[WARN] Row ID ${action.rowId} not found in table. Operation skipped.`);
+                    // ID not found (maybe deleted concurrently or auto-pruned?)
+                    // Aborting is safer to prevent modifying wrong row (index shifting).
+                    logs.push(`[WARN] Row ID ${action.rowId} not found in table. Operation skipped to prevent data corruption.`);
                     return; 
                 }
             }
@@ -556,6 +576,12 @@ export const MedusaService = {
         // Only send rows relevant to Active Live-Links to save tokens
         const filteredDb = filterDatabaseForContext(database, activeChatEntries);
 
+        // --- SNAPSHOT CREATION ---
+        // Create a map of indices to UUIDs to be used when parsing the response
+        // Note: This snapshot is implicit in standalone mode because we use `filteredDb` to parse actions
+        // In standalone mode, we pass filteredDb directly to parseCustomActions.
+        // -------------------------
+
         const rawSystemPrompt = database.settings?.customSystemPrompt || DEFAULT_MEDUSA_PROMPT;
         // Use filteredDb for prompt resolution
         const resolvedSystemPrompt = resolveMedusaMacros(rawSystemPrompt, filteredDb, historyLog, lorebookContext);
@@ -590,8 +616,12 @@ export const MedusaService = {
             const thinkMatch = rawText.match(/<tableThink>([\s\S]*?)<\/tableThink>/);
             const thinkContent = thinkMatch ? thinkMatch[1].replace(/<!--|-->/g, '').trim() : "No thinking data.";
             
-            // Pass filteredDb to parser to enable ID mapping
-            const actions = parseCustomActions(rawText, filteredDb);
+            // Pass the snapshot (derived from filteredDb) to parser
+            // Actually, parseCustomActions takes snapshot or contextDb. 
+            // In standalone mode, we have `filteredDb` which matches exactly what AI sees.
+            // So we can extract snapshot from it.
+            const snapshot = createRpgSnapshot(filteredDb);
+            const actions = parseCustomActions(rawText, snapshot);
 
             if (actions.length === 0) {
                 return {
@@ -607,6 +637,7 @@ export const MedusaService = {
 
             if (actions.length > 0) {
                 // Apply actions to the FULL original database (since we want to save changes to the real DB)
+                // The actions now contain rowId (UUID) so applying to full DB works correctly regardless of indexing
                 const { newDb, notifications, logs } = applyMedusaActions(database, actions);
                 logs.unshift(`[Thinking]: ${thinkContent.substring(0, 200)}...`);
                 

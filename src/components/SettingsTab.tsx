@@ -73,14 +73,9 @@ export const SettingsTab: React.FC = () => {
                     )
                 )}
                 {activeSubTab === 'smartscan' && (
-                    activePreset ? (
-                        <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-2xl mx-auto">
-                            <h3 className="text-xl font-bold text-sky-400 mb-4">Cấu hình Quét Thông Minh (Preset: {activePreset.name})</h3>
-                            <SmartScanSettings preset={activePreset} onUpdate={updateActivePreset} />
-                        </div>
-                    ) : (
-                         <div className="text-center text-slate-500 p-8">Vui lòng chọn một Preset đang hoạt động để cấu hình tính năng này.</div>
-                    )
+                    <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-2xl mx-auto">
+                        <SmartScanSettings />
+                    </div>
                 )}
                 {activeSubTab === 'context' && (
                     activePreset ? (

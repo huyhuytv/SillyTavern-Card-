@@ -4,7 +4,7 @@ import { immer } from 'zustand/middleware/immer';
 import type { 
     ChatMessage, CharacterCard, SillyTavernPreset, UserPersona, 
     VisualState, WorldInfoRuntimeStats, SystemLogEntry, ChatTurnLog, 
-    QuickReply, ScriptButton, SummaryQueueItem, WorldInfoEntry, RPGDatabase, NetworkLogEntry
+    QuickReply, ScriptButton, SummaryQueueItem, WorldInfoEntry, RPGDatabase, NetworkLogEntry, RpgSnapshot
 } from '../types';
 // IMPORT SYNC LOGIC
 import { syncDatabaseToLorebook } from '../services/medusaService'; 
@@ -38,6 +38,8 @@ interface ChatState {
     rpgNotification: string | null;
     // NEW: Generated Lorebook Entries
     generatedLorebookEntries: WorldInfoEntry[];
+    // NEW: Snapshot for Index Mapping
+    rpgSnapshot?: RpgSnapshot;
 
     visualState: VisualState;
     quickReplies: QuickReply[];

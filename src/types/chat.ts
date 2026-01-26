@@ -3,7 +3,7 @@
 
 import type { VisualState, WorldInfoRuntimeStats, SummaryQueueItem, ChatTurnLog, SystemLogEntry, NetworkLogEntry } from './app';
 import type { WorldInfoEntry } from './character';
-import type { RPGDatabase } from './rpg';
+import type { RPGDatabase, RpgSnapshot } from './rpg';
 
 export interface ChatMessage {
     id: string;
@@ -49,6 +49,10 @@ export interface ChatSession {
     // --- MYTHIC ENGINE STATE ---
     rpgState?: RPGDatabase; // Stores the current state of RPG tables
     // -------------------------
+
+    // --- SNAPSHOT SYSTEM (Fix Index Shifting) ---
+    rpgSnapshot?: RpgSnapshot; // Stores the mapping of [Index -> UUID] for the current/last request
+    // --------------------------------------------
 
     // --- LIVE LINK (Generated Lore) ---
     generatedLorebookEntries?: WorldInfoEntry[]; // Entries created by Mythic Engine for this session

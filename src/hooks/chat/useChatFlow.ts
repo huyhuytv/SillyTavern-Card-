@@ -251,8 +251,6 @@ export const useChatFlow = () => {
     // --- UNIFIED SEND MESSAGE ---
     const sendMessage = useCallback(async (text: string, options?: { forcedContent?: string }) => {
         // CRITICAL FIX: Always get FRESH state from store directly.
-        // This ensures that when regenerate calls deleteMessage (updating store) and then sendMessage,
-        // we use the messages list AFTER deletion, not the stale closure variable.
         const freshState = useChatStore.getState();
 
         if (!freshState.card || !freshState.preset || !text.trim()) return;
@@ -295,15 +293,7 @@ export const useChatFlow = () => {
 
             while (retryScan) {
                 try {
-                    // Use freshState.messages (which DOES NOT include userMsg yet in the store, 
-                    // but we added it via addMessage action just now. 
-                    // WAIT: addMessage updates the store synchronously in memory (Immer).
-                    // So freshState.messages MIGHT include it if we called getState() again.
-                    // But here we use 'freshState' captured at start of function. 
-                    // Actually, let's grab latest state again for history to be super safe or just append userMsg manually.
-                    // Ideally, we append userMsg to the history passed to constructs.
-                    
-                    const messagesForScan = [...freshState.messages]; // Messages BEFORE userMsg (snapshot at start)
+                    const messagesForScan = [...freshState.messages]; 
                     const recentHistoryText = messagesForScan.slice(-3).map(m => m.content).join('\n');
                     
                     const textToScan = options?.forcedContent 
@@ -362,7 +352,8 @@ export const useChatFlow = () => {
             
             // 5. Chuẩn bị Prompt using FRESH data
             let fullPrompt = "";
-            
+            let generatedRpgSnapshot;
+
             if (!options?.forcedContent) {
                 const sessionLorebook = { name: "Session Generated", book: { entries: dynamicEntries } };
                 const effectiveLorebooks = [...lorebooks, sessionLorebook];
@@ -389,6 +380,7 @@ export const useChatFlow = () => {
                     freshState.preset
                 );
                 fullPrompt = constructed.fullPrompt;
+                generatedRpgSnapshot = constructed.rpgSnapshot;
                 logger.logPrompt(constructed.structuredPrompt); 
             }
 
@@ -396,6 +388,11 @@ export const useChatFlow = () => {
             const aiMsg = createPlaceholderMessage('model');
             aiMsg.rpgState = currentRpgSnapshot;
             aiMsg.worldInfoRuntime = scanResult.updatedRuntimeState; 
+            
+            // --- FIX: ATTACH SNAPSHOT TO MESSAGE ---
+            // Gắn snapshot vào tin nhắn ngay lập tức để dùng cho việc phân tích hành động sau này
+            // Điều này đảm bảo tính nhất quán kể cả khi user sửa DB trong lúc AI đang chạy
+            aiMsg.rpgSnapshot = generatedRpgSnapshot; 
             
             state.addMessage(aiMsg);
 
@@ -429,6 +426,24 @@ export const useChatFlow = () => {
 
             // 8. Xử lý hậu kỳ & Mythic Engine
             if (!ac.signal.aborted) {
+
+                // --- SAFETY VALVE (VAN AN TOÀN) ---
+                // Kiểm tra tính toàn vẹn của phản hồi trước khi cập nhật RPG.
+                const cleanResponse = accumulatedText ? accumulatedText.trim() : "";
+                // Đếm số từ (tách theo khoảng trắng)
+                const wordCount = cleanResponse.split(/\s+/).filter(w => w.length > 0).length;
+
+                // Điều kiện chặn:
+                // 1. Rỗng hoàn toàn (Lỗi Safety Filter phổ biến nhất).
+                // 2. Hoặc: Dưới 100 ký tự VÀ dưới 10 từ (Lỗi ngữ nghĩa hoặc câu trả lời rác, hoặc AI từ chối).
+                // Ngưỡng này cho phép các câu trả lời ngắn như "Tôi đồng ý." (3 từ, ~12 ký tự) nếu bạn muốn,
+                // nhưng yêu cầu của bạn là "khoảng 10 từ hoặc 100 ký tự". Tôi sẽ chặn nếu KHÔNG ĐẠT CẢ HAI.
+                // Tức là: Phải >= 100 chars HOẶC >= 10 từ mới được coi là Valid cho RPG.
+                if (!cleanResponse || (cleanResponse.length < 100 && wordCount < 10)) {
+                    throw new Error(`Phản hồi AI quá ngắn hoặc rỗng (${cleanResponse.length} ký tự / ${wordCount} từ). Hủy bỏ cập nhật Mythic Engine để bảo vệ dữ liệu.`);
+                }
+                // ----------------------------------
+
                 await processAIResponse(accumulatedText, aiMsg.id);
                 logger.logResponse(accumulatedText);
                 
@@ -436,9 +451,13 @@ export const useChatFlow = () => {
                     playNotification('ai');
                 }
 
+                // Retrieve snapshot FROM THE MESSAGE, NOT global state
+                const snapshotForAction = aiMsg.rpgSnapshot;
+
                 // --- INTEGRATED MODE LOGIC (1-PASS) ---
                 if (freshState.card.rpg_data && executionMode === 'integrated') {
-                    const actions = parseCustomActions(accumulatedText);
+                    // Pass snapshot to parser
+                    const actions = parseCustomActions(accumulatedText, snapshotForAction);
                     
                     if (actions.length > 0) {
                         logger.logSystemMessage('state', 'system', `[Integrated RPG] Detected ${actions.length} actions.`);
@@ -467,11 +486,12 @@ export const useChatFlow = () => {
                         const nextRuntime = { ...freshState.worldInfoRuntime };
                         if (actions) {
                              actions.forEach(action => {
-                                 if (action.type === 'UPDATE' && typeof action.rowIndex === 'number') {
-                                    const table = newDb.tables[action.tableIndex!];
-                                    if (table && table.data.rows[action.rowIndex]) {
-                                        const rowUuid = table.data.rows[action.rowIndex][0];
-                                        const uid = `mythic_${table.config.id}_${rowUuid}`;
+                                 // action.rowId is resolved via snapshot inside parseCustomActions now
+                                 // So we can use it to update lifecycle
+                                 if (action.type === 'UPDATE' && action.rowId && typeof action.tableIndex === 'number') {
+                                    const table = newDb.tables[action.tableIndex];
+                                    if (table) {
+                                        const uid = `mythic_${table.config.id}_${action.rowId}`;
                                         if (nextRuntime[uid]) {
                                             nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
                                         }
@@ -489,6 +509,7 @@ export const useChatFlow = () => {
                 
                 // --- STANDALONE MODE LOGIC (2-PASS / LEGACY) ---
                 else if (freshState.card.rpg_data && executionMode === 'standalone') {
+                    
                     logger.logSystemMessage('state', 'system', 'Mythic Engine: Đang kích hoạt Medusa (Standalone)...');
                     const apiKey = getApiKey();
                     
@@ -530,6 +551,7 @@ export const useChatFlow = () => {
                                 }
 
                                 if (medusaResult.success) {
+                                    // ... (Success handling) ...
                                     const updatedCard = { ...freshState.card, rpg_data: medusaResult.newDb };
                                     
                                     state.setSessionData({ card: updatedCard });
@@ -553,12 +575,12 @@ export const useChatFlow = () => {
                                     const nextRuntime = { ...freshState.worldInfoRuntime };
                                     if (medusaResult.rawActions) {
                                         medusaResult.rawActions.forEach(action => {
-                                            if (action.type === 'UPDATE' && typeof action.rowIndex === 'number') {
+                                            // Standalone Medusa uses rowId mapping internally in processTurn logic
+                                            if (action.type === 'UPDATE' && action.rowId && typeof action.tableIndex === 'number') {
                                                 const table = medusaResult.newDb.tables[action.tableIndex!];
-                                                if (table && table.data.rows[action.rowIndex]) {
-                                                    const rowUuid = table.data.rows[action.rowIndex][0];
-                                                    const uid = `mythic_${table.config.id}_${rowUuid}`;
-                                                    if (nextRuntime[uid]) {
+                                                if (table) {
+                                                    const uid = `mythic_${table.config.id}_${action.rowId}`;
+                                                     if (nextRuntime[uid]) {
                                                         nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
                                                     }
                                                     else nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };

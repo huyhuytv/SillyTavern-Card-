@@ -69,6 +69,10 @@ const checkKeyMatch = (key: string, text: string, useRegex: boolean): boolean =>
  * 2. Live-Link Lifecycle: Prune if inactive > 10 turns, unless woken by Smart Scan or Keyword.
  * 3. Primary Keys: OR logic (at least one must match).
  * 4. Secondary Keys: If present, OR logic (at least one must match).
+ * 
+ * UPDATE (Smart Scan & Keep-Alive):
+ * - AI Override: If AI selects an entry, it bypasses dormancy check.
+ * - Keep-Alive: If matched (by AI or Keyword), it gets added to touchedUids for timestamp refresh.
  */
 const scanEntries = (
     text: string, 
@@ -76,7 +80,8 @@ const scanEntries = (
     manualState: Record<string, boolean> = {},
     runtimeState: Record<string, WorldInfoRuntimeStats> = {},
     currentTurn: number = 0,
-    aiActiveUids: Set<string> = new Set()
+    aiActiveUids: Set<string> = new Set(),
+    keywordEnabled: boolean = true // NEW PARAMETER: Controls whether keyword matching runs
 ): { matchedEntries: WorldInfoEntry[], touchedUids: Set<string> } => {
     
     const matchedEntries: WorldInfoEntry[] = [];
@@ -86,8 +91,6 @@ const scanEntries = (
         if (!entry.uid) continue;
         
         // 1. Check Enabled State (Manual Override > Card Default)
-        // BUG FIX: Previously only checked `manualState !== false`. 
-        // Now checks: If manual override exists, use it. Else, use entry.enabled default.
         const isEnabled = manualState[entry.uid] !== undefined
             ? manualState[entry.uid]
             : entry.enabled !== false;
@@ -96,8 +99,13 @@ const scanEntries = (
 
         const stats = runtimeState[entry.uid] || { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: undefined };
 
-        // 2. Check Runtime Cooldown
-        if (stats.cooldownDuration > 0) continue;
+        // [LOGIC #4 - AI OVERRIDE]
+        // Check if AI explicitly selected this entry
+        const isAiSelected = aiActiveUids.has(entry.uid);
+
+        // 2. Check Runtime Cooldown (Updated Logic: AI Override Cooldown)
+        // If AI selected it, we ignore cooldown. If purely keyword, we respect cooldown.
+        if (!isAiSelected && stats.cooldownDuration > 0) continue;
 
         // 3. Constant entries always match immediately
         if (entry.constant) {
@@ -114,32 +122,36 @@ const scanEntries = (
             const lastActive = stats.lastActiveTurn !== undefined ? stats.lastActiveTurn : currentTurn;
             const inactivityAge = currentTurn - lastActive;
             
-            if (inactivityAge > 10) {
+            // Only consider it dormant if age > 10 AND AI didn't just select it
+            if (inactivityAge > 10 && !isAiSelected) {
                 isDormant = true;
             }
         }
 
-        // Triggers that can wake up a Dormant entry:
-        // A. AI Smart Scan explicitly selected it
-        const isAiSelected = aiActiveUids.has(entry.uid);
+        // [LOGIC CHECK]
+        // Triggers that can wake up or maintain an entry:
+        // A. AI Smart Scan (isAiSelected) -> Already handled in dormancy check above (forces isDormant = false)
+        // B. Keyword Match (Only if keywordEnabled is true)
         
-        // B. Keyword Match
         let isKeywordMatched = false;
-        const hasPrimaryKeys = entry.keys && entry.keys.length > 0;
         
-        if (hasPrimaryKeys) {
-            for (const keyStr of entry.keys) {
-                if (checkKeyMatch(keyStr, text, !!entry.use_regex)) {
-                    isKeywordMatched = true;
-                    break; 
+        // Only run keyword logic if enabled for this scan
+        if (keywordEnabled) {
+            const hasPrimaryKeys = entry.keys && entry.keys.length > 0;
+            
+            if (hasPrimaryKeys) {
+                for (const keyStr of entry.keys) {
+                    if (checkKeyMatch(keyStr, text, !!entry.use_regex)) {
+                        isKeywordMatched = true;
+                        break; 
+                    }
                 }
             }
         }
 
         // Logic Decision:
-        // - If Dormant AND NOT Triggered (AI or Keyword) -> Skip (Pruned)
-        // - If Dormant AND Triggered -> Wake Up (Include & Update TS)
-        // - If Not Dormant -> Check keywords normally (if not AI selected)
+        // - If Dormant: Skip (Pruned), unless isAiSelected (which forced isDormant=false)
+        // - If Not Dormant: Include if (AI Selected OR Keyword Match)
         
         let shouldInclude = false;
 
@@ -159,28 +171,16 @@ const scanEntries = (
                     }
                 }
             }
-            if (secondaryMatch) shouldInclude = true;
-        }
-
-        // Final Filter based on Dormancy
-        if (isDormant && !shouldInclude) {
-            continue; // Pruned
-        }
-
-        // If not dormant, but also not triggered (and not AI selected), standard logic applies
-        if (!isDormant && !shouldInclude) {
-            if (isLiveLink && !isDormant) {
-                // Keep live links active if they haven't timed out yet
-                shouldInclude = true; 
+            if (secondaryMatch && !isDormant) {
+                shouldInclude = true;
             }
         }
 
         if (shouldInclude) {
             matchedEntries.push(entry);
-            // If triggered by interaction (AI or Keyword), mark as touched to update timestamp
-            if (isAiSelected || isKeywordMatched) {
-                touchedUids.add(entry.uid);
-            }
+            // [LOGIC #1 - KEEP-ALIVE PULSE]
+            // Mark as touched to update timestamp, ensuring it stays alive for next turns
+            touchedUids.add(entry.uid);
         }
     }
 
@@ -189,10 +189,15 @@ const scanEntries = (
 
 /**
  * Helper to prepare lorebook data payload for AI Smart Scan.
- * Truncates content to 300 chars start + 100 chars end.
+ * Truncates content based on strategy.
  * Splits into 'contextString' (Constants) and 'candidateString' (Candidates).
  */
-export const prepareLorebookForAI = (entries: WorldInfoEntry[], currentTurn: number, runtimeState: Record<string, WorldInfoRuntimeStats>): { contextString: string, candidateString: string } => {
+export const prepareLorebookForAI = (
+    entries: WorldInfoEntry[], 
+    currentTurn: number, 
+    runtimeState: Record<string, WorldInfoRuntimeStats>,
+    strategy: 'efficient' | 'full' = 'efficient' // Added strategy param
+): { contextString: string, candidateString: string } => {
     const contextParts: string[] = [];
     const candidateParts: string[] = [];
 
@@ -200,9 +205,21 @@ export const prepareLorebookForAI = (entries: WorldInfoEntry[], currentTurn: num
         if (!entry.uid || entry.enabled === false) return;
 
         let content = entry.content || '';
-        if (content.length > 400) {
-            content = content.slice(0, 300) + "\n... (đã lược bỏ) ...\n" + content.slice(-100);
+        
+        if (strategy === 'efficient') {
+            // EFFICIENT MODE: Truncate at 400 chars to save tokens
+            if (content.length > 400) {
+                content = content.slice(0, 300) + "\n... (đã lược bỏ) ...\n" + content.slice(-100);
+            }
+        } else {
+            // FULL MODE: High Accuracy
+            // Still enforce a safety limit to prevent browser/API crash on massive entries
+            const SAFETY_LIMIT = 20000;
+            if (content.length > SAFETY_LIMIT) {
+                content = content.slice(0, SAFETY_LIMIT) + "\n... (đã lược bỏ vì quá lớn > 20k) ...";
+            }
         }
+        
         content = content.replace(/\n/g, ' ');
         
         // Determine status for AI context
@@ -244,7 +261,8 @@ export const performWorldInfoScan = (
     pinnedState: Record<string, boolean> = {},
     aiActiveUids: string[] = [], 
     bypassKeywordScan: boolean = false,
-    currentTurn: number = 0 // Lifecycle Tracking
+    currentTurn: number = 0, // Lifecycle Tracking
+    aiStickyDuration: number = 0 // NEW: Global Override for AI triggered entries
 ): { activeEntries: WorldInfoEntry[]; updatedRuntimeState: Record<string, WorldInfoRuntimeStats> } => {
     
     const MAX_DEPTH = 2;
@@ -279,16 +297,20 @@ export const performWorldInfoScan = (
         }
     }
     
-    // D. AI-Activated (Add to Touched to refresh 10-turn timer)
+    // D. AI-Activated
+    // Note: We delegate the actual inclusion logic to scanEntries so it handles touchedUids correctly.
+    // However, for pure AI selection without keyword scan (ai_only mode), we ensure they are added here.
     aiActiveUids.forEach(uid => {
         if (manualState[uid] !== false) {
-            activeUidSet.add(uid);
-            touchedUidSet.add(uid); 
+            // AI selections are automatically considered "Touched"
+            touchedUidSet.add(uid);
         }
     });
 
     // E. Keyword Scan + Lifecycle Check
-    if (!bypassKeywordScan) {
+    // We run the loop even if bypassKeywordScan is true, to process AI active items (recursively if needed)
+    // AND to handle the Lifecycle pruning via scanEntries
+    if (!bypassKeywordScan || aiActiveUids.length > 0) {
         let textBuffer = textToScan;
         
         while (currentDepth <= MAX_DEPTH) {
@@ -298,7 +320,8 @@ export const performWorldInfoScan = (
                 manualState, 
                 currentRuntimeState,
                 currentTurn,
-                aiUidSet
+                aiUidSet,
+                !bypassKeywordScan // Pass keywordEnabled flag: False if bypassing
             );
             
             let hasNew = false;
@@ -307,7 +330,7 @@ export const performWorldInfoScan = (
             for (const entry of matchedEntries) {
                 if (!entry.uid) continue;
                 
-                // Track touched (interacted) entries
+                // Track touched (interacted) entries for Keep-Alive Pulse
                 if (scanTouched.has(entry.uid)) {
                     touchedUidSet.add(entry.uid);
                 }
@@ -347,15 +370,35 @@ export const performWorldInfoScan = (
             nextRuntimeState[entry.uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
         }
 
-        // Update 10-turn Lifecycle if Touched (Interacted/Triggered)
+        // [LOGIC #1 - KEEP-ALIVE PULSE APPLICATION]
+        // If entry was Touched (via AI selection or Keyword Match), update its timestamp to NOW.
+        // This resets the 10-turn death timer.
         if (touchedUidSet.has(entry.uid)) {
             nextRuntimeState[entry.uid].lastActiveTurn = currentTurn;
         }
 
-        // Standard Sticky/Cooldown
-        if (entry.sticky && entry.sticky > 0) {
-            nextRuntimeState[entry.uid].stickyDuration = entry.sticky;
+        // [LOGIC #2 - STICKY APPLICATION WITH AI OVERRIDE]
+        // Determine base sticky from card
+        const cardSticky = entry.sticky && entry.sticky > 0 ? entry.sticky : 0;
+        
+        let finalSticky = cardSticky;
+
+        // If triggered by AI, apply Max Safe logic: Max(Card, App)
+        // Note: aiStickyDuration comes from Global Settings passed into this function
+        if (aiUidSet.has(entry.uid) && aiStickyDuration > 0) {
+            finalSticky = Math.max(cardSticky, aiStickyDuration);
         }
+
+        // Only apply if greater than current remaining duration to extend it
+        if (finalSticky > 0) {
+             // Logic: Refresh sticky duration to max if triggered this turn
+             // We only set it if it was touched this turn
+             if (touchedUidSet.has(entry.uid)) {
+                 nextRuntimeState[entry.uid].stickyDuration = Math.max(nextRuntimeState[entry.uid].stickyDuration, finalSticky);
+             }
+        }
+        
+        // Cooldown application (Standard)
         if (entry.cooldown && entry.cooldown > 0) {
              nextRuntimeState[entry.uid].cooldownDuration = entry.cooldown;
         }

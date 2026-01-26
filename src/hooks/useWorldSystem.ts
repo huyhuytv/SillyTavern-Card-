@@ -5,6 +5,7 @@ import { performWorldInfoScan, prepareLorebookForAI } from '../services/worldInf
 import { processVariableUpdates } from '../services/variableEngine';
 import { processWithRegex } from '../services/regexService';
 import { scanWorldInfoWithAI } from '../services/geminiService';
+import { getGlobalSmartScanSettings } from '../services/settingsService'; // Import Global Settings
 
 export interface WorldSystemResult {
     // Updated to be async to support AI calls
@@ -46,13 +47,16 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
         worldInfoState: Record<string, boolean>,
         worldInfoRuntime: Record<string, WorldInfoRuntimeStats>,
         worldInfoPinned: Record<string, boolean>,
-        preset?: SillyTavernPreset,
+        preset?: SillyTavernPreset, // Legacy arg, mostly ignored for smart scan now
         historyForScan: string[] = [],
         latestInput: string = '',
         variables: Record<string, any> = {},
         dynamicEntries: WorldInfoEntry[] = [],
         currentTurnIndex: number = 0 // Default 0
     ) => {
+        // FETCH GLOBAL SETTINGS
+        const globalSettings = getGlobalSmartScanSettings();
+
         // MERGE LOGIC: Combine static entries from card with dynamic entries from RPG
         const staticEntries = card?.char_book?.entries || [];
         const allEntries = [...staticEntries, ...dynamicEntries];
@@ -60,9 +64,9 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
         let aiActiveUids: string[] = [];
         let smartScanLogData;
 
-        // Determine Mode
-        const mode = preset?.smart_scan_mode || (preset?.smart_scan_enabled ? 'hybrid' : 'keyword');
-        const isAiEnabled = mode === 'hybrid' || mode === 'ai_only';
+        // Determine Mode from GLOBAL SETTINGS
+        const mode = globalSettings.mode || 'keyword';
+        const isAiEnabled = (globalSettings.enabled) && (mode === 'hybrid' || mode === 'ai_only');
 
         // --- SMART SCAN LOGIC (AI PART) ---
         if (isAiEnabled) {
@@ -70,8 +74,8 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
             const startTime = Date.now();
             
             try {
-                // 1. Prepare Context (History)
-                const depth = preset?.smart_scan_depth || 3;
+                // 1. Prepare Context (History) - Use global depth
+                const depth = globalSettings.depth || 3;
                 const chatContext = historyForScan.slice(-depth).join('\n');
                 
                 // 2. Prepare State String
@@ -89,23 +93,25 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
 
                 // 3. Prepare Lorebook Payload (Separated)
                 // NOW USING currentTurnIndex to flag dormant entries
-                const { contextString, candidateString } = prepareLorebookForAI(allEntries, currentTurnIndex, worldInfoRuntime);
+                // AND PASSING scan_strategy for full context option
+                const strategy = globalSettings.scan_strategy || 'efficient';
+                const { contextString, candidateString } = prepareLorebookForAI(allEntries, currentTurnIndex, worldInfoRuntime, strategy);
 
                 // Only scan if there are candidates to choose from
                 if (candidateString) {
-                    // 4. Call API with New Structure
+                    // 4. Call API with Global Settings
                     const { selectedIds, outgoingPrompt, rawResponse } = await scanWorldInfoWithAI(
                         chatContext, 
                         contextString,
                         candidateString,
                         latestInput || textToScan, 
                         stateString,
-                        preset?.smart_scan_model || 'gemini-2.5-flash',
-                        preset?.smart_scan_system_prompt 
+                        globalSettings.model || 'gemini-flash-lite-latest',
+                        globalSettings.system_prompt 
                     );
                     
-                    // 5. Apply "Token Budget" / Max Entries
-                    const maxEntries = preset?.smart_scan_max_entries || 5;
+                    // 5. Apply "Token Budget" / Max Entries from Global Settings
+                    const maxEntries = globalSettings.max_entries || 5;
                     aiActiveUids = selectedIds.slice(0, maxEntries);
                     
                     const endTime = Date.now();
@@ -133,7 +139,8 @@ export const useWorldSystem = (card: CharacterCard | null): WorldSystemResult =>
             worldInfoPinned,
             aiActiveUids,
             mode === 'ai_only', // Bypass keyword check?
-            currentTurnIndex // Pass turn for Lifecycle check
+            currentTurnIndex, // Pass turn for Lifecycle check
+            globalSettings.aiStickyDuration // Pass Global AI Sticky Override
         );
 
         return { ...result, smartScanLog: smartScanLogData };
