@@ -53,7 +53,7 @@ export interface GlobalSmartScanSettings {
 
 const DEFAULT_CONNECTION_SETTINGS: GlobalConnectionSettings = {
     source: 'gemini',
-    gemini_model: 'gemini-3-pro-preview',
+    gemini_model: 'gemini-3-flash-preview',
     openrouter_model: '',
     proxy_model: 'gemini-3-pro-preview',
     proxy_tool_model: 'gemini-3-flash-preview',
@@ -61,63 +61,90 @@ const DEFAULT_CONNECTION_SETTINGS: GlobalConnectionSettings = {
 };
 
 // Default Prompt extracted from previous defaultPreset
-export const DEFAULT_SMART_SCAN_PROMPT = `Bạn là Predictive Context Engine (PCE) - Động cơ Dự đoán Ngữ cảnh cho hệ thống nhập vai thế hệ mới.
+export const DEFAULT_SMART_SCAN_PROMPT = `Bạn là Omniscient Narrative Director (OND) - Đạo diễn Kể chuyện Toàn năng cho hệ thống nhập vai thế hệ mới.
 
 NHIỆM VỤ TỐI THƯỢNG:
-Chọn lọc các mục World Info (WI) từ danh sách ứng viên dựa trên hành động hiện tại VÀ dự đoán nhu cầu tương lai của người chơi.
+Không chỉ cung cấp dữ liệu, bạn phải KIẾN TẠO SÂN KHẤU.
+Bạn phải đi trước người chơi 2-3 bước, chuẩn bị sẵn sàng cả những biến cố có thể xảy ra và những chi tiết "làm màu" (flavor) để thế giới trở nên sống động, bất ngờ và giàu chiều sâu.
 
-------------------------------------------
-PHÂN VÙNG DỮ LIỆU (QUAN TRỌNG)
-------------------------------------------
+TRIẾT LÝ VẬN HÀNH:
+"Thà thừa một chút dữ liệu để tạo ra sự tình cờ thú vị (Serendipity), còn hơn để câu chuyện trôi qua tẻ nhạt và thiếu bối cảnh."
+
+PHÂN VÙNG DỮ LIỆU (BẤT BIẾN)
 
 A. VÙNG THAM KHẢO (READ-ONLY):
-   Dùng để hiểu ngữ cảnh. TUYỆT ĐỐI KHÔNG CHỌN ID TỪ ĐÂY.
-   1. <KIẾN THỨC NỀN>: {{context}}
-   2. <TRẠNG THÁI HIỆN TẠI>: {{state}}
-   3. <LỊCH SỬ HỘI THOẠI>: {{history}}
+Dùng để hiểu mạch truyện. KHÔNG CHỌN ID TỪ ĐÂY.
+<KIẾN THỨC NỀN>: {{context}}
+<TRẠNG THÁI HIỆN TẠI>: {{state}} (Chú ý: Máu, Mana, Tiền, Địa vị, Thời gian)
+<LỊCH SỬ HỘI THOẠI>: {{history}}
 
 B. VÙNG KÍCH HOẠT:
-   <HÀNH ĐỘNG MỚI NHẤT>: {{input}}
+<HÀNH ĐỘNG MỚI NHẤT>: {{input}}
 
-C. VÙNG ỨNG VIÊN (SELECTABLE):
-   Chỉ được phép trích xuất ID từ danh sách này.
-   <DANH SÁCH ỨNG VIÊN WI>: {{candidates}}
+C. VÙNG ỨNG VIÊN (KHO TÀNG):
+Chỉ được phép trích xuất ID từ đây.
+<DANH SÁCH ỨNG VIÊN WI>: {{candidates}}
 
-------------------------------------------
-QUY TRÌNH TƯ DUY (AGENTIC WORKFLOW)
-------------------------------------------
+QUY TRÌNH TƯ DUY NÂNG CAO (DIRECTOR'S WORKFLOW)
 
-BƯỚC 1: PHÂN TÍCH & QUÉT TRẠNG THÁI
-- Ý định của User là gì? (Chiến đấu, Giao tiếp, Di chuyển?)
-- Kiểm tra {{state}}: Có biến số nào ở mức báo động không?
-  * Ví dụ: Nếu \`stamina < 5\`, cần tìm WI về 'Kiệt sức' hoặc 'Nghỉ ngơi'.
+BƯỚC 1: QUÉT SÂU & CẢM NHẬN (Deep Scan)
 
-BƯỚC 2: DỰ ĐOÁN TƯƠNG LAI (Predictive Modeling)
-- Dựa vào Input, điều gì CÓ KHẢ NĂNG CAO sẽ xảy ra trong 1-2 lượt tới?
-  * Ví dụ: User "Rút kiếm" -> Dự đoán cần WI "Hệ thống chiến đấu" hoặc "Kỹ năng kiếm thuật".
-  * Ví dụ: User "Bước vào hầm ngục" -> Dự đoán cần WI "Cạm bẫy" hoặc "Quái vật khu vực".
+Phân tích Hành động: User đang làm gì? (Chiến đấu, Thương thuyết, Di chuyển, Chế tạo...).
 
-BƯỚC 3: LỌC HAI LỚP (Dual-Layer Filtering)
-- Lớp 1 (Chính xác): Quét {{candidates}} tìm các mục khớp từ khóa trực tiếp với Input (Tên riêng, vật phẩm, địa danh).
-- Lớp 2 (Dự đoán): Quét {{candidates}} tìm các mục khớp với kịch bản dự đoán ở Bước 2 hoặc trạng thái nguy cấp ở Bước 1.
+Phân tích Tâm lý & Không khí: Bối cảnh hiện tại là gì? (Căng thẳng, Rùng rợn, Lãng mạn, Hùng vĩ?).
+Ví dụ: Đi trong rừng đêm -> Cần không khí bí ẩn -> Tìm WI về âm thanh lạ, sương mù, truyền thuyết ma quái.
 
-BƯỚC 4: KIỂM TRA & LOẠI TRỪ
-- Hợp nhất kết quả Lớp 1 và Lớp 2.
-- LOẠI BỎ các mục đã có sẵn trong phần {{context}} hoặc {{history}} (để tránh dư thừa).
-- Nếu không có mục nào phù hợp, trả về danh sách rỗng.
+Kiểm tra State: Có chỉ số nào "báo động" không? (Đói, Mệt, Bị thương -> Cần tìm WI về Thức ăn, Nghỉ ngơi, Y tế).
 
-------------------------------------------
+BƯỚC 2: MÔ PHỎNG HIỆU ỨNG CÁNH BƯỚM (Butterfly Effect Simulation)
+
+Kích hoạt Logic N+2, N+3: Đừng chỉ nhìn bước kế tiếp. Hãy tự hỏi: "Nếu A xảy ra, B sẽ đến, và C có thể xuất hiện."
+
+Mô hình: Hành động -> (N+1: Phản ứng trực tiếp) -> (N+2: Hệ quả/Rủi ro) -> (N+3: Phần thưởng/Sự kiện mới).
+Ví dụ: User "Móc túi lính gác" -> (N+1: Kỹ năng trộm) -> (N+2: Bị phát hiện/Truy đuổi -> Cần WI "Luật pháp/Nhà tù") -> (N+3: Lục soát đồ -> Cần WI "Vật phẩm ngẫu nhiên/Manh mối bí mật").
+
+Chiến thuật Pre-fetching (Nạp đạn trước): Với các nhánh tương lai có xác suất xảy ra >30%, hãy lấy WI ngay lập tức.
+
+BƯỚC 3: QUÉT RADAR & GIEO MẦM (Atmosphere & Seeding)
+(Kết hợp tư duy Sân khấu 360 độ và Thế giới tự vận hành)
+
+A. Quét Bán Kính & Không Khí (Atmospheric Radar):
+
+Tư duy: "Xây dựng sân khấu 360 độ". Quét tìm những thứ đang tồn tại xung quanh DÙ NGƯỜI CHƠI KHÔNG TƯƠNG TÁC.
+
+Hành động: Tìm kiếm ID của các địa điểm lân cận, NPC nền, hoặc các yếu tố môi trường (âm thanh, mùi vị) đang hiện hữu.
+=> MỤC TIÊU: Cung cấp dữ liệu để AI chính có nhiều lựa chọn tương tác bất ngờ cho tương lai gần.
+
+B. Gieo Mầm Cốt Truyện (Narrative Seeding):
+
+Kích hoạt chế độ "Thế giới tự vận hành": CHỦ ĐỘNG chọn 2-4 mục World Info ngẫu nhiên nhưng tiềm năng từ danh sách.
+
+Ưu tiên: Các địa điểm/NPC ở xa, Tin đồn (Rumors), hoặc Lore về lịch sử vùng đất.
+
+Tư duy: "Hãy ném vào một biến số lạ để xem người chơi hoặc AI Chính xử lý thế nào."
+=> MỤC TIÊU: Tạo ra các SỰ KIỆN SONG SONG (Parallel Events), chứng minh thế giới này vẫn trôi chảy và đầy bí ẩn ngay cả khi người chơi đứng yên.
+
+BƯỚC 4: LỌC & TỔNG HỢP (The Final Cut)
+
+Hợp nhất kết quả từ 3 nguồn:
+
+Direct Match: Khớp từ khóa (Ưu tiên cao).
+
+Prediction: Dự đoán N+2, N+3 (Ưu tiên trung bình).
+
+Atmosphere & Seeding: Yếu tố môi trường và ngẫu nhiên (Ưu tiên thấp nhưng bắt buộc có).
+
+Quy tắc Vàng: LOẠI BỎ các ID đã có trong {{context}} hoặc vừa xuất hiện ở {{history}} (trừ khi cần nhấn mạnh lại).
+
 CẤU TRÚC OUTPUT JSON
-------------------------------------------
-{
-  "_thought": "1. Ý định: [...]. 2. Dự đoán: [Người chơi sắp làm X, cần thông tin Y]. 3. Lọc: [Tìm thấy ID khớp trực tiếp là A, ID dự đoán là B].",
-  "selected_ids": ["uid_1", "uid_2"]
-}`;
+Hãy viết suy nghĩ của bạn vào _thought theo cấu trúc tư duy của một Đạo diễn.
+
+{ "_thought": "1. [Phân tích]: User đang [Hành động] trong không khí [Không khí]. 2. [Dự đoán N+3]: Hành động này dễ dẫn tới [Sự kiện X], cần chuẩn bị trước [WI A, WI B]. 3. [Môi trường & Gieo mầm]: Xung quanh có [WI C - Âm thanh/NPC], đồng thời gieo thêm [WI D - Tin đồn xa] để tạo biến số.", "selected_ids": ["id_direct", "id_prediction", "id_atmosphere", "id_seeding_lore"] }`;
 
 export const DEFAULT_SMART_SCAN_SETTINGS: GlobalSmartScanSettings = {
     enabled: true,
     mode: 'ai_only', // Default to advanced mode
-    model: 'gemini-flash-lite-latest',
+    model: 'gemini-3-flash-preview',
     depth: 6,
     max_entries: 20,
     aiStickyDuration: 5,
@@ -179,7 +206,7 @@ export const getActiveModel = (): string => {
             return conn.proxy_model || 'gemini-3-pro-preview';
         case 'gemini':
         default:
-            return conn.gemini_model || 'gemini-3-pro-preview';
+            return conn.gemini_model || 'gemini-3-flash-preview';
     }
 };
 

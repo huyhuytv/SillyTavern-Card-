@@ -21,6 +21,14 @@ export const RpgSection: React.FC<RpgSectionProps> = ({ card, onUpdate }) => {
 
     const tableCount = rpgData?.tables?.length || 0;
     const liveLinkCount = rpgData?.tables?.filter(t => t.config.lorebookLink?.enabled).length || 0;
+    
+    // Status Bar Logic
+    const executionMode = rpgData?.settings?.executionMode || 'standalone';
+    const modeLabel = executionMode === 'integrated' ? '1-Pass' : '2-Pass';
+    
+    const statusText = hasData 
+        ? `🟢 Mythic Engine: ${modeLabel} • ${tableCount} Bảng • ${liveLinkCount} Live-Link` 
+        : "⚪ Mythic Engine: Off";
 
     const handleToggle = (enabled: boolean) => {
         if (enabled) {
@@ -48,10 +56,8 @@ export const RpgSection: React.FC<RpgSectionProps> = ({ card, onUpdate }) => {
                 <div className="flex items-center justify-between bg-slate-700/30 p-4 rounded-lg border border-slate-600/50">
                     <div>
                         <h4 className="font-bold text-slate-200">Kích hoạt Mythic Engine</h4>
-                        <p className="text-xs text-slate-400 mt-1">
-                            {hasData 
-                                ? `Đang hoạt động. (${tableCount} bảng, ${liveLinkCount} Live-Link).` 
-                                : "Chưa kích hoạt. Bật để nạp Template chuẩn (VH)."}
+                        <p className="text-xs text-slate-400 mt-1 font-mono">
+                            {statusText}
                         </p>
                     </div>
                     <div className="flex items-center gap-3">

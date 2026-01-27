@@ -1,10 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import type { RPGDatabase, RPGSettings, RPGTable, RPGColumn } from '../types/rpg';
-import type { WorldInfoEntry } from '../types'; // Import WorldInfoEntry
+import type { WorldInfoEntry } from '../types';
 import { MODEL_OPTIONS } from '../services/settingsService';
 import { LabeledInput } from './ui/LabeledInput';
-import { LabeledTextarea } from './ui/LabeledTextarea';
 import { ToggleInput } from './ui/ToggleInput';
 import { SelectInput } from './ui/SelectInput';
 import { DEFAULT_MEDUSA_PROMPT } from '../services/medusaService';
@@ -15,24 +14,22 @@ interface RpgSettingsModalProps {
     onClose: () => void;
     database: RPGDatabase;
     onSave: (newDb: RPGDatabase) => void;
-    lorebookEntries?: WorldInfoEntry[]; // New prop
+    lorebookEntries?: WorldInfoEntry[];
 }
 
-type Tab = 'operation' | 'prompt' | 'context' | 'data'; // Added 'context'
+type Tab = 'operation' | 'prompt' | 'context' | 'data';
 
 const MACROS = [
     { label: '{{rpg_schema}}', desc: 'Cấu trúc bảng & cột' },
     { label: '{{rpg_data}}', desc: 'Dữ liệu hiện tại (JSON/Table)' },
     { label: '{{global_rules}}', desc: 'Luật chơi chung' },
     { label: '{{chat_history}}', desc: 'Lịch sử hội thoại gần nhất' },
-    { label: '{{rpg_lorebook}}', desc: 'Dữ liệu Sổ tay (Hybrid)' }, // New Macro
+    { label: '{{rpg_lorebook}}', desc: 'Dữ liệu Sổ tay (Hybrid)' },
 ];
 
-// --- ADAPTER: CONVERT LEGACY CHAT SHEETS TO MYTHIC V2 ---
 const convertLegacyToV2 = (rawData: any): RPGDatabase => {
     const tables: RPGTable[] = [];
     
-    // Detect sheets: keys starting with "sheet_" or containing "content" array
     const sheetKeys = Object.keys(rawData).filter(k => 
         (k.startsWith('sheet_') || (rawData[k]?.content && Array.isArray(rawData[k].content))) &&
         typeof rawData[k] === 'object'
@@ -46,32 +43,23 @@ const convertLegacyToV2 = (rawData: any): RPGDatabase => {
         const sheet = rawData[key];
         const content = sheet.content || [];
         
-        // Skip empty sheets or sheets without headers
         if (content.length === 0) continue;
 
-        // 1. Extract Columns from Header (Row 0)
-        // ChatSheets format: [null, "Col1", "Col2"]
         const headerRow = content[0];
-        // Skip index 0 (usually null)
         const validHeaders = headerRow.slice(1);
         
         const columns: RPGColumn[] = validHeaders.map((header: string, index: number) => ({
-            id: String(index), // Use index as ID for mapping simplicity
+            id: String(index), 
             label: header || `Column ${index + 1}`,
             type: 'string'
         }));
 
-        // 2. Extract Data Rows (Row 1+)
         const rows = content.slice(1).map((row: any[]) => {
-            // ChatSheets row: [null, "Val1", "Val2"]
-            // Mythic V2 row: [UUID, "Val1", "Val2"]
             const newRow = [...row];
-            // Generate UUID for index 0
             newRow[0] = `row_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
             return newRow;
         });
 
-        // 3. Map Rules
         const source = sheet.sourceData || {};
         const aiRules = {
             init: source.initNode,
@@ -80,15 +68,12 @@ const convertLegacyToV2 = (rawData: any): RPGDatabase => {
             delete: source.deleteNode
         };
 
-        // 4. Map Export Config
         const exp = sheet.exportConfig || {};
         const exportConfig = {
             enabled: exp.enabled !== false,
             format: 'markdown_table' as const,
-            // Convert 'keyword' type to 'on_change' strategy, otherwise 'always'
             strategy: exp.entryType === 'keyword' ? 'on_change' as const : 'always' as const,
             
-            // Preserve specific fields
             splitByRow: exp.splitByRow,
             entryName: exp.entryName || sheet.name,
             entryType: exp.entryType,
@@ -111,7 +96,6 @@ const convertLegacyToV2 = (rawData: any): RPGDatabase => {
         });
     }
 
-    // Sort by orderNo
     tables.sort((a, b) => (a.config.orderNo || 0) - (b.config.orderNo || 0));
 
     return {
@@ -126,13 +110,13 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
     const [activeTab, setActiveTab] = useState<Tab>('operation');
     const [settings, setSettings] = useState<RPGSettings>({
         triggerMode: 'auto',
-        executionMode: 'standalone', // Default
+        executionMode: 'standalone', 
         modelId: '',
         customSystemPrompt: DEFAULT_MEDUSA_PROMPT,
         pinnedLorebookUids: []
     });
-    const [jsonInput, setJsonInput] = useState(''); // State for Paste Import
-    const [importMode, setImportMode] = useState<'merge' | 'overwrite'>('merge'); // NEW: Import Mode
+    const [jsonInput, setJsonInput] = useState(''); 
+    const [importMode, setImportMode] = useState<'merge' | 'overwrite'>('merge'); 
     
     const promptInputRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -147,8 +131,8 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                 triggerKeywords: database.settings?.triggerKeywords || [],
                 pinnedLorebookUids: database.settings?.pinnedLorebookUids || []
             });
-            setJsonInput(''); // Reset input
-            setImportMode('merge'); // Reset to default
+            setJsonInput(''); 
+            setImportMode('merge'); 
         }
     }, [isOpen, database]);
 
@@ -173,12 +157,10 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
         }
     };
 
-    // --- IMPORT / EXPORT LOGIC ---
     const handleExport = (mode: 'schema' | 'full') => {
         const exportData = JSON.parse(JSON.stringify(database));
         
         if (mode === 'schema') {
-            // Xóa dữ liệu hàng, giữ lại cấu trúc
             exportData.tables.forEach((t: any) => {
                 t.data = { rows: [] };
             });
@@ -196,20 +178,15 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
         URL.revokeObjectURL(url);
     };
 
-    // Helper: Merge Tables
     const performMerge = (importedDb: RPGDatabase) => {
         const mergedDb = { ...database };
         const currentTables = [...mergedDb.tables];
 
         importedDb.tables.forEach(importedTable => {
-            // Check if table with same ID exists
             const existingIndex = currentTables.findIndex(t => t.config.id === importedTable.config.id);
-            
             if (existingIndex !== -1) {
-                // UPDATE existing
                 currentTables[existingIndex] = importedTable;
             } else {
-                // ADD new
                 currentTables.push(importedTable);
             }
         });
@@ -239,14 +216,10 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                     }
                 }
                 
-                // Logic xử lý Mode
                 if (importMode === 'overwrite') {
-                    // Ghi đè: Thay thế hoàn toàn dữ liệu
                     importedDb.lastUpdated = Date.now();
                     onSave(importedDb);
-                    // Không cần thông báo xác nhận theo yêu cầu
                 } else {
-                    // Gộp: Logic cũ
                     performMerge(importedDb);
                 }
                 
@@ -264,28 +237,21 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
             const rawData = parseLooseJson(jsonInput);
             let tablesToMerge: RPGTable[] = [];
 
-            // Case 1: Full Database Structure
             if (rawData.tables && Array.isArray(rawData.tables)) {
                 tablesToMerge = rawData.tables;
-            }
-            // Case 2: Single Table Structure ({ config: ..., data: ... })
-            else if (rawData.config && rawData.config.id) {
-                // Ensure data exists, default to empty rows if missing
+            } else if (rawData.config && rawData.config.id) {
                 const tableData = rawData.data || { rows: [] };
                 tablesToMerge = [{ config: rawData.config, data: tableData }];
-            }
-            // Case 3: Legacy Format (ChatSheets)
-            else {
+            } else {
                 try {
                     const legacyDb = convertLegacyToV2(rawData);
                     tablesToMerge = legacyDb.tables;
                 } catch (e) {
-                    throw new Error("Không nhận diện được cấu trúc JSON (Không phải Database, Single Table, hay Legacy).");
+                    throw new Error("Không nhận diện được cấu trúc JSON.");
                 }
             }
 
             if (importMode === 'overwrite') {
-                // Ghi đè
                 const newDb: RPGDatabase = {
                     version: 2,
                     tables: tablesToMerge,
@@ -294,10 +260,8 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                     lastUpdated: Date.now()
                 };
                 onSave(newDb);
-                // Không thông báo xác nhận
                 alert(`Đã ghi đè dữ liệu thành công (${tablesToMerge.length} bảng).`);
             } else {
-                // Gộp
                 const tempDb: RPGDatabase = {
                     version: 2,
                     tables: tablesToMerge,
@@ -357,68 +321,63 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                     {/* TAB A: OPERATION */}
                     {activeTab === 'operation' && (
                         <div className="space-y-6">
-                            <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-                                <h4 className="font-bold text-slate-200 mb-4">Chiến lược Thực thi (Quan trọng)</h4>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <button 
-                                        onClick={() => setSettings({ ...settings, executionMode: 'standalone' })}
-                                        className={`p-4 rounded-lg border text-left transition-all ${settings.executionMode === 'standalone' ? 'bg-indigo-900/30 border-indigo-500 ring-1 ring-indigo-500' : 'bg-slate-900 border-slate-600 hover:bg-slate-800'}`}
-                                    >
-                                        <div className="font-bold text-sm mb-1 text-indigo-300">🛡️ Độc lập (Standalone)</div>
-                                        <div className="text-xs text-slate-400">An toàn & Chính xác. Chạy logic RPG <strong>sau khi</strong> Chat AI đã trả lời. (Gọi API 2 lần).</div>
-                                    </button>
-                                    <button 
-                                        onClick={() => setSettings({ ...settings, executionMode: 'integrated' })}
-                                        className={`p-4 rounded-lg border text-left transition-all ${settings.executionMode === 'integrated' ? 'bg-fuchsia-900/30 border-fuchsia-500 ring-1 ring-fuchsia-500' : 'bg-slate-900 border-slate-600 hover:bg-slate-800'}`}
-                                    >
-                                        <div className="font-bold text-sm mb-1 text-fuchsia-300">⚡ Tích hợp (Integrated)</div>
-                                        <div className="text-xs text-slate-400">Nhanh & Tiết kiệm. Gộp logic vào Chat AI để vừa viết văn vừa cập nhật bảng. (Gọi API 1 lần).</div>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className={`bg-slate-800/50 p-4 rounded-lg border border-slate-700 transition-opacity ${settings.executionMode === 'integrated' ? 'opacity-50 pointer-events-none' : ''}`}>
-                                <h4 className="font-bold text-slate-200 mb-4">Cấu hình Medusa (Chỉ cho chế độ Độc lập)</h4>
+                            {/* Execution Strategy */}
+                            <div className="bg-slate-800/50 p-5 rounded-lg border border-slate-700">
                                 <SelectInput
-                                    label="Chọn Model xử lý Logic RPG"
-                                    value={settings.modelId || ''}
-                                    onChange={(e) => setSettings({ ...settings, modelId: e.target.value })}
+                                    label="1. Chiến lược Thực thi (Execution Strategy)"
+                                    value={settings.executionMode || 'standalone'}
+                                    onChange={(e) => setSettings({ ...settings, executionMode: e.target.value as any })}
                                     options={[
-                                        { value: '', label: 'Sử dụng Model Chat mặc định' },
-                                        ...MODEL_OPTIONS.map(m => ({ value: m.id, label: m.name }))
+                                        { value: 'standalone', label: '🛡️ 2-Pass (Tách biệt - An toàn)' },
+                                        { value: 'integrated', label: '⚡ 1-Pass (Tích hợp - Tốc độ)' }
                                     ]}
-                                    tooltip="Chọn model riêng cho Medusa. Khuyên dùng Gemini Flash hoặc Flash-Lite để tiết kiệm chi phí và tăng tốc độ."
                                 />
-                            </div>
-
-                            <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-                                <h4 className="font-bold text-slate-200 mb-4">Chế độ Kích hoạt</h4>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <button 
-                                        onClick={() => setSettings({ ...settings, triggerMode: 'auto' })}
-                                        className={`p-4 rounded-lg border text-left transition-all ${settings.triggerMode === 'auto' ? 'bg-sky-900/30 border-sky-500 ring-1 ring-sky-500' : 'bg-slate-900 border-slate-600 hover:bg-slate-800'}`}
-                                    >
-                                        <div className="font-bold text-sm mb-1 text-sky-300">🔴 Tự động (Auto)</div>
-                                        <div className="text-xs text-slate-400">Chạy ngầm sau mỗi lượt chat của User. Mượt mà nhất.</div>
-                                    </button>
-                                    <button 
-                                        onClick={() => setSettings({ ...settings, triggerMode: 'keyword' })}
-                                        className={`p-4 rounded-lg border text-left transition-all ${settings.triggerMode === 'keyword' ? 'bg-amber-900/30 border-amber-500 ring-1 ring-amber-500' : 'bg-slate-900 border-slate-600 hover:bg-slate-800'}`}
-                                    >
-                                        <div className="font-bold text-sm mb-1 text-amber-300">🟡 Từ khóa (Keyword)</div>
-                                        <div className="text-xs text-slate-400">Chỉ chạy khi User gõ từ khóa (ví dụ: [MUA], /check).</div>
-                                    </button>
-                                    <button 
-                                        onClick={() => setSettings({ ...settings, triggerMode: 'manual' })}
-                                        className={`p-4 rounded-lg border text-left transition-all ${settings.triggerMode === 'manual' ? 'bg-indigo-900/30 border-indigo-500 ring-1 ring-indigo-500' : 'bg-slate-900 border-slate-600 hover:bg-slate-800'}`}
-                                    >
-                                        <div className="font-bold text-sm mb-1 text-indigo-300">🔵 Thủ công (Manual)</div>
-                                        <div className="text-xs text-slate-400">Chỉ chạy khi bạn bấm nút "Cập nhật RPG".</div>
-                                    </button>
+                                <div className="mt-2 text-xs text-slate-400 bg-slate-900/50 p-2 rounded">
+                                    {settings.executionMode === 'integrated' ? (
+                                        <p><strong>1-Pass:</strong> Logic RPG được xử lý cùng lúc khi tạo hội thoại. Tốc độ nhanh nhất, tiết kiệm token, nhưng đôi khi AI có thể bỏ sót luật chơi.</p>
+                                    ) : (
+                                        <p><strong>2-Pass:</strong> Logic RPG chạy riêng biệt sau khi hội thoại hoàn tất. Đảm bảo độ chính xác cao nhất và an toàn dữ liệu, nhưng tốn thêm thời gian xử lý.</p>
+                                    )}
                                 </div>
 
+                                {/* Conditionally show Model Selection for 2-Pass (Standalone) */}
+                                {settings.executionMode === 'standalone' && (
+                                    <div className="mt-4 pt-4 border-t border-slate-700 animate-fade-in-up">
+                                        <SelectInput
+                                            label="Model xử lý Logic (Chỉ cho 2-Pass)"
+                                            value={settings.modelId || ''}
+                                            onChange={(e) => setSettings({ ...settings, modelId: e.target.value })}
+                                            options={[
+                                                { value: '', label: 'Sử dụng Model Chat mặc định' },
+                                                ...MODEL_OPTIONS.map(m => ({ value: m.id, label: m.name }))
+                                            ]}
+                                            tooltip="Chọn model riêng cho Medusa. Khuyên dùng Gemini Flash hoặc Flash-Lite để tiết kiệm chi phí và tăng tốc độ."
+                                        />
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Trigger Mode */}
+                            <div className="bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                                <SelectInput
+                                    label="2. Chế độ Kích hoạt (Trigger Mode)"
+                                    value={settings.triggerMode || 'auto'}
+                                    onChange={(e) => setSettings({ ...settings, triggerMode: e.target.value as any })}
+                                    options={[
+                                        { value: 'auto', label: '🔴 Tự động (Auto)' },
+                                        { value: 'keyword', label: '🟡 Từ khóa (Keyword)' },
+                                        { value: 'manual', label: '🔵 Thủ công (Manual)' }
+                                    ]}
+                                />
+                                <div className="mt-2 text-xs text-slate-400 bg-slate-900/50 p-2 rounded">
+                                    {settings.triggerMode === 'auto' && <p>Hệ thống tự động chạy sau mỗi lượt trả lời của AI.</p>}
+                                    {settings.triggerMode === 'keyword' && <p>Chỉ chạy khi trong tin nhắn (User/AI) xuất hiện từ khóa quy định.</p>}
+                                    {settings.triggerMode === 'manual' && <p>Chỉ chạy khi bạn bấm nút "Force Run" trong công cụ.</p>}
+                                </div>
+
+                                {/* Conditionally show Keywords for Keyword Mode */}
                                 {settings.triggerMode === 'keyword' && (
-                                    <div className="mt-4 animate-fade-in-up">
+                                    <div className="mt-4 pt-4 border-t border-slate-700 animate-fade-in-up">
                                         <LabeledInput 
                                             label="Danh sách từ khóa (phân tách bằng dấu phẩy)"
                                             value={(settings.triggerKeywords || []).join(', ')}
@@ -464,7 +423,7 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                         </div>
                     )}
 
-                    {/* TAB C: CONTEXT (NEW) */}
+                    {/* TAB C: CONTEXT */}
                     {activeTab === 'context' && (
                         <div className="space-y-4">
                             <div className="bg-fuchsia-900/20 border border-fuchsia-500/30 p-4 rounded-lg">
@@ -516,7 +475,7 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                         </div>
                     )}
 
-                    {/* TAB D: DATA (UPDATED) */}
+                    {/* TAB D: DATA */}
                     {activeTab === 'data' && (
                         <div className="flex flex-col gap-8 h-full">
                             
@@ -591,7 +550,7 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
                                 </div>
                             </div>
 
-                            {/* SECTION 2: PASTE IMPORT (NEW) */}
+                            {/* SECTION 2: PASTE IMPORT */}
                             <div className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl">
                                 <div className="flex items-center gap-2 mb-3">
                                     <span className="text-xl">📋</span>

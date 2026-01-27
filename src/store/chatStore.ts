@@ -105,6 +105,9 @@ interface ChatActions {
     addRpgRow: (tableId: string) => void;
     deleteRpgRow: (tableId: string, rowIndex: number) => void;
     
+    // NEW: Bulk Update for Save/Cancel pattern
+    replaceRpgTableRows: (tableId: string, newRows: any[][]) => void;
+
     // NEW: Reload RPG Config from Template
     reloadRpgConfig: (templateDb: RPGDatabase) => void;
 }
@@ -225,6 +228,22 @@ export const useChatStore = create<ChatState & ChatActions>()(
                     state.generatedLorebookEntries = syncDatabaseToLorebook(state.card.rpg_data);
                 } catch(e) {
                     console.error("Sync error in deleteRpgRow", e);
+                }
+            }
+        }),
+        
+        replaceRpgTableRows: (tableId, newRows) => set((state) => {
+             if (!state.card?.rpg_data) return;
+            const table = state.card.rpg_data.tables.find(t => t.config.id === tableId);
+            if (table) {
+                table.data.rows = newRows;
+                state.card.rpg_data.lastUpdated = Date.now();
+
+                // AUTO SYNC
+                try {
+                    state.generatedLorebookEntries = syncDatabaseToLorebook(state.card.rpg_data);
+                } catch(e) {
+                    console.error("Sync error in replaceRpgTableRows", e);
                 }
             }
         }),
